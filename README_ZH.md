@@ -52,8 +52,8 @@
 **1. 克隆仓库**
 
 ```bash
-git clone https://github.com/lexmount/browseruse-bench.git
-cd browseruse-bench
+git clone https://github.com/lexmount/browseruse-agent-bench.git
+cd browseruse-agent-bench
 ```
 
 **2. 安装依赖 (Python>=3.11)**
@@ -268,16 +268,16 @@ bubench viz --watch-interval 5       # 轮询间隔秒数（默认 3）
 
 ## Roadmap/ Development Plan
 
-有关后续版本计划和截止时间，请参考我们的 [Milestones](https://github.com/lexmount/browseruse-bench/milestones)。
+有关后续版本计划和截止时间，请参考我们的 [Milestones](https://github.com/lexmount/browseruse-agent-bench/milestones)。
 
 ## Star 历史
 
 
 
-<a href="https://star-history.com/#lexmount/browseruse-bench&Date">
+<a href="https://star-history.com/#lexmount/browseruse-agent-bench&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=lexmount/browseruse-bench&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=lexmount/browseruse-bench&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=lexmount/browseruse-bench&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=lexmount/browseruse-agent-bench&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=lexmount/browseruse-agent-bench&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=lexmount/browseruse-agent-bench&type=Date" />
  </picture>
 </a>

@@ -53,8 +53,8 @@
 **1. Clone the repository**
 
 ```bash
-git clone https://github.com/lexmount/browseruse-bench.git
-cd browseruse-bench
+git clone https://github.com/lexmount/browseruse-agent-bench.git
+cd browseruse-agent-bench
 ```
 
 **2. Install dependencies (Python>=3.11)**
@@ -259,17 +259,17 @@ Some code in this project is cited and modified from [Online-Mind2Web](https://g
 
 ## Roadmap/ Development Plan
 
-Refer to our [Milestones](https://github.com/lexmount/browseruse-bench/milestones) for upcoming versions and deadlines.
+Refer to our [Milestones](https://github.com/lexmount/browseruse-agent-bench/milestones) for upcoming versions and deadlines.
 
 
 ## Star History
 
 
 
-<a href="https://star-history.com/#lexmount/browseruse-bench&Date">
+<a href="https://star-history.com/#lexmount/browseruse-agent-bench&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=lexmount/browseruse-bench&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=lexmount/browseruse-bench&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=lexmount/browseruse-bench&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=lexmount/browseruse-agent-bench&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=lexmount/browseruse-agent-bench&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=lexmount/browseruse-agent-bench&type=Date" />
  </picture>
 </a>

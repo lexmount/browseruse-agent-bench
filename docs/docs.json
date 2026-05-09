@@ -219,7 +219,7 @@
         "links": [
             {
                 "label": "GitHub",
-                "href": "https://github.com/lexmount/browseruse-bench"
+                "href": "https://github.com/lexmount/browseruse-agent-bench"
             }
         ]
     },
@@ -231,7 +231,7 @@
     },
     "footer": {
         "socials": {
-            "github": "https://github.com/lexmount/browseruse-bench"
+            "github": "https://github.com/lexmount/browseruse-agent-bench"
         }
     }
 }

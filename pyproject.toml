@@ -75,9 +75,9 @@ openai-cua = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/lexmount/browseruse-bench"
-Repository = "https://github.com/lexmount/browseruse-bench"
-Issues = "https://github.com/lexmount/browseruse-bench/issues"
+Homepage = "https://github.com/lexmount/browseruse-agent-bench"
+Repository = "https://github.com/lexmount/browseruse-agent-bench"
+Issues = "https://github.com/lexmount/browseruse-agent-bench/issues"
 
 [project.scripts]
 bubench = "browseruse_bench.cli:main"

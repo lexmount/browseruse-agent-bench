@@ -34,7 +34,7 @@ Specified PR:
 
 ```bash
 export PYTHONPATH=/path/to/browseruse_bench
-python3 scripts/generate_pr_review_checklists.py --pr-number 122 --repo lexmount/browseruse-bench
+python3 scripts/generate_pr_review_checklists.py --pr-number 122 --repo lexmount/browseruse-agent-bench
 ```
 
 ## Behavior
