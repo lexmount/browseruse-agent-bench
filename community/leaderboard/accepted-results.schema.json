@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LexBench public leaderboard accepted results",
+  "type": "object",
+  "required": ["schema_version", "generated_from", "results"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "generated_from": {
+      "type": "string"
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "benchmark",
+          "split",
+          "benchmark_version",
+          "agent",
+          "model",
+          "browser",
+          "evaluation",
+          "metrics",
+          "review"
+        ],
+        "properties": {
+          "id": {"type": "string"},
+          "benchmark": {"type": "string"},
+          "split": {"type": "string"},
+          "benchmark_version": {"type": "string"},
+          "agent": {"type": "object"},
+          "model": {"type": "object"},
+          "browser": {"type": "object"},
+          "evaluation": {"type": "object"},
+          "metrics": {"type": "object"},
+          "artifacts": {"type": "object"},
+          "review": {
+            "type": "object",
+            "required": ["status", "reviewed_by", "rerun_status"],
+            "properties": {
+              "status": {"type": "string", "enum": ["accepted"]},
+              "reviewed_by": {"type": "string"},
+              "rerun_status": {"type": "string", "enum": ["full", "sampled"]}
+            }
+          }
+        }
+      }
+    }
+  }
+}

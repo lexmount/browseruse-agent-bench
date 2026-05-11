@@ -36,9 +36,18 @@ Required fields:
 
 1. Open a Result Submission issue or PR.
 2. Attach `submission.json` and redacted artifacts.
-3. Maintainers validate metadata and artifact coverage.
+3. Run the metadata validator.
 4. Maintainers rerun the result, fully or by sample.
 5. If accepted, the result can be merged into the public leaderboard snapshot.
+
+## Validate metadata
+
+```bash
+uv run python scripts/validate_result_submissions.py
+```
+
+The validator checks required fields, task accounting, basic score ranges, the static
+leaderboard JSON, and obvious secret-like values.
 
 ## Example
 
@@ -53,4 +62,3 @@ experiments/LexBench-Browser/All/<agent>/<model-id>/<timestamp>/
 ```
 
 For the full policy, see the repository root `EVALUATION_PROTOCOL.md`.
-

@@ -44,3 +44,13 @@ Do not commit secrets, cookies, account credentials, or provider logs containing
 Maintainers review metadata first, then request or run reproduction artifacts. A result is not
 official until a maintainer marks it accepted or merges the corresponding leaderboard update.
 
+## Validation
+
+Run:
+
+```bash
+uv run python scripts/validate_result_submissions.py
+```
+
+The validator checks required metadata, task accounting, basic metric ranges, and obvious
+secret-like values.

@@ -34,9 +34,17 @@ LexBench-Browser 接受社区通过 GitHub Issues 或 PR 提交结果。闭源 A
 
 1. 创建 Result Submission issue 或 PR。
 2. 附上 `submission.json` 和脱敏后的 artifacts。
-3. 维护者检查 metadata 和 artifact coverage。
+3. 运行 metadata validator。
 4. 维护者进行完整或抽样复跑。
 5. 结果通过后，可以合入 public leaderboard snapshot。
+
+## 校验 metadata
+
+```bash
+uv run python scripts/validate_result_submissions.py
+```
+
+validator 会检查必填字段、任务计数、基础分数范围、静态 leaderboard JSON，以及明显像 secret 的字段。
 
 ## 示例
 
@@ -51,4 +59,3 @@ experiments/LexBench-Browser/All/<agent>/<model-id>/<timestamp>/
 ```
 
 完整政策见仓库根目录 `EVALUATION_PROTOCOL.md`。
-
