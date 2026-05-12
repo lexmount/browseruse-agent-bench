@@ -277,6 +277,7 @@ bubench viz --watch-interval 5       # 轮询间隔秒数（默认 3）
 
 - Bug 和功能请求请发到 [GitHub Issues](https://github.com/lexmount/browseruse-agent-bench/issues)。
 - 问题讨论和结果交流请发到 [GitHub Discussions](https://github.com/lexmount/browseruse-agent-bench/discussions)。
+- official result、数据集和合作问题可发邮件至 [lexbench@lexmount.com](mailto:lexbench@lexmount.com)。
 - 后续版本计划见 [Milestones](https://github.com/lexmount/browseruse-agent-bench/milestones)。
 - 提交 PR 或新增 Agent/Benchmark 前，请参考 [Contributing](./CONTRIBUTING.md)。
 - 结果审核规则见 [Governance](./GOVERNANCE.md) 和 [Evaluation Protocol](./EVALUATION_PROTOCOL.md)。

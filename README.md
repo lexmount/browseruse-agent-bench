@@ -268,6 +268,7 @@ Questions, benchmark proposals, agent integrations, and result reproductions are
 
 - Report bugs or request features in [GitHub Issues](https://github.com/lexmount/browseruse-agent-bench/issues).
 - Ask questions and discuss results in [GitHub Discussions](https://github.com/lexmount/browseruse-agent-bench/discussions).
+- Email official result, dataset, and collaboration questions to [lexbench@lexmount.com](mailto:lexbench@lexmount.com).
 - Track upcoming releases in [Milestones](https://github.com/lexmount/browseruse-agent-bench/milestones).
 - Use [Contributing](./CONTRIBUTING.md) when opening pull requests or adding a new agent/benchmark.
 - See [Governance](./GOVERNANCE.md) and [Evaluation Protocol](./EVALUATION_PROTOCOL.md) for result review rules.

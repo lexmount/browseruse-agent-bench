@@ -31,6 +31,8 @@ Dataset page: https://huggingface.co/datasets/Lexmount/LexBench-Browser
 
 Docs: https://docs.bubench.lexmount.io/
 
+Contact: lexbench@lexmount.com
+
 ## Dataset Summary
 
 LexBench-Browser is designed to support browser-agent engineering in browseruse-agent-bench:
