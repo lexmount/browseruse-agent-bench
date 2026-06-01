@@ -75,7 +75,7 @@ openai-cua = [
 ]
 
 webwright = [
-    "webwright @ git+https://github.com/microsoft/Webwright.git",
+    "webwright @ git+https://github.com/microsoft/Webwright.git@734bc60ea73653498215694d0cc4bc96fbc09e9c",
 ]
 
 [project.urls]

@@ -139,7 +139,21 @@ def test_run_task_calls_webwright_run_one_and_parses_artifacts(
         steps_dir.mkdir()
         (steps_dir / "step_0001.py").write_text("await page.goto('https://example.com')\n")
         (tmp_path / "trajectory.json").write_text(
-            json.dumps({"info": {"api_calls": 7}}),
+            json.dumps(
+                {
+                    "info": {"api_calls": 7},
+                    "model": {
+                        "usage": {
+                            "cumulative_response": {
+                                "input_tokens": 123,
+                                "output_tokens": 45,
+                                "total_tokens": 168,
+                                "cached_input_tokens": 10,
+                            }
+                        }
+                    },
+                }
+            ),
             encoding="utf-8",
         )
         return {
@@ -185,6 +199,10 @@ def test_run_task_calls_webwright_run_one_and_parses_artifacts(
     assert result.action_history == ["step_0001: await page.goto('https://example.com')"]
     assert result.screenshots == ["screenshots/step_0001.png"]
     assert result.metrics.steps == 7
+    assert result.metrics.usage is not None
+    assert result.metrics.usage.total_prompt_tokens == 123
+    assert result.metrics.usage.total_completion_tokens == 45
+    assert result.metrics.usage.total_prompt_cached_tokens == 10
 
     assert captured["task_id"] == "ww-1"
     assert captured["start_url"] == "https://example.com"
@@ -200,6 +218,39 @@ def test_run_task_calls_webwright_run_one_and_parses_artifacts(
     )
     assert "environment.browser_mode=local_cdp" in captured["config_spec"]
     assert "environment.remote_cdp_url=wss://lexmount.example/cdp" in captured["config_spec"]
+
+
+def test_run_task_maps_openai_env_key_for_chat_gateway(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    def fake_run_one(**_: Any) -> dict[str, Any]:
+        assert os.environ["OPENROUTER_API_KEY"] == "env-openai-key"
+        return {
+            "exit_status": "Submitted",
+            "final_response": "ok",
+            "api_calls": 1,
+        }
+
+    monkeypatch.setattr(webwright_module, "_run_one", fake_run_one)
+    monkeypatch.setattr(webwright_module, "_WEBWRIGHT_IMPORT_ERROR", None)
+    monkeypatch.setattr(webwright_module, "open_browser_session", _fake_open_lexmount)
+
+    with monkeypatch.context() as env_patch:
+        env_patch.setenv("OPENAI_API_KEY", "env-openai-key")
+        env_patch.delenv("OPENROUTER_API_KEY", raising=False)
+        result = WebwrightAgent().run_task(
+            task_info=TASK_INFO,
+            agent_config={
+                "model_type": "OPENAI",
+                "model_api_style": "chat_completions",
+                "model_id": "gpt-test",
+            },
+            task_workspace=tmp_path,
+        )
+        assert "OPENROUTER_API_KEY" not in os.environ
+
+    assert result.env_status.value == "success"
 
 
 def test_run_task_maps_limits_exceeded_to_max_steps(

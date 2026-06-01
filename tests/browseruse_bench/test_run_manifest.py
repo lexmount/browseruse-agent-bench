@@ -19,8 +19,11 @@ def test_write_run_manifest_redacts_secrets(tmp_path: Path) -> None:
                 }
             },
             "lexmount_api_key": "lexmount-secret",
-            "headers": [{"Authorization_Token": "token-secret"}],
+            "headers": [{"Authorization": "Bearer token-secret"}],
             "empty_api_key": "",
+            "max_tokens": 1000,
+            "max_output_tokens": 4000,
+            "hf_token": "hf-secret",
         },
     )
 
@@ -29,5 +32,8 @@ def test_write_run_manifest_redacts_secrets(tmp_path: Path) -> None:
     assert snapshot["models"]["gpt"]["api_key"] == "<redacted>"
     assert snapshot["models"]["gpt"]["base_url"] == "https://gateway.example/v1"
     assert snapshot["lexmount_api_key"] == "<redacted>"
-    assert snapshot["headers"][0]["Authorization_Token"] == "<redacted>"
+    assert snapshot["headers"][0]["Authorization"] == "<redacted>"
     assert snapshot["empty_api_key"] == ""
+    assert snapshot["max_tokens"] == 1000
+    assert snapshot["max_output_tokens"] == 4000
+    assert snapshot["hf_token"] == "<redacted>"

@@ -156,7 +156,7 @@ def _safe_float(value: Any) -> float | None:
         return None
 
 
-def _read_api_calls_from_trajectory(task_workspace: Path) -> int | None:
+def _read_trajectory(task_workspace: Path) -> dict[str, Any] | None:
     try:
         trajectory = json.loads((task_workspace / "trajectory.json").read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -164,12 +164,38 @@ def _read_api_calls_from_trajectory(task_workspace: Path) -> int | None:
     except (OSError, json.JSONDecodeError) as exc:
         logger.warning("Failed to read Webwright trajectory from %s: %s", task_workspace, exc)
         return None
+    return trajectory if isinstance(trajectory, dict) else None
+
+
+def _read_api_calls_from_trajectory(task_workspace: Path) -> int | None:
+    trajectory = _read_trajectory(task_workspace)
+    if trajectory is None:
+        return None
 
     info = trajectory.get("info")
     if not isinstance(info, dict) or info.get("api_calls") is None:
         return None
     steps = _safe_int(info.get("api_calls"), -1)
     return steps if steps >= 0 else None
+
+
+def _read_usage_from_trajectory(task_workspace: Path) -> dict[str, Any]:
+    trajectory = _read_trajectory(task_workspace)
+    if trajectory is None:
+        return {}
+
+    model = trajectory.get("model")
+    if not isinstance(model, dict):
+        return {}
+    usage = model.get("usage")
+    if not isinstance(usage, dict):
+        return {}
+
+    cumulative = usage.get("cumulative_response")
+    if isinstance(cumulative, dict):
+        return cumulative
+    last_response = usage.get("last_response")
+    return last_response if isinstance(last_response, dict) else {}
 
 
 def _normalize_model_type(raw_value: Any) -> str:
@@ -233,14 +259,24 @@ def _model_api_key_env_var(model_type: str) -> str:
     return "OPENAI_API_KEY"
 
 
+def _fallback_model_api_key_env_var(model_type: str) -> str | None:
+    if model_type == "openrouter":
+        return "OPENAI_API_KEY"
+    return None
+
+
 @contextmanager
 def _temporary_model_env(agent_config: dict[str, Any], model_type: str) -> Iterator[None]:
+    env_var = _model_api_key_env_var(model_type)
     api_key = agent_config.get("api_key")
+    if not api_key:
+        fallback_env_var = _fallback_model_api_key_env_var(model_type)
+        if fallback_env_var and env_var not in os.environ:
+            api_key = os.environ.get(fallback_env_var)
     if not api_key:
         yield
         return
 
-    env_var = _model_api_key_env_var(model_type)
     previous = os.environ.get(env_var)
     had_previous = env_var in os.environ
     os.environ[env_var] = str(api_key)
@@ -401,6 +437,10 @@ class WebwrightAgent(BaseAgent):
             agent_done = "done"
 
         usage_payload = self._extract_usage(result_payload)
+        if not usage_payload:
+            usage_payload = self._extract_usage(
+                {"usage": _read_usage_from_trajectory(task_workspace)}
+            )
         steps = _safe_int(result_payload.get("api_calls"), -1)
         if steps < 0:
             trajectory_steps = _read_api_calls_from_trajectory(task_workspace)
@@ -564,12 +604,16 @@ class WebwrightAgent(BaseAgent):
         total_completion_tokens = _safe_int(
             usage.get("output_tokens") or usage.get("completion_tokens")
         )
+        total_prompt_cached_tokens = _safe_int(
+            usage.get("cached_input_tokens") or usage.get("cached_tokens")
+        )
         total_tokens = _safe_int(usage.get("total_tokens"), total_prompt_tokens + total_completion_tokens)
         total_cost = _safe_float(usage.get("cost") or usage.get("total_cost"))
 
         usage_data: dict[str, Any] = {
             "total_prompt_tokens": total_prompt_tokens,
             "total_completion_tokens": total_completion_tokens,
+            "total_prompt_cached_tokens": total_prompt_cached_tokens,
             "total_tokens": total_tokens,
         }
         if total_cost is not None:

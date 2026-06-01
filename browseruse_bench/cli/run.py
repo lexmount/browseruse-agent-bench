@@ -180,11 +180,28 @@ def _resolve_output_model_id(agent_name: str, agent_cfg: dict[str, Any]) -> str 
 
 
 _REDACTED_CONFIG_VALUE = "<redacted>"
-_SECRET_KEY_PARTS = ("api_key", "apikey", "token", "secret", "password")
+_SECRET_KEY_PARTS = ("api_key", "apikey", "secret", "password", "private_key")
+_SECRET_KEYS = {
+    "authorization",
+    "proxy_authorization",
+    "token",
+    "auth_token",
+    "access_token",
+    "refresh_token",
+    "bearer_token",
+    "id_token",
+    "hf_token",
+    "github_token",
+}
+_NON_SECRET_TOKEN_KEYS = {"max_tokens", "max_output_tokens"}
 
 
 def _is_secret_config_key(key: str) -> bool:
-    normalized = key.lower()
+    normalized = key.lower().replace("-", "_")
+    if normalized in _NON_SECRET_TOKEN_KEYS:
+        return False
+    if normalized in _SECRET_KEYS:
+        return True
     return any(part in normalized for part in _SECRET_KEY_PARTS)
 
 
@@ -192,7 +209,10 @@ def _redact_config_secrets(value: Any, key: str | None = None) -> Any:
     if key is not None and _is_secret_config_key(key):
         return _REDACTED_CONFIG_VALUE if value else value
     if isinstance(value, dict):
-        return {item_key: _redact_config_secrets(item_value, item_key) for item_key, item_value in value.items()}
+        return {
+            item_key: _redact_config_secrets(item_value, item_key)
+            for item_key, item_value in value.items()
+        }
     if isinstance(value, list):
         return [_redact_config_secrets(item) for item in value]
     return value
