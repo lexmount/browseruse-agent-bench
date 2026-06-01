@@ -1,14 +1,7 @@
 """Unit tests for BaseAgent helper methods."""
 from __future__ import annotations
 
-import base64
-from pathlib import Path
-
-import pytest
-
 from browseruse_bench.agents.base import BaseAgent
-from browseruse_bench.schemas import AgentResult
-
 
 # ---------------------------------------------------------------------------
 # Minimal concrete subclass for testing
@@ -85,6 +78,19 @@ class TestBuildTaskPrompt:
         prompt = AGENT.build_task_prompt(task_info)
         assert "Only use https://example.com" in prompt
         assert "Don't go to any other site" in prompt
+
+    def test_odysseys_allows_cross_site_navigation(self):
+        """Odysseys tasks start from Google but intentionally span sites."""
+        task_info = {
+            "benchmark_name": "Odysseys",
+            "task_text": "Find evidence across Hulu and Wikipedia.",
+            "url": "https://www.google.com",
+        }
+        prompt = AGENT.build_task_prompt(task_info)
+        assert "Start from https://www.google.com" in prompt
+        assert "You may visit any websites needed" in prompt
+        assert "Only use" not in prompt
+        assert "Don't go to any other site" not in prompt
 
 
 # ---------------------------------------------------------------------------

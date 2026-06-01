@@ -49,6 +49,7 @@
                                             "en/benchmarks/lexbench-browser",
                                             "en/benchmarks/online-mind2web",
                                             "en/benchmarks/browsecomp",
+                                            "en/benchmarks/odysseys",
                                             "en/benchmarks/custom-benchmark"
                                         ]
                                     },
@@ -152,6 +153,7 @@
                                             "zh/benchmarks/lexbench-browser",
                                             "zh/benchmarks/online-mind2web",
                                             "zh/benchmarks/browsecomp",
+                                            "zh/benchmarks/odysseys",
                                             "zh/benchmarks/custom-benchmark"
                                         ]
                                     },

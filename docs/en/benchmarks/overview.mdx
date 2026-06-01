@@ -18,6 +18,9 @@ types of web interaction tasks.
   <Card title="BrowseComp" icon="trophy" href="browsecomp">
     Browser operation competition tasks, evaluating agents' comprehensive browser operation capabilities.
   </Card>
+  <Card title="Odysseys" icon="route" href="odysseys">
+    Long-horizon live-web tasks with rubric checkpoints for partial-credit evaluation.
+  </Card>
 </CardGroup>
 
 ## Feature Comparison
@@ -27,6 +30,7 @@ types of web interaction tasks.
 | LexBench-Browser | 210 | zh/en | LLM (visual) | No |
 | Online-Mind2Web | 300 | English | WebJudge | No |
 | BrowseComp | 1266 | English | Grader | No |
+| Odysseys | 200 | English | Rubric LLM (visual) | No |
 
 ## Quick Comparison Run
 
@@ -39,6 +43,9 @@ bubench run --agent browser-use --data Online-Mind2Web --mode first_n --count 5
 
 # BrowseComp
 bubench run --agent browser-use --data BrowseComp --mode first_n --count 5
+
+# Odysseys
+bubench run --agent browser-use --data Odysseys --mode first_n --count 5
 ```
 
 ## Data Location
@@ -50,6 +57,7 @@ Dataset files are stored under `browseruse_bench/data/`:
 | LexBench-Browser | `browseruse_bench/data/LexBench-Browser/` |
 | Online-Mind2Web | `browseruse_bench/data/Online-Mind2Web/` |
 | BrowseComp | `browseruse_bench/data/BrowseComp/` |
+| Odysseys | `browseruse_bench/data/Odysseys/` |
 
 For more details on data loading configuration (including HuggingFace support and private datasets), please refer to the [Data Loading](/en/benchmarks/data-loading) guide.
 

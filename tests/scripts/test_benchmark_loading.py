@@ -65,3 +65,10 @@ class TestBenchmarkLoading:
         tasks_file = _resolve_tasks_file("BrowseComp")
         tasks = load_task_file(tasks_file)
         assert len(tasks) > 0
+
+    def test_odysseys_tasks_exist(self):
+        """Test Odysseys tasks file exists and is valid JSONL."""
+        tasks_file = _resolve_tasks_file("Odysseys")
+        tasks = load_task_file(tasks_file)
+        assert len(tasks) == 200
+        assert "rubrics" in tasks[0]

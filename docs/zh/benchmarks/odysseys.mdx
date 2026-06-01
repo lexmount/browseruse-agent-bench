@@ -1,0 +1,49 @@
+---
+title: "Odysseys"
+description: "带 rubric 检查点的长程 Web Agent Benchmark"
+---
+
+Odysseys 包含 200 个真实长程 Web 任务，任务来自真实浏览会话，并在 live Internet 上执行。任务通常跨多个网站，并提供 rubric 检查点用于部分得分评测。
+
+## 数据集
+
+本地数据位于 `browseruse_bench/data/Odysseys/task.jsonl`。
+
+每条任务包含：
+
+- `task_id`：稳定任务 ID。
+- `confirmed_task`：给 Agent 的用户指令。
+- `website`：起始 URL，通常为 Google。
+- `level`：难度标签。
+- `rubrics`：检查点要求与验证说明。
+- `categories`：任务类别。
+
+来源：
+
+- [论文](https://arxiv.org/abs/2604.24964)
+- [项目页](https://odysseys-website.pages.dev/)
+- [官方任务 JSON](https://github.com/ljang0/Odysseys/blob/main/data/odysseys.json)
+
+## 运行
+
+```bash
+bubench run --agent browser-use --data Odysseys --mode first_n --count 5
+```
+
+## 评测
+
+Odysseys evaluator 会根据 Agent 的最终回答和轨迹截图逐项评测 rubric。只有所有 rubric 都通过时，任务才计为 perfect success。
+
+```bash
+bubench eval --agent browser-use --data Odysseys --model-id gpt-4.1
+```
+
+summary 中会包含：
+
+- `rubric_average`：平均通过 rubric 比例。
+- `perfect_task_rate`：全部 rubric 通过的任务比例。
+- `trajectory_efficiency`：有 step 统计时的平均 rubric score / step。
+
+## 注意
+
+Odysseys 是长程 live-web 任务，smoke run 通常会比短任务、单站点 benchmark 更耗时。
