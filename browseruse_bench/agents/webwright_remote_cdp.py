@@ -103,6 +103,8 @@ class RemoteCDPEnvironment(LocalBrowserEnvironment):
         self._context.set_default_timeout(self.config.browser_timeout_ms)
         self._context.set_default_navigation_timeout(self.config.browser_navigation_timeout_ms)
         self._attach_page_listeners(self._page)
+        if self.config.start_url:
+            await self._page.goto(self.config.start_url, wait_until="domcontentloaded")
 
     async def _execute_async(self, action: dict[str, Any]) -> dict[str, Any]:
         await self._ensure_remote_browser()

@@ -37,21 +37,24 @@ RunOne = Callable[..., dict[str, Any]]
 
 _run_one: RunOne | None = None
 _WEBWRIGHT_IMPORT_ERROR: str | None = None
+_WEBWRIGHT_LIMITS_EXCEEDED: type[BaseException] | None = None
 
 
 def _load_webwright_dependencies() -> None:
     """Lazy-load Webwright only when the webwright agent is selected."""
-    global _run_one, _WEBWRIGHT_IMPORT_ERROR
+    global _run_one, _WEBWRIGHT_IMPORT_ERROR, _WEBWRIGHT_LIMITS_EXCEEDED
 
     if _run_one is not None or _WEBWRIGHT_IMPORT_ERROR is not None:
         return
     try:
+        from webwright.exceptions import LimitsExceeded
         from webwright.run.cli import run_one
     except ImportError as exc:
         _WEBWRIGHT_IMPORT_ERROR = str(exc)
         logger.error("webwright dependency is not available: %s", exc)
         return
     _run_one = run_one
+    _WEBWRIGHT_LIMITS_EXCEEDED = LimitsExceeded
 
 
 def _get_config_value(agent_config: dict[str, Any], *keys: str, default: Any = None) -> Any:
@@ -195,6 +198,15 @@ def _is_official_openai_endpoint(base_url: str | None) -> bool:
     return hostname == "api.openai.com"
 
 
+def _is_chat_completions_endpoint(base_url: str | None) -> bool:
+    if not base_url:
+        return False
+    parsed = urlparse(base_url)
+    hostname = (parsed.hostname or "").lower()
+    path = parsed.path.rstrip("/").lower()
+    return hostname == "openrouter.ai" or path.endswith("/chat/completions")
+
+
 @contextmanager
 def _wall_clock_timeout(timeout_seconds: int) -> Iterator[None]:
     if timeout_seconds <= 0 or threading.current_thread() is not threading.main_thread():
@@ -259,6 +271,7 @@ class WebwrightAgent(BaseAgent):
         started = time.monotonic()
         result_payload: dict[str, Any] = {}
         error_msg: str | None = None
+        forced_exit_status: str | None = None
 
         logger.info(
             "Executing Webwright for task %s (model_type=%s, model=%s, max_steps=%d)",
@@ -300,8 +313,12 @@ class WebwrightAgent(BaseAgent):
             error_msg = f"Timeout after {timeout} seconds"
             logger.error("Task %s timed out after %d seconds", task_id, timeout)
         except self._runtime_error_types() as exc:
-            error_msg = str(exc)
-            logger.error("Task %s Webwright execution error: %s", task_id, exc)
+            if self._is_limits_exceeded(exc):
+                forced_exit_status = "LimitsExceeded"
+                logger.info("Task %s reached Webwright step limit", task_id)
+            else:
+                error_msg = str(exc)
+                logger.error("Task %s Webwright execution error: %s", task_id, exc)
 
         end_to_end_ms = int((time.monotonic() - started) * 1000)
         latest_run = _latest_run_dir(task_workspace)
@@ -317,7 +334,7 @@ class WebwrightAgent(BaseAgent):
             or _extract_answer_from_log(final_log)
             or ""
         )
-        exit_status = str(result_payload.get("exit_status") or "")
+        exit_status = forced_exit_status or str(result_payload.get("exit_status") or "")
         run_exception = str(result_payload.get("run_exception") or "")
         if run_exception and not error_msg:
             error_msg = run_exception
@@ -393,10 +410,10 @@ class WebwrightAgent(BaseAgent):
         cdp_url: str | None = None,
     ) -> list[str]:
         uses_live_browser = session_transport == "cdp"
-        config_spec = [
-            "local_browser.yaml" if uses_live_browser else "base.yaml",
-            _default_model_config(model_type),
-        ]
+        config_spec = ["base.yaml"]
+        if uses_live_browser:
+            config_spec.append("local_browser.yaml")
+        config_spec.append(_default_model_config(model_type))
 
         if model_id:
             config_spec.append(f"model.model_name={model_id}")
@@ -460,7 +477,12 @@ class WebwrightAgent(BaseAgent):
         api_style = str(agent_config.get("model_api_style") or "").strip().lower()
         if model_type == "openai" and api_style in {"chat", "chat_completions", "chat-completions"}:
             return "openrouter"
-        if model_type == "openai" and base_url and not _is_official_openai_endpoint(str(base_url)):
+        if (
+            model_type == "openai"
+            and base_url
+            and not _is_official_openai_endpoint(str(base_url))
+            and _is_chat_completions_endpoint(str(base_url))
+        ):
             return "openrouter"
         return model_type
 
@@ -476,7 +498,13 @@ class WebwrightAgent(BaseAgent):
         )
         if PlaywrightError is not None:
             error_types = error_types + (PlaywrightError,)
+        if _WEBWRIGHT_LIMITS_EXCEEDED is not None:
+            error_types = error_types + (_WEBWRIGHT_LIMITS_EXCEEDED,)
         return error_types
+
+    @staticmethod
+    def _is_limits_exceeded(exc: BaseException) -> bool:
+        return _WEBWRIGHT_LIMITS_EXCEEDED is not None and isinstance(exc, _WEBWRIGHT_LIMITS_EXCEEDED)
 
     @staticmethod
     def _extract_usage(result_payload: dict[str, Any]) -> dict[str, Any]:

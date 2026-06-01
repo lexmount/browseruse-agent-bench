@@ -7,6 +7,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from browseruse_bench.agents import webwright as webwright_module
 from browseruse_bench.agents.webwright import WebwrightAgent, _wall_clock_timeout
 from browseruse_bench.browsers.types import BrowserSessionContext
@@ -60,10 +62,17 @@ def test_build_config_spec_normalizes_openai_base_url_to_responses_endpoint() ->
 
 def test_resolve_model_type_uses_chat_completions_for_custom_openai_gateway() -> None:
     assert (
-        WebwrightAgent._resolve_model_type(
-            {"model_type": "OPENAI", "base_url": "https://litellm.local.lexmount.net/v1"}
-        )
+        WebwrightAgent._resolve_model_type({"model_type": "OPENAI", "model_api_style": "chat"})
         == "openrouter"
+    )
+
+
+def test_resolve_model_type_preserves_custom_openai_responses_gateway() -> None:
+    assert (
+        WebwrightAgent._resolve_model_type(
+            {"model_type": "OPENAI", "base_url": "https://responses.example/v1"}
+        )
+        == "openai"
     )
 
 
@@ -162,7 +171,7 @@ def test_run_task_calls_webwright_run_one_and_parses_artifacts(
     assert captured["debug"] is False
     assert "model.model_name=gpt-test" in captured["config_spec"]
     assert "agent.step_limit=5" in captured["config_spec"]
-    assert "local_browser.yaml" in captured["config_spec"]
+    assert captured["config_spec"][:3] == ["base.yaml", "local_browser.yaml", "model_openai.yaml"]
     assert (
         "environment.environment_class="
         "browseruse_bench.agents.webwright_remote_cdp.RemoteCDPEnvironment"
@@ -189,6 +198,32 @@ def test_run_task_maps_limits_exceeded_to_max_steps(
     assert result.env_status.value == "success"
     assert result.agent_done.value == "max_steps"
     assert result.agent_success is None
+
+
+def test_run_task_maps_webwright_limits_exception_to_max_steps(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    class FakeLimitsExceeded(BaseException):
+        pass
+
+    def fake_run_one(**_: Any) -> dict[str, Any]:
+        raise FakeLimitsExceeded("step limit")
+
+    monkeypatch.setattr(webwright_module, "_run_one", fake_run_one)
+    monkeypatch.setattr(webwright_module, "_WEBWRIGHT_IMPORT_ERROR", None)
+    monkeypatch.setattr(webwright_module, "_WEBWRIGHT_LIMITS_EXCEEDED", FakeLimitsExceeded)
+    monkeypatch.setattr(webwright_module, "open_browser_session", _fake_open_lexmount)
+
+    result = WebwrightAgent().run_task(
+        task_info=TASK_INFO,
+        agent_config={"model_type": "OPENAI", "model_id": "gpt-test"},
+        task_workspace=tmp_path,
+    )
+
+    assert result.env_status.value == "success"
+    assert result.agent_done.value == "max_steps"
+    assert result.error is None
 
 
 def test_run_task_returns_failed_result_on_webwright_error(
@@ -218,10 +253,10 @@ def test_run_task_returns_failed_result_on_playwright_error(
     monkeypatch: Any,
     tmp_path: Path,
 ) -> None:
-    from playwright.async_api import Error as PlaywrightError
+    playwright = pytest.importorskip("playwright.async_api")
 
     def fake_run_one(**_: Any) -> dict[str, Any]:
-        raise PlaywrightError("remote session closed")
+        raise playwright.Error("remote session closed")
 
     monkeypatch.setattr(webwright_module, "_run_one", fake_run_one)
     monkeypatch.setattr(webwright_module, "_WEBWRIGHT_IMPORT_ERROR", None)
