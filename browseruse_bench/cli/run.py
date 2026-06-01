@@ -179,6 +179,25 @@ def _resolve_output_model_id(agent_name: str, agent_cfg: dict[str, Any]) -> str 
     return agent_cfg.get("model_id") or agent_cfg.get("MODEL_ID")
 
 
+_REDACTED_CONFIG_VALUE = "<redacted>"
+_SECRET_KEY_PARTS = ("api_key", "apikey", "token", "secret", "password")
+
+
+def _is_secret_config_key(key: str) -> bool:
+    normalized = key.lower()
+    return any(part in normalized for part in _SECRET_KEY_PARTS)
+
+
+def _redact_config_secrets(value: Any, key: str | None = None) -> Any:
+    if key is not None and _is_secret_config_key(key):
+        return _REDACTED_CONFIG_VALUE if value else value
+    if isinstance(value, dict):
+        return {item_key: _redact_config_secrets(item_value, item_key) for item_key, item_value in value.items()}
+    if isinstance(value, list):
+        return [_redact_config_secrets(item) for item in value]
+    return value
+
+
 # ---------------------------------------------------------------------------
 # task_brief.log: lightweight per-task digest (step numbers + action names)
 # Parsed out of the subprocess stdout stream as it is teed to runtime.log.
@@ -247,7 +266,7 @@ def _write_run_manifest(
     try:
         config_snapshot_path = output_dir / "config_snapshot.json"
         with open(config_snapshot_path, "w", encoding="utf-8") as fh:
-            json.dump(agent_config, fh, indent=2, ensure_ascii=False)
+            json.dump(_redact_config_secrets(agent_config), fh, indent=2, ensure_ascii=False)
         logger.info("Config snapshot written to %s", config_snapshot_path)
     except OSError as exc:
         logger.warning("Failed to write config_snapshot.json: %s", exc)

@@ -7,7 +7,9 @@ isolated in the agent venv.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import signal
 import threading
 import time
@@ -154,6 +156,22 @@ def _safe_float(value: Any) -> float | None:
         return None
 
 
+def _read_api_calls_from_trajectory(task_workspace: Path) -> int | None:
+    try:
+        trajectory = json.loads((task_workspace / "trajectory.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to read Webwright trajectory from %s: %s", task_workspace, exc)
+        return None
+
+    info = trajectory.get("info")
+    if not isinstance(info, dict) or info.get("api_calls") is None:
+        return None
+    steps = _safe_int(info.get("api_calls"), -1)
+    return steps if steps >= 0 else None
+
+
 def _normalize_model_type(raw_value: Any) -> str:
     value = str(raw_value or "OPENAI").strip().lower().replace("-", "_")
     if value in {"anthropic", "claude"}:
@@ -205,6 +223,34 @@ def _is_chat_completions_endpoint(base_url: str | None) -> bool:
     hostname = (parsed.hostname or "").lower()
     path = parsed.path.rstrip("/").lower()
     return hostname == "openrouter.ai" or path.endswith("/chat/completions")
+
+
+def _model_api_key_env_var(model_type: str) -> str:
+    if model_type == "anthropic":
+        return "ANTHROPIC_API_KEY"
+    if model_type == "openrouter":
+        return "OPENROUTER_API_KEY"
+    return "OPENAI_API_KEY"
+
+
+@contextmanager
+def _temporary_model_env(agent_config: dict[str, Any], model_type: str) -> Iterator[None]:
+    api_key = agent_config.get("api_key")
+    if not api_key:
+        yield
+        return
+
+    env_var = _model_api_key_env_var(model_type)
+    previous = os.environ.get(env_var)
+    had_previous = env_var in os.environ
+    os.environ[env_var] = str(api_key)
+    try:
+        yield
+    finally:
+        if had_previous and previous is not None:
+            os.environ[env_var] = previous
+        else:
+            os.environ.pop(env_var, None)
 
 
 @contextmanager
@@ -298,7 +344,7 @@ class WebwrightAgent(BaseAgent):
                     session_transport=session_context.transport,
                     cdp_url=cdp_url,
                 )
-                with _wall_clock_timeout(timeout):
+                with _temporary_model_env(agent_config, model_type), _wall_clock_timeout(timeout):
                     result_payload = _run_one(
                         task=task_prompt,
                         task_id=task_id,
@@ -355,7 +401,10 @@ class WebwrightAgent(BaseAgent):
             agent_done = "done"
 
         usage_payload = self._extract_usage(result_payload)
-        steps = _safe_int(result_payload.get("api_calls"), len(action_history))
+        steps = _safe_int(result_payload.get("api_calls"), -1)
+        if steps < 0:
+            trajectory_steps = _read_api_calls_from_trajectory(task_workspace)
+            steps = trajectory_steps if trajectory_steps is not None else len(action_history)
         agent_success = None
         if agent_done == "done":
             agent_success = bool(final_answer)
@@ -409,6 +458,11 @@ class WebwrightAgent(BaseAgent):
         session_transport: str,
         cdp_url: str | None = None,
     ) -> list[str]:
+        if session_transport not in {"cdp", "local"}:
+            raise ValueError(
+                f"Webwright does not support browser session transport: {session_transport}"
+            )
+
         uses_live_browser = session_transport == "cdp"
         config_spec = ["base.yaml"]
         if uses_live_browser:
@@ -439,15 +493,7 @@ class WebwrightAgent(BaseAgent):
         if request_timeout is not None:
             config_spec.append(f"model.request_timeout_seconds={int(request_timeout)}")
 
-        api_key = agent_config.get("api_key")
         base_url = agent_config.get("base_url")
-        if api_key:
-            if model_type == "anthropic":
-                config_spec.append(f"model.anthropic_api_key={api_key}")
-            elif model_type == "openrouter":
-                config_spec.append(f"model.openrouter_api_key={api_key}")
-            else:
-                config_spec.append(f"model.openai_api_key={api_key}")
         if base_url:
             if model_type == "anthropic":
                 config_spec.append(f"model.anthropic_endpoint={base_url}")

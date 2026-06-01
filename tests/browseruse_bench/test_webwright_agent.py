@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import signal
 from contextlib import contextmanager
 from pathlib import Path
@@ -41,7 +43,7 @@ def test_build_config_spec_maps_openai_config() -> None:
     assert "agent.step_limit=42" in spec
     assert "environment.command_timeout_seconds=600" in spec
     assert "environment.browser_mode=local" in spec
-    assert "model.openai_api_key=sk-test" in spec
+    assert all("sk-test" not in item for item in spec)
     assert "model.openai_endpoint=https://gateway.example/v1/responses" in spec
     assert "model.max_output_tokens=1234" in spec
     assert "model.request_timeout_seconds=77" in spec
@@ -90,7 +92,7 @@ def test_build_config_spec_maps_chat_completions_endpoint() -> None:
     )
 
     assert spec[:2] == ["base.yaml", "model_openrouter.yaml"]
-    assert "model.openrouter_api_key=sk-test" in spec
+    assert all("sk-test" not in item for item in spec)
     assert "model.openrouter_endpoint=https://litellm.local.lexmount.net/v1/chat/completions" in spec
 
 
@@ -105,8 +107,20 @@ def test_build_config_spec_maps_anthropic_config() -> None:
     )
 
     assert spec[:2] == ["base.yaml", "model_claude.yaml"]
-    assert "model.anthropic_api_key=anthropic-key" in spec
+    assert all("anthropic-key" not in item for item in spec)
     assert "model.anthropic_endpoint=https://anthropic.example/messages" in spec
+
+
+def test_build_config_spec_rejects_cloud_native_transport() -> None:
+    with pytest.raises(ValueError, match="cloud_native"):
+        WebwrightAgent._build_config_spec(
+            agent_config={},
+            model_type="openai",
+            model_id="gpt-test",
+            timeout=600,
+            max_steps=42,
+            session_transport="cloud_native",
+        )
 
 
 def test_run_task_calls_webwright_run_one_and_parses_artifacts(
@@ -117,16 +131,20 @@ def test_run_task_calls_webwright_run_one_and_parses_artifacts(
 
     def fake_run_one(**kwargs: Any) -> dict[str, Any]:
         captured.update(kwargs)
+        assert os.environ["OPENAI_API_KEY"] == "sk-test"
         screenshots_dir = tmp_path / "screenshots"
         screenshots_dir.mkdir(parents=True)
         (screenshots_dir / "step_0001.png").write_bytes(b"\x89PNG fake")
         steps_dir = tmp_path / "steps"
         steps_dir.mkdir()
         (steps_dir / "step_0001.py").write_text("await page.goto('https://example.com')\n")
+        (tmp_path / "trajectory.json").write_text(
+            json.dumps({"info": {"api_calls": 7}}),
+            encoding="utf-8",
+        )
         return {
             "exit_status": "Submitted",
             "final_response": "Example Domain",
-            "api_calls": 3,
             "_output_dir": str(tmp_path),
         }
 
@@ -142,17 +160,20 @@ def test_run_task_calls_webwright_run_one_and_parses_artifacts(
     monkeypatch.setattr(webwright_module, "_WEBWRIGHT_IMPORT_ERROR", None)
     monkeypatch.setattr(webwright_module, "open_browser_session", fake_open_browser_session)
 
-    result = WebwrightAgent().run_task(
-        task_info=TASK_INFO,
-        agent_config={
-            "model_type": "OPENAI",
-            "model_id": "gpt-test",
-            "api_key": "sk-test",
-            "timeout": 30,
-            "max_steps": 5,
-        },
-        task_workspace=tmp_path,
-    )
+    with monkeypatch.context() as env_patch:
+        env_patch.delenv("OPENAI_API_KEY", raising=False)
+        result = WebwrightAgent().run_task(
+            task_info=TASK_INFO,
+            agent_config={
+                "model_type": "OPENAI",
+                "model_id": "gpt-test",
+                "api_key": "sk-test",
+                "timeout": 30,
+                "max_steps": 5,
+            },
+            task_workspace=tmp_path,
+        )
+        assert "OPENAI_API_KEY" not in os.environ
 
     assert isinstance(result, AgentResult)
     assert result.env_status.value == "success"
@@ -163,7 +184,7 @@ def test_run_task_calls_webwright_run_one_and_parses_artifacts(
     assert result.browser_id == "lexmount"
     assert result.action_history == ["step_0001: await page.goto('https://example.com')"]
     assert result.screenshots == ["screenshots/step_0001.png"]
-    assert result.metrics.steps == 3
+    assert result.metrics.steps == 7
 
     assert captured["task_id"] == "ww-1"
     assert captured["start_url"] == "https://example.com"
