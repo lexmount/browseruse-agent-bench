@@ -62,3 +62,13 @@ openai-cua:
     - BrowseComp
     - LexBench-Browser
     - WebVoyager
+
+webwright:
+  path: browseruse_bench/agents
+  entrypoint: browseruse_bench/runner/agent_runner.py
+  venv: .venvs/webwright
+  supported_benchmarks:
+    - Online-Mind2Web
+    - BrowseComp
+    - LexBench-Browser
+    - WebVoyager

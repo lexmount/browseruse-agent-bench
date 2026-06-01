@@ -44,6 +44,11 @@ except ImportError as exc:
     logger.warning("Skipping optional agent module browseruse_bench.agents.deepbrowse: %s", exc)
 
 try:
+    from browseruse_bench.agents import webwright  # noqa: F401
+except ImportError as exc:
+    logger.warning("Skipping optional agent module browseruse_bench.agents.webwright: %s", exc)
+
+try:
     from browseruse_bench.agents import openai_cua  # noqa: F401
 except (ModuleNotFoundError, ImportError) as exc:
     # Catch both: ModuleNotFoundError (missing package) and ImportError

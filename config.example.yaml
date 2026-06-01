@@ -286,6 +286,36 @@ agents:
       enable_network_recording: true
       debug_artifacts: true
       timeout: 600
+
+  webwright:
+    active_model: gpt
+    models:
+      gpt:
+        model_type: OPENAI
+        model_id: gpt-5.4
+        api_key: $OPENAI_API_KEY
+        base_url: $OPENAI_BASE_URL
+      claude:
+        model_type: ANTHROPIC
+        model_id: claude-opus-4-6
+        api_key: $ANTHROPIC_API_KEY
+        # base_url: $ANTHROPIC_BASE_URL
+      openrouter:
+        model_type: OPENROUTER
+        model_id: openai/gpt-5.4
+        api_key: $OPENROUTER_API_KEY
+        base_url: https://openrouter.ai/api/v1/chat/completions
+    browser:
+      browser_id: lexmount
+      lexmount_browser_mode: normal
+      lexmount_api_key: $LEXMOUNT_API_KEY
+      lexmount_project_id: $LEXMOUNT_PROJECT_ID
+      # lexmount_base_url: $LEXMOUNT_BASE_URL
+    defaults:
+      max_steps: 100
+      timeout: 600
+      request_timeout_seconds: 120
+
   Agent-TARS:
     active_model: claude
     browser:

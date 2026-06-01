@@ -566,6 +566,8 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
         extra_name = "browser-use"
     elif agent_name == "openai-cua":
         extra_name = "openai-cua"
+    elif agent_name == "webwright":
+        extra_name = "webwright"
     else:
         extra_name = None
 

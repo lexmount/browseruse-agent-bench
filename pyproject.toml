@@ -74,6 +74,10 @@ openai-cua = [
     "playwright>=1.57.0",
 ]
 
+webwright = [
+    "webwright @ git+https://github.com/microsoft/Webwright.git",
+]
+
 [project.urls]
 Homepage = "https://lexmount.github.io/browseruse-agent-bench/"
 Repository = "https://github.com/lexmount/browseruse-agent-bench"
