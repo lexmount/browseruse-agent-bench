@@ -8,6 +8,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -141,6 +142,26 @@ def resolve_data_file(benchmark_path: Path, split: str | None) -> str:
     raise SystemExit("[FAILED] data_info.json format is incorrect, must include split")
 
 
+def _prompt_format_for_benchmark(benchmark_name: str) -> str:
+    """Return benchmark-specific task prompt formatting."""
+    if benchmark_name == "Odysseys":
+        return (
+            "{task}\n"
+            "Start from {url}. You may visit any websites needed to complete the task, "
+            "and keep requested proof pages open when the task asks for visual evidence.\n"
+            "Avoid action loops: do not repeatedly switch between the same tabs or click the same filter "
+            "more than twice. If a filter has no data after 1 retry, fallback to available results, "
+            "return the best-effort answer with clear uncertainty, and finish."
+        )
+    return (
+        "{task}\n"
+        "Only use {url} to achieve the task. Don't go to any other site. Starting URL: {url}\n"
+        "Avoid action loops: do not repeatedly switch between the same tabs or click the same filter "
+        "more than twice. If a filter has no data after 1 retry, fallback to available results, "
+        "return the best-effort answer with clear uncertainty, and finish."
+    )
+
+
 # Running subprocesses (keyed by pid) — accessed by signal handler.
 _processes: dict[int, subprocess.Popen] = {}
 
@@ -173,7 +194,7 @@ class _TaskBriefWriter:
     """Extract key event lines from subprocess output into task_brief.log."""
 
     def __init__(self, path: Path):
-        self._fh = open(path, "w", encoding="utf-8")
+        self._fh = open(path, "w", encoding="utf-8")  # noqa: SIM115
         self._cur_step: str | None = None
         self._cur_actions: list[str] = []
 
@@ -213,10 +234,8 @@ class _TaskBriefWriter:
 
     def close(self) -> None:
         self._flush_step()
-        try:
+        with suppress(OSError):
             self._fh.close()
-        except OSError:
-            pass
 
 
 def _write_run_manifest(
@@ -326,10 +345,8 @@ def _terminate_one(proc: subprocess.Popen) -> None:
             os.killpg(os.getpgid(proc.pid), signal.SIGINT)
     except (ProcessLookupError, OSError) as exc:
         logger.error("Failed to send SIGINT to process group (pid=%s): %s", proc.pid, exc)
-        try:
+        with suppress(ProcessLookupError):
             proc.terminate()
-        except ProcessLookupError:
-            pass
     try:
         proc.wait(timeout=_SIGINT_GRACE_SECONDS)
         return
@@ -341,10 +358,8 @@ def _terminate_one(proc: subprocess.Popen) -> None:
         else:
             os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
     except (ProcessLookupError, OSError):
-        try:
+        with suppress(ProcessLookupError):
             proc.terminate()
-        except ProcessLookupError:
-            pass
     try:
         proc.wait(timeout=_SIGTERM_GRACE_SECONDS)
         return
@@ -356,10 +371,8 @@ def _terminate_one(proc: subprocess.Popen) -> None:
         else:
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
     except (ProcessLookupError, OSError):
-        try:
+        with suppress(ProcessLookupError):
             proc.kill()
-        except ProcessLookupError:
-            pass
 
 
 def _signal_handler(signum: int, frame: Any) -> None:
@@ -508,13 +521,7 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
 
     # Load tasks
     default_task_url = config.get("default", {}).get("task_start_url")
-    prompt_fmt = (
-        "{task}\n"
-        "Only use {url} to achieve the task. Don't go to any other site. Starting URL: {url}\n"
-        "Avoid action loops: do not repeatedly switch between the same tabs or click the same filter "
-        "more than twice. If a filter has no data after 1 retry, fallback to available results, "
-        "return the best-effort answer with clear uncertainty, and finish."
-    )
+    prompt_fmt = _prompt_format_for_benchmark(benchmark_name)
     tasks = load_tasks_with_benchmark_support(
         benchmark_data,
         prompt_fmt=prompt_fmt,
@@ -616,6 +623,7 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
         task_workspace.mkdir(parents=True, exist_ok=True)
         session_state_file = task_workspace / ".browser_session_state.json"
         session_state_file.unlink(missing_ok=True)
+        task_info = {**task_info, "benchmark_name": benchmark_name}
 
         task_info_path: Path | None = None
         tmp_cfg_path: Path | None = None
@@ -728,10 +736,8 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
             for _tmp in [task_info_path, tmp_cfg_path]:
                 if _tmp is None:
                     continue
-                try:
+                with suppress(FileNotFoundError, OSError):
                     _tmp.unlink()
-                except (FileNotFoundError, OSError):
-                    pass
             _cleanup_orphaned_browser_session(
                 session_state_file=session_state_file,
                 env=env,
