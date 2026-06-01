@@ -1,0 +1,20 @@
+{
+  "default_split": "All",
+  "split": {
+    "All": "task.jsonl"
+  },
+  "source": {
+    "paper": "https://arxiv.org/abs/2604.24964",
+    "project": "https://odysseys-website.pages.dev/",
+    "task_json": "https://github.com/ljang0/Odysseys/blob/main/data/odysseys.json",
+    "raw_task_json": "https://raw.githubusercontent.com/ljang0/Odysseys/main/data/odysseys.json"
+  },
+  "version_info": {
+    "Odysseys": {
+      "total_tasks": 200,
+      "description": "Long-horizon, multi-site live-web tasks with rubric checkpoints.",
+      "paper_title": "Odysseys: Benchmarking Web Agents on Realistic Long Horizon Tasks",
+      "last_updated": "2026-06-01"
+    }
+  }
+}

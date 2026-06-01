@@ -67,6 +67,12 @@ class BaseAgent(ABC):
         url = task_info.get("url", "")
         if template:
             return template.format(task_text=task_text, url=url)
+        if task_info.get("benchmark_name") == "Odysseys" and url:
+            return (
+                f"{task_text}\n"
+                f"Start from {url}. You may visit any websites needed to complete the task, "
+                "and keep requested proof pages open when the task asks for visual evidence."
+            )
         urls = task_info.get("urls") or ([url] if url else [])
         if len(urls) > 1:
             return (

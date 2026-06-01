@@ -1,0 +1,49 @@
+---
+title: "Odysseys"
+description: "Long-horizon web-agent benchmark with rubric checkpoints"
+---
+
+Odysseys is a benchmark of 200 realistic long-horizon web tasks derived from real browsing sessions and evaluated on the live Internet. Tasks often span multiple sites and include rubric checkpoints for partial-credit evaluation.
+
+## Dataset
+
+The local dataset is stored at `browseruse_bench/data/Odysseys/task.jsonl`.
+
+Each task includes:
+
+- `task_id`: Stable task identifier.
+- `confirmed_task`: User-facing instruction.
+- `website`: Starting URL, usually Google.
+- `level`: Difficulty label.
+- `rubrics`: Checkpoint requirements and verification notes.
+- `categories`: Task categories.
+
+Sources:
+
+- [Paper](https://arxiv.org/abs/2604.24964)
+- [Project page](https://odysseys-website.pages.dev/)
+- [Official task JSON](https://github.com/ljang0/Odysseys/blob/main/data/odysseys.json)
+
+## Run
+
+```bash
+bubench run --agent browser-use --data Odysseys --mode first_n --count 5
+```
+
+## Evaluate
+
+The Odysseys evaluator grades each rubric item independently from the agent's final response and trajectory screenshots. A task is counted as a perfect success only when every rubric item passes.
+
+```bash
+bubench eval --agent browser-use --data Odysseys --model-id gpt-4.1
+```
+
+The summary includes:
+
+- `rubric_average`: Average fraction of passed rubric items.
+- `perfect_task_rate`: Fraction of tasks with all rubric items passed.
+- `trajectory_efficiency`: Average rubric score per agent step when step counts are available.
+
+## Notes
+
+Odysseys tasks are long-horizon live-web tasks, so smoke runs can take substantially longer than shorter single-site benchmarks.

@@ -6,28 +6,28 @@ the corresponding benchmark is used.
 """
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Type
+from collections.abc import Callable
 
 from browseruse_bench.eval.base import BaseEvaluator
 
-_FACTORIES: Dict[str, Callable[[], Type[BaseEvaluator]]] = {}
+_FACTORIES: dict[str, Callable[[], type[BaseEvaluator]]] = {}
 
 
 def register_evaluator(
     name: str,
-) -> Callable[[Callable[[], Type[BaseEvaluator]]], Callable[[], Type[BaseEvaluator]]]:
+) -> Callable[[Callable[[], type[BaseEvaluator]]], Callable[[], type[BaseEvaluator]]]:
     """Decorator: bind a factory closure under the given benchmark name."""
 
     def decorator(
-        factory: Callable[[], Type[BaseEvaluator]],
-    ) -> Callable[[], Type[BaseEvaluator]]:
+        factory: Callable[[], type[BaseEvaluator]],
+    ) -> Callable[[], type[BaseEvaluator]]:
         _FACTORIES[name] = factory
         return factory
 
     return decorator
 
 
-def get_evaluator_class(name: str) -> Type[BaseEvaluator]:
+def get_evaluator_class(name: str) -> type[BaseEvaluator]:
     if name not in _FACTORIES:
         raise KeyError(
             f"Unknown evaluator: {name}. Registered: {sorted(_FACTORIES)}"
@@ -35,7 +35,7 @@ def get_evaluator_class(name: str) -> Type[BaseEvaluator]:
     return _FACTORIES[name]()
 
 
-def list_evaluators() -> List[str]:
+def list_evaluators() -> list[str]:
     return sorted(_FACTORIES)
 
 
@@ -65,6 +65,11 @@ def _register_defaults() -> None:
     def _webvoyager():
         from browseruse_bench.eval.webvoyager.evaluator import WebVoyagerEvaluator
         return WebVoyagerEvaluator
+
+    @register_evaluator("Odysseys")
+    def _odysseys():
+        from browseruse_bench.eval.odysseys.evaluator import OdysseysEvaluator
+        return OdysseysEvaluator
 
 
 _register_defaults()
