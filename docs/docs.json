@@ -33,6 +33,7 @@
                                         "pages": [
                                             "en/agents/overview",
                                             "en/agents/browser-use",
+                                            "en/agents/webwright",
                                             "en/agents/agent-tars",
                                             "en/agents/skyvern",
                                             "en/agents/claude-code",
@@ -137,6 +138,7 @@
                                         "pages": [
                                             "zh/agents/overview",
                                             "zh/agents/browser-use",
+                                            "zh/agents/webwright",
                                             "zh/agents/agent-tars",
                                             "zh/agents/skyvern",
                                             "zh/agents/claude-code",

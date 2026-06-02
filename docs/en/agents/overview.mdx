@@ -11,6 +11,9 @@ browseruse-bench provides a unified interface to run and evaluate different brow
   <Card title="browser-use" icon="python" href="browser-use">
     Python-based browser agent with programmable browser automation capabilities. Supports both local browsers and Lexmount cloud browsers.
   </Card>
+  <Card title="Webwright" icon="globe" href="webwright">
+    Open-source Webwright SDK integration that runs through remote Lexmount CDP sessions, with Webwright trajectories and screenshots preserved.
+  </Card>
   <Card title="Agent-TARS" icon="terminal" href="agent-tars">
     Browser agent developed by the TARS team, distributed as an npm CLI package.
   </Card>
@@ -24,12 +27,12 @@ browseruse-bench provides a unified interface to run and evaluate different brow
 
 ## Feature Comparison
 
-| Feature | browser-use | Agent-TARS | Skyvern | Claude Code |
-|---------|-------------|------------|---------|-------------|
-| Language | Python | Node.js | Python | Node.js CLI |
-| Installation | uv/pip | npm | uv/pip | npm |
-| Local Browser | ✅ | ✅ | ✅ | ✅ (via MCP) |
-| Cloud Browser | ✅ | ✅ | ✅ | — |
+| Feature | browser-use | Webwright | Agent-TARS | Skyvern | Claude Code |
+|---------|-------------|-----------|------------|---------|-------------|
+| Language | Python | Python SDK | Node.js | Python | Node.js CLI |
+| Installation | uv/pip | uv/pip extra | npm | uv/pip | npm |
+| Local Browser | ✅ | ✅ | ✅ | ✅ | ✅ (via MCP) |
+| Cloud Browser | ✅ | ✅ (Lexmount CDP) | ✅ | ✅ | — |
 
 ## Quick Start
 
@@ -40,6 +43,14 @@ uv sync
 
 # Run
 bubench run --agent browser-use --data LexBench-Browser --mode first_n --count 3
+```
+
+```bash Webwright
+# Install
+uv sync --extra webwright
+
+# Run
+bubench run --agent webwright --data LexBench-Browser --mode single
 ```
 
 ```bash Agent-TARS

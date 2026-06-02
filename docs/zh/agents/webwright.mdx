@@ -1,0 +1,269 @@
+---
+title: "Webwright"
+description: "通过 Webwright SDK 接入的开源浏览器代理"
+---
+
+Webwright 是 Microsoft 开源的浏览器代理。browseruse-bench 通过 Python SDK runner 接入 Webwright，而不是通过 Webwright CLI 或 HTTP API 做一层包装。这样可以让任务执行继续走标准的 `bubench run` 生命周期，同时复用 Webwright 自己的 planner、prompt、trajectory、截图和 live-browser 环境。
+
+默认推荐使用 Lexmount 浏览器后端。运行 Lexmount 时，browseruse-bench 会为每个任务创建一个新的远程浏览器 session，拿到 browser-level CDP websocket 后，通过自定义 remote-CDP 环境直接传给 Webwright。它不会启动本地 Chrome，也不会探测本地 `/json/*` CDP 端点。
+
+## 安装
+
+在项目环境中安装 Webwright 可选依赖：
+
+```bash
+uv sync --extra webwright
+```
+
+开发和测试时同时安装 dev extra：
+
+```bash
+uv sync --extra dev --extra webwright
+```
+
+`bubench run` 也会使用 `configs/agent_registry.yaml` 中声明的 agent venv（`.venvs/webwright`），并在首次使用时安装 `webwright` extra。
+
+## 配置
+
+在根目录 `config.yaml` 的 `agents.webwright` 下配置 Webwright。下面示例使用 OpenAI 兼容 chat-completions 网关和 Lexmount：
+
+```yaml
+agents:
+  webwright:
+    active_model: gpt
+    models:
+      gpt:
+        model_type: OPENAI
+        model_id: gpt-5.4
+        api_key: $OPENAI_API_KEY
+        base_url: $OPENAI_BASE_URL
+        model_api_style: chat_completions
+      claude:
+        model_type: ANTHROPIC
+        model_id: claude-opus-4-6
+        api_key: $ANTHROPIC_API_KEY
+      openrouter:
+        model_type: OPENROUTER
+        model_id: openai/gpt-5.4
+        api_key: $OPENROUTER_API_KEY
+        base_url: https://openrouter.ai/api/v1/chat/completions
+    browser:
+      browser_id: lexmount
+      lexmount_browser_mode: normal
+      lexmount_api_key: $LEXMOUNT_API_KEY
+      lexmount_project_id: $LEXMOUNT_PROJECT_ID
+      # lexmount_base_url: $LEXMOUNT_BASE_URL
+    defaults:
+      max_steps: 100
+      timeout: 600
+      request_timeout_seconds: 120
+```
+
+建议在 `config.yaml` 中使用 `$ENV_VAR` 引用，并把密钥放到 `.env`。运行 manifest 和 Webwright config snapshot 会对 credential-like 字段做脱敏，包括 API key、Authorization header、bearer token、Lexmount 凭据和密码。
+
+### 支持的模型类型
+
+| `model_type` | Webwright 后端 | 说明 |
+|-------------|----------------|------|
+| `OPENAI` | 默认使用 OpenAI Responses | OpenAI 兼容 chat 网关请设置 `model_api_style: chat_completions`。 |
+| `ANTHROPIC` | Claude | 读取 `ANTHROPIC_API_KEY` 或配置中的 `api_key`。 |
+| `OPENROUTER` | OpenRouter chat completions | 读取 `OPENROUTER_API_KEY` 或配置中的 `api_key`。 |
+
+### 配置参数说明
+
+| 参数 | 说明 | 示例 |
+|------|------|------|
+| `active_model` | `models` 下默认使用的模型配置名 | `gpt` |
+| `model_type` | 模型提供商类型 | `OPENAI`, `ANTHROPIC`, `OPENROUTER` |
+| `model_id` | 传给 Webwright 的模型 ID | `gpt-5.4`, `claude-opus-4-6` |
+| `model_api_style` | OpenAI 兼容 profile 的 API 风格 | `responses`, `chat_completions` |
+| `api_key` | API key 引用 | `$OPENAI_API_KEY` |
+| `base_url` | 可选模型 endpoint 覆盖 | `$OPENAI_BASE_URL` |
+| `browser_id` | 浏览器后端 | `lexmount`, `Chrome-Local` |
+| `lexmount_browser_mode` | Lexmount 浏览器模式 | `normal`, `light` |
+| `max_steps` | 单任务最大 Webwright step 数 | `100` |
+| `timeout` | wall-clock 超时时间，单位秒 | `600` |
+| `request_timeout_seconds` | 传给 Webwright 的模型请求超时 | `120` |
+
+## 浏览器模式
+
+### Lexmount Remote CDP
+
+Lexmount 是推荐的 benchmark 运行模式：
+
+```yaml
+browser:
+  browser_id: lexmount
+  lexmount_browser_mode: normal
+  lexmount_api_key: $LEXMOUNT_API_KEY
+  lexmount_project_id: $LEXMOUNT_PROJECT_ID
+  # lexmount_base_url: $LEXMOUNT_BASE_URL
+```
+
+每个任务都会获得独立的 Lexmount session。Webwright 通过 Playwright `connect_over_cdp()` 直接连接 Lexmount 返回的远程 websocket。这个模式适合 CI smoke test 和并发 benchmark。
+
+### 本地浏览器
+
+本地浏览器模式只建议用于开发调试：
+
+```yaml
+browser:
+  browser_id: Chrome-Local
+```
+
+需要可复现的远程浏览器 benchmark 结果时请使用 Lexmount。不支持的 cloud-native transport 会 fail fast，不会静默回退到本地浏览器。
+
+## 运行命令
+
+### Dry-Run 验证
+
+先用 dry-run 验证 agent registry、模型 profile 选择、数据加载和 runner 串联是否正确。dry-run 不会打开浏览器，也不会调用模型 provider：
+
+```bash
+uv run --extra dev bubench run \
+  --agent webwright \
+  --data LexBench-Browser \
+  --mode single \
+  --dry-run
+```
+
+预期输出会加载 `LexBench-Browser`，最后出现类似：
+
+```text
+[DRY RUN] Would run 1 tasks using agent_runner.py
+```
+
+### 单任务 Smoke Test
+
+这是修改 Webwright agent 前后必须跑的真实 smoke test：
+
+```bash
+uv run --extra dev bubench run \
+  --agent webwright \
+  --data LexBench-Browser \
+  --mode single
+```
+
+如果默认 `active_model` 不是你要测试的 profile，可以显式选择一个已配置的 profile：
+
+```bash
+uv run --extra dev bubench run \
+  --agent webwright \
+  --model openrouter \
+  --data LexBench-Browser \
+  --mode single
+```
+
+真实 smoke 会创建 Lexmount session，并调用当前模型 provider。它要求 `.env` 中的模型 profile 凭据和 Lexmount 凭据都有效。
+
+### 并发运行 Online-Mind2Web
+
+使用 `--concurrency` 并发启动多个任务。使用 Lexmount 时，每个任务都会打开独立的远程浏览器 session：
+
+```bash
+uv run --extra dev bubench run \
+  --agent webwright \
+  --data Online-Mind2Web \
+  --mode first_n \
+  --count 3 \
+  --concurrency 3
+```
+
+### 跳过已完成任务
+
+```bash
+uv run --extra dev bubench run \
+  --agent webwright \
+  --data LexBench-Browser \
+  --mode all \
+  --skip-completed
+```
+
+## 输出与产物
+
+Webwright 会在每个任务 workspace 中写入自己的产物，包括：
+
+- `trajectory.json`，包含 turn count 和 token usage。
+- `final_runs/run_<id>/`，包含 action log 和截图。
+- Webwright config snapshot，其中密钥字段由 browseruse-bench 脱敏。
+
+browseruse-bench 会从 Webwright trajectory 中读取数据并写回 `result.json`，包括 `metrics.steps` 和模型 usage 汇总。
+
+## 验证
+
+先运行 dry-run 验证：
+
+```bash
+uv run --extra dev bubench run \
+  --agent webwright \
+  --data LexBench-Browser \
+  --mode single \
+  --dry-run
+```
+
+运行 Webwright 集成相关的聚焦测试：
+
+```bash
+uv run --extra dev pytest \
+  tests/browseruse_bench/test_webwright_agent.py \
+  tests/browseruse_bench/test_run_manifest.py
+```
+
+对实现和相关测试运行 lint：
+
+```bash
+uv run --extra dev ruff check \
+  browseruse_bench/agents/webwright.py \
+  browseruse_bench/agents/webwright_remote_cdp.py \
+  browseruse_bench/cli/run.py \
+  tests/browseruse_bench/test_webwright_agent.py \
+  tests/browseruse_bench/test_run_manifest.py
+```
+
+然后运行真实 Webwright smoke：
+
+```bash
+uv run --extra dev bubench run \
+  --agent webwright \
+  --data LexBench-Browser \
+  --mode single
+```
+
+如果真实 smoke 在 Lexmount session 创建后因为 provider `401` 或 `500` 失败，说明 Webwright/Lexmount 路径已经被实际执行；请修正 `.env` 中所选模型 profile 的 key 或 endpoint 后，重新运行同一个命令。
+
+## 常见问题
+
+### `webwright dependencies are missing`
+
+安装 Webwright extra：
+
+```bash
+uv sync --extra webwright
+```
+
+也可以直接通过 `bubench run --agent webwright ...` 使用 registry 管理的 `webwright` agent venv。
+
+### `Active session not found`
+
+这个错误来自远端 Lexmount session 生命周期，通常表示远程 session 在任务完成前过期或被回收。如果任务本身预期会更久，可以提高 `defaults.timeout`；否则建议保持 benchmark 有明确上限，让 Webwright 在远程浏览器消失前返回结构化 timeout 结果。
+
+### Provider `401 Unauthorized` 或 `500 Internal Server Error`
+
+这类错误来自当前配置的模型 provider，不是 Lexmount CDP 连接问题。请检查所选 `--model` profile、对应的 `api_key`，以及 `.env` 中的 `base_url`。如果日志中已经出现 `Lexmount session created`，说明 Webwright/Lexmount 路径已经正常进入真实执行阶段。
+
+### 任务从 `about:blank` 开始
+
+Lexmount/CDP 运行时，browseruse-bench 的 `RemoteCDPEnvironment` 会在 Webwright 第一个 action 前导航到 benchmark `start_url`。如果看到 `about:blank`，请确认 dataset task 有 `start_url`，并确认当前运行使用的是最新的 `webwright_remote_cdp` 环境。
+
+## 支持的 Benchmarks
+
+- ✅ LexBench-Browser
+- ✅ Online-Mind2Web
+- ✅ BrowseComp
+- ✅ WebVoyager
+- ✅ Odysseys
+
+## 相关链接
+
+- [Webwright GitHub 仓库](https://github.com/microsoft/Webwright)
+- [Lexmount 云浏览器](/zh/browser/lexmount)

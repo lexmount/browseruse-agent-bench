@@ -254,7 +254,7 @@ jobs:
       # `latest` is auto-tagged by ghcr-publish.yml on every main push, so
       # this stays in sync with main's Dockerfile (which preinstalls
       # git/ca-certificates/curl and chowns /app to uid 1000).
-      image: ghcr.io/lexmount/browseruse-bench:latest
+      image: ghcr.io/lexmount/browseruse-agent-bench:latest
       options: --shm-size=2g --user 1000:1000
       credentials:
         username: ${{ github.actor }}

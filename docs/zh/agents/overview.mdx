@@ -11,6 +11,9 @@ browseruse-bench 提供统一的接口来运行和评估不同的浏览器代理
   <Card title="browser-use" icon="python" href="browser-use">
     基于 Python 的浏览器代理，提供可编程的浏览器自动化能力。支持本地浏览器和 Lexmount 云浏览器。
   </Card>
+  <Card title="Webwright" icon="globe" href="webwright">
+    通过 Webwright SDK 接入的开源浏览器代理，使用 Lexmount remote CDP session，并保留 Webwright trajectory 与截图产物。
+  </Card>
   <Card title="Agent-TARS" icon="terminal" href="agent-tars">
     由 TARS 团队开发的浏览器代理，以 npm CLI 包的形式发布。
   </Card>
@@ -24,12 +27,12 @@ browseruse-bench 提供统一的接口来运行和评估不同的浏览器代理
 
 ## 功能对比
 
-| 特性 | browser-use | Agent-TARS | Skyvern | Claude Code |
-|------|-------------|------------|---------|-------------|
-| 编程语言 | Python | Node.js | Python | Node.js CLI |
-| 安装方式 | uv/pip | npm | uv/pip | npm |
-| 本地浏览器 | ✅ | ✅ | ✅ | ✅（via MCP）|
-| 云浏览器 | ✅ | ✅ | ✅ | — |
+| 特性 | browser-use | Webwright | Agent-TARS | Skyvern | Claude Code |
+|------|-------------|-----------|------------|---------|-------------|
+| 编程语言 | Python | Python SDK | Node.js | Python | Node.js CLI |
+| 安装方式 | uv/pip | uv/pip extra | npm | uv/pip | npm |
+| 本地浏览器 | ✅ | ✅ | ✅ | ✅ | ✅（via MCP）|
+| 云浏览器 | ✅ | ✅（Lexmount CDP） | ✅ | ✅ | — |
 
 ## 快速使用
 
@@ -40,6 +43,14 @@ uv sync
 
 # 运行
 bubench run --agent browser-use --data LexBench-Browser --mode first_n --count 3
+```
+
+```bash Webwright
+# 安装
+uv sync --extra webwright
+
+# 运行
+bubench run --agent webwright --data LexBench-Browser --mode single
 ```
 
 ```bash Agent-TARS

@@ -1,0 +1,269 @@
+---
+title: "Webwright"
+description: "Open-source browser agent integrated through the Webwright SDK"
+---
+
+Webwright is an open-source browser agent from Microsoft. browseruse-bench integrates it through the Python SDK runner, not through the Webwright CLI or an HTTP API wrapper. This keeps task execution inside the normal `bubench run` lifecycle while still using Webwright's own planner, prompts, trajectory files, screenshots, and live-browser environment.
+
+The default and recommended browser backend is Lexmount. For Lexmount runs, browseruse-bench creates a fresh remote browser session for each task, receives the browser-level CDP websocket, and passes that websocket directly to Webwright through a custom remote-CDP environment. It does not launch local Chrome and does not probe local `/json/*` CDP endpoints.
+
+## Installation
+
+Install the Webwright optional dependency in the project environment:
+
+```bash
+uv sync --extra webwright
+```
+
+For development and tests, include the dev extra as well:
+
+```bash
+uv sync --extra dev --extra webwright
+```
+
+`bubench run` also uses the agent venv declared in `configs/agent_registry.yaml` (`.venvs/webwright`) and installs the `webwright` extra there on first use.
+
+## Configuration
+
+Configure Webwright in the root `config.yaml` under `agents.webwright`. The example below uses an OpenAI-compatible chat-completions gateway and Lexmount:
+
+```yaml
+agents:
+  webwright:
+    active_model: gpt
+    models:
+      gpt:
+        model_type: OPENAI
+        model_id: gpt-5.4
+        api_key: $OPENAI_API_KEY
+        base_url: $OPENAI_BASE_URL
+        model_api_style: chat_completions
+      claude:
+        model_type: ANTHROPIC
+        model_id: claude-opus-4-6
+        api_key: $ANTHROPIC_API_KEY
+      openrouter:
+        model_type: OPENROUTER
+        model_id: openai/gpt-5.4
+        api_key: $OPENROUTER_API_KEY
+        base_url: https://openrouter.ai/api/v1/chat/completions
+    browser:
+      browser_id: lexmount
+      lexmount_browser_mode: normal
+      lexmount_api_key: $LEXMOUNT_API_KEY
+      lexmount_project_id: $LEXMOUNT_PROJECT_ID
+      # lexmount_base_url: $LEXMOUNT_BASE_URL
+    defaults:
+      max_steps: 100
+      timeout: 600
+      request_timeout_seconds: 120
+```
+
+Use `$ENV_VAR` values in `config.yaml` and put secrets in `.env`. Run manifests and Webwright config snapshots redact credential-like fields such as API keys, authorization headers, bearer tokens, Lexmount credentials, and passwords.
+
+### Supported Model Types
+
+| `model_type` | Webwright backend | Notes |
+|-------------|-------------------|-------|
+| `OPENAI` | OpenAI Responses by default | Use `model_api_style: chat_completions` for OpenAI-compatible chat gateways. |
+| `ANTHROPIC` | Claude | Reads `ANTHROPIC_API_KEY` or the configured `api_key`. |
+| `OPENROUTER` | OpenRouter chat completions | Uses `OPENROUTER_API_KEY` or the configured `api_key`. |
+
+### Configuration Parameters
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `active_model` | Default model profile under `models` | `gpt` |
+| `model_type` | Model provider type | `OPENAI`, `ANTHROPIC`, `OPENROUTER` |
+| `model_id` | Model ID passed to Webwright | `gpt-5.4`, `claude-opus-4-6` |
+| `model_api_style` | API style for OpenAI-compatible profiles | `responses`, `chat_completions` |
+| `api_key` | API key reference | `$OPENAI_API_KEY` |
+| `base_url` | Optional provider endpoint override | `$OPENAI_BASE_URL` |
+| `browser_id` | Browser backend | `lexmount`, `Chrome-Local` |
+| `lexmount_browser_mode` | Lexmount browser mode | `normal`, `light` |
+| `max_steps` | Max Webwright steps per task | `100` |
+| `timeout` | Wall-clock timeout in seconds | `600` |
+| `request_timeout_seconds` | Model request timeout passed into Webwright | `120` |
+
+## Browser Modes
+
+### Lexmount Remote CDP
+
+Lexmount is the recommended mode for benchmark runs:
+
+```yaml
+browser:
+  browser_id: lexmount
+  lexmount_browser_mode: normal
+  lexmount_api_key: $LEXMOUNT_API_KEY
+  lexmount_project_id: $LEXMOUNT_PROJECT_ID
+  # lexmount_base_url: $LEXMOUNT_BASE_URL
+```
+
+Each task gets its own Lexmount session. Webwright connects directly with Playwright `connect_over_cdp()` to the remote websocket returned by Lexmount. This is the right mode for CI-like smoke tests and parallel benchmark runs.
+
+### Local Browser
+
+Local browser mode is available for development only:
+
+```yaml
+browser:
+  browser_id: Chrome-Local
+```
+
+Use Lexmount for reproducible remote-browser benchmark results. Unsupported cloud-native transports fail fast instead of silently falling back to local browser execution.
+
+## Run Commands
+
+### Dry-Run Validation
+
+Use dry-run first to verify the agent registry entry, model profile selection, dataset loading, and runner wiring without opening a browser or calling the model provider:
+
+```bash
+uv run --extra dev bubench run \
+  --agent webwright \
+  --data LexBench-Browser \
+  --mode single \
+  --dry-run
+```
+
+The expected output should load `LexBench-Browser` and end with a line like:
+
+```text
+[DRY RUN] Would run 1 tasks using agent_runner.py
+```
+
+### Single-Task Smoke Test
+
+This is the required real smoke test before committing Webwright agent changes:
+
+```bash
+uv run --extra dev bubench run \
+  --agent webwright \
+  --data LexBench-Browser \
+  --mode single
+```
+
+If the default `active_model` is not the profile you want to test, select a configured profile explicitly:
+
+```bash
+uv run --extra dev bubench run \
+  --agent webwright \
+  --model openrouter \
+  --data LexBench-Browser \
+  --mode single
+```
+
+The real smoke opens a Lexmount session and calls the configured model provider. It requires valid `.env` credentials for both the selected model profile and Lexmount.
+
+### Parallel Online-Mind2Web Run
+
+Use `--concurrency` to start multiple tasks. With Lexmount, each task opens an independent remote browser session:
+
+```bash
+uv run --extra dev bubench run \
+  --agent webwright \
+  --data Online-Mind2Web \
+  --mode first_n \
+  --count 3 \
+  --concurrency 3
+```
+
+### Skip Completed Runs
+
+```bash
+uv run --extra dev bubench run \
+  --agent webwright \
+  --data LexBench-Browser \
+  --mode all \
+  --skip-completed
+```
+
+## Outputs and Artifacts
+
+Webwright writes its own artifacts inside each task workspace, including:
+
+- `trajectory.json` with turn counts and token usage.
+- `final_runs/run_<id>/` with action logs and screenshots.
+- Webwright config snapshots with secrets redacted by browseruse-bench.
+
+browseruse-bench reads Webwright trajectory data back into `result.json`, including `metrics.steps` and model usage totals when available.
+
+## Verification
+
+Start with dry-run validation:
+
+```bash
+uv run --extra dev bubench run \
+  --agent webwright \
+  --data LexBench-Browser \
+  --mode single \
+  --dry-run
+```
+
+Run the focused tests for the Webwright integration:
+
+```bash
+uv run --extra dev pytest \
+  tests/browseruse_bench/test_webwright_agent.py \
+  tests/browseruse_bench/test_run_manifest.py
+```
+
+Run lint on the touched implementation and docs-adjacent tests:
+
+```bash
+uv run --extra dev ruff check \
+  browseruse_bench/agents/webwright.py \
+  browseruse_bench/agents/webwright_remote_cdp.py \
+  browseruse_bench/cli/run.py \
+  tests/browseruse_bench/test_webwright_agent.py \
+  tests/browseruse_bench/test_run_manifest.py
+```
+
+Then run the real Webwright smoke:
+
+```bash
+uv run --extra dev bubench run \
+  --agent webwright \
+  --data LexBench-Browser \
+  --mode single
+```
+
+If the real smoke fails with a provider `401` or `500` after a Lexmount session is created, the Webwright/Lexmount path is already being exercised; fix the selected model profile or provider endpoint in `.env` and rerun the same command.
+
+## Troubleshooting
+
+### `webwright dependencies are missing`
+
+Install the Webwright extra:
+
+```bash
+uv sync --extra webwright
+```
+
+or run with the registry-managed `webwright` agent venv through `bubench run --agent webwright ...`.
+
+### `Active session not found`
+
+This comes from the remote Lexmount session lifecycle. It usually means the remote session expired or was reclaimed before the task finished. Increase `defaults.timeout` only if the task is expected to take longer; otherwise keep the benchmark bounded so Webwright returns a structured timeout result before the browser session disappears.
+
+### Provider `401 Unauthorized` or `500 Internal Server Error`
+
+These errors come from the configured model provider, not from Lexmount CDP connection. Check the selected `--model` profile, its `api_key`, and any `base_url` in `.env`. A healthy Webwright/Lexmount path will log `Lexmount session created` before the provider error appears.
+
+### The task starts at `about:blank`
+
+For Lexmount/CDP runs, browseruse-bench's `RemoteCDPEnvironment` navigates the remote page to the benchmark `start_url` before the first Webwright action. If you see `about:blank`, verify that the dataset task has a `start_url` and that the run is using the current `webwright_remote_cdp` environment.
+
+## Supported Benchmarks
+
+- ✅ LexBench-Browser
+- ✅ Online-Mind2Web
+- ✅ BrowseComp
+- ✅ WebVoyager
+- ✅ Odysseys
+
+## Related Links
+
+- [Webwright GitHub Repository](https://github.com/microsoft/Webwright)
+- [Lexmount Cloud Browser](/en/browser/lexmount)
