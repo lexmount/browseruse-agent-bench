@@ -59,7 +59,7 @@ agents:
       request_timeout_seconds: 120
 ```
 
-建议在 `config.yaml` 中使用 `$ENV_VAR` 引用，并把密钥放到 `.env`。运行 manifest 和 Webwright config snapshot 会对 credential-like 字段做脱敏，包括 API key、Authorization header、bearer token、Lexmount 凭据和密码。
+建议在 `config.yaml` 中使用 `$ENV_VAR` 引用，并把密钥放到 `.env`。browseruse-bench 的运行 manifest 会对 credential-like 字段做脱敏，包括 API key、Authorization header、bearer token、Lexmount 凭据和密码。Webwright 自己的 task workspace 仍可能包含原始 config snapshot；对于实时 Lexmount/CDP 运行，在确认或脱敏其中的 `remote_cdp_url` 前，不要直接分享 task workspace。
 
 ### 支持的模型类型
 
@@ -185,7 +185,7 @@ Webwright 会在每个任务 workspace 中写入自己的产物，包括：
 
 - `trajectory.json`，包含 turn count 和 token usage。
 - `final_runs/run_<id>/`，包含 action log 和截图。
-- Webwright config snapshot，其中密钥字段由 browseruse-bench 脱敏。
+- Webwright 创建的 config snapshot。Lexmount/CDP 运行时请把这些文件视为敏感产物，因为其中可能包含原始 `remote_cdp_url`。
 
 browseruse-bench 会从 Webwright trajectory 中读取数据并写回 `result.json`，包括 `metrics.steps` 和模型 usage 汇总。
 

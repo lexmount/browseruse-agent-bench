@@ -59,7 +59,7 @@ agents:
       request_timeout_seconds: 120
 ```
 
-Use `$ENV_VAR` values in `config.yaml` and put secrets in `.env`. Run manifests and Webwright config snapshots redact credential-like fields such as API keys, authorization headers, bearer tokens, Lexmount credentials, and passwords.
+Use `$ENV_VAR` values in `config.yaml` and put secrets in `.env`. browseruse-bench run manifests redact credential-like fields such as API keys, authorization headers, bearer tokens, Lexmount credentials, and passwords. Webwright's own task workspace may still include its raw config snapshot; do not share task workspaces from live Lexmount/CDP runs until you have checked or redacted any `remote_cdp_url` values.
 
 ### Supported Model Types
 
@@ -185,7 +185,7 @@ Webwright writes its own artifacts inside each task workspace, including:
 
 - `trajectory.json` with turn counts and token usage.
 - `final_runs/run_<id>/` with action logs and screenshots.
-- Webwright config snapshots with secrets redacted by browseruse-bench.
+- Webwright config snapshots created by Webwright. Treat these as sensitive for Lexmount/CDP runs because they may include the raw `remote_cdp_url`.
 
 browseruse-bench reads Webwright trajectory data back into `result.json`, including `metrics.steps` and model usage totals when available.
 
