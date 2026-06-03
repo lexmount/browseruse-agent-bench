@@ -27,7 +27,7 @@ class TestBuildTaskPrompt:
         prompt = AGENT.build_task_prompt(task_info)
         assert "Find the price" in prompt
         assert "https://example.com" in prompt
-        assert "Only use" in prompt
+        assert "Use only" in prompt
         assert "Starting URL" in prompt
 
     def test_no_url_returns_task_text_only(self):
@@ -69,15 +69,29 @@ class TestBuildTaskPrompt:
             "urls": ["https://example.com"],
         }
         prompt = AGENT.build_task_prompt(task_info)
-        assert "Only use https://example.com" in prompt
-        assert "Don't go to any other site" in prompt
+        assert "Use only https://example.com" in prompt
+        assert "do not navigate to unrelated third-party sites" in prompt
 
     def test_missing_urls_falls_back_to_single_site(self):
-        """If urls is absent, behaviour matches the pre-multi-site format."""
+        """If urls is absent, behaviour matches the single-site format."""
         task_info = {"task_text": "Find X", "url": "https://example.com"}
         prompt = AGENT.build_task_prompt(task_info)
-        assert "Only use https://example.com" in prompt
-        assert "Don't go to any other site" in prompt
+        assert "Use only https://example.com" in prompt
+        assert "do not navigate to unrelated third-party sites" in prompt
+
+    def test_single_site_allows_regional_subdomain_variants(self):
+        """A single-site task must treat regional/country variants of the same
+        site as on-site, so a region redirect (e.g. zalando.com ->
+        zalando.co.uk) is not mistaken for an off-site jump and refused."""
+        task_info = {"task_text": "Search on Zalando", "url": "https://www.zalando.com"}
+        prompt = AGENT.build_task_prompt(task_info)
+        assert "Use only https://www.zalando.com" in prompt
+        assert "same site" in prompt
+        assert "are allowed" in prompt
+        # The allowance must be generic, not a hardcoded list of country TLDs.
+        assert ".de" not in prompt
+        assert ".uk" not in prompt
+        assert ".cn" not in prompt
 
     def test_odysseys_allows_cross_site_navigation(self):
         """Odysseys tasks start from Google but intentionally span sites."""

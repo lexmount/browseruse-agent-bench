@@ -111,6 +111,7 @@ def load_tasks_with_benchmark_support(
     tasks_json_path: Path,
     prompt_fmt: Optional[str] = None,
     default_url: Optional[str] = None,
+    prompt_fmt_multi: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Load tasks with support for different benchmarks (including BrowseComp)
@@ -119,6 +120,9 @@ def load_tasks_with_benchmark_support(
         tasks_json_path: Path to tasks JSON file
         prompt_fmt: Optional prompt template (ignored for BrowseComp which has its own template)
         default_url: Optional default starting URL used when task URL is missing
+        prompt_fmt_multi: Optional template for multi-site tasks (``target_website``
+            listing several sites). Accepts ``{task}``, ``{url}`` and ``{urls}``.
+            Falls back to ``prompt_fmt`` when omitted.
 
     Returns:
         List of task dictionaries
@@ -127,13 +131,19 @@ def load_tasks_with_benchmark_support(
         logger.info("[INFO] BrowseComp benchmark detected")
         return _load_browsecomp_tasks(tasks_json_path, default_url=default_url)
     else:
-        return load_tasks(tasks_json_path, prompt_fmt=prompt_fmt, default_url=default_url)
+        return load_tasks(
+            tasks_json_path,
+            prompt_fmt=prompt_fmt,
+            default_url=default_url,
+            prompt_fmt_multi=prompt_fmt_multi,
+        )
 
 
 def load_tasks(
     tasks_json_path: str,
     prompt_fmt: Optional[str] = None,
     default_url: Optional[str] = None,
+    prompt_fmt_multi: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Load task data from JSON or JSONL file.
 
@@ -142,6 +152,10 @@ def load_tasks(
         prompt_fmt: Optional prompt template, format "{task}\n...{url}...".
                     If provided, a 'prompt' field will be added to the task dictionary.
         default_url: Optional default starting URL used when task URL is missing.
+        prompt_fmt_multi: Optional template applied to multi-site tasks
+                    (``len(urls) > 1``). Accepts ``{task}``, ``{url}`` (the first
+                    URL) and ``{urls}`` (comma-separated list). Falls back to
+                    ``prompt_fmt`` when omitted, preserving prior behaviour.
 
     Returns:
         List[Dict[str, Any]]: List of tasks, each containing task_id, task_text, url.
@@ -198,7 +212,15 @@ def load_tasks(
                     'url': url,
                     'urls': urls,
                 })
-                if prompt_fmt:
+                # Multi-site tasks (target_website listing several sites) use the
+                # multi-site template so they are not pinned to a single-site
+                # "use only" constraint. Falls back to prompt_fmt when no
+                # multi-site template was supplied.
+                if len(urls) > 1 and prompt_fmt_multi:
+                    task_dict['prompt'] = prompt_fmt_multi.format(
+                        task=task_text, url=url, urls=", ".join(urls)
+                    )
+                elif prompt_fmt:
                     task_dict['prompt'] = prompt_fmt.format(task=task_text, url=url)
                 tasks.append(task_dict)
     except (OSError, ValueError, TypeError) as exc:

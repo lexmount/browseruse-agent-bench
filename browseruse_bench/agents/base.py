@@ -49,9 +49,14 @@ class BaseAgent(ABC):
 
         Eliminates the duplicated prompt construction pattern across agents.
 
-        Multi-site tasks (``len(task_info["urls"]) > 1``) skip the
-        "Don't go to any other site" constraint, since the constraint would
-        contradict the requirement to use multiple sites.
+        Single-site tasks keep a "use only this site" constraint, but explicitly
+        treat regional/country variants of the same site (a different subdomain
+        or domain ending, e.g. ``zalando.com`` → ``zalando.co.uk``) as the same
+        site, so a region redirect is not mistaken for an off-site jump.
+
+        Multi-site tasks (``len(task_info["urls"]) > 1``) skip the single-site
+        constraint entirely, since it would contradict the requirement to use
+        multiple sites.
 
         Args:
             task_info: Dict with "task_text" (or "prompt"), "url", and
@@ -83,8 +88,10 @@ class BaseAgent(ABC):
         if url:
             return (
                 f"{task_text}\n"
-                f"Only use {url} to achieve the task. "
-                f"Don't go to any other site. Starting URL: {url}"
+                f"Use only {url} to achieve the task. Regional or country versions of "
+                f"the same site (a different subdomain or domain ending) count as the "
+                f"same site and are allowed; do not navigate to unrelated third-party "
+                f"sites. Starting URL: {url}"
             )
         return task_text
 

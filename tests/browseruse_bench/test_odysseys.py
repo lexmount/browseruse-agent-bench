@@ -32,23 +32,45 @@ class TestLoadTasksOdysseysFields:
     def test_odysseys_prompt_allows_cross_site_navigation(self):
         from browseruse_bench.cli.run import _prompt_format_for_benchmark
 
-        prompt = _prompt_format_for_benchmark("Odysseys").format(
+        prompt_fmt, prompt_fmt_multi = _prompt_format_for_benchmark("Odysseys")
+        prompt = prompt_fmt.format(
             task="Find evidence across Hulu and Wikipedia.",
             url="https://www.google.com",
         )
 
         assert "You may visit any websites needed" in prompt
         assert "Only use https://www.google.com" not in prompt
+        # Odysseys needs only one template; there is no multi-site variant.
+        assert prompt_fmt_multi is None
 
     def test_single_site_prompt_keeps_existing_constraint(self):
         from browseruse_bench.cli.run import _prompt_format_for_benchmark
 
-        prompt = _prompt_format_for_benchmark("LexBench-Browser").format(
+        prompt_fmt, _ = _prompt_format_for_benchmark("LexBench-Browser")
+        prompt = prompt_fmt.format(
             task="Find one page.",
             url="https://example.com",
         )
 
-        assert "Only use https://example.com" in prompt
+        assert "Use only https://example.com" in prompt
+        # Region redirects to the same site are allowed, off-site is not.
+        assert "do not navigate to unrelated third-party sites" in prompt
+
+    def test_multi_site_benchmark_prompt_lists_all_sites(self):
+        """LexBench multi-site tasks must NOT be pinned to a single-site
+        'use only' constraint via the CLI prompt path."""
+        from browseruse_bench.cli.run import _prompt_format_for_benchmark
+
+        _, prompt_fmt_multi = _prompt_format_for_benchmark("LexBench-Browser")
+        assert prompt_fmt_multi is not None
+        prompt = prompt_fmt_multi.format(
+            task="Compare ratings.",
+            url="https://movie.douban.com",
+            urls="https://movie.douban.com, https://imdb.com",
+        )
+        assert "https://movie.douban.com" in prompt
+        assert "https://imdb.com" in prompt
+        assert "Use only" not in prompt
 
 
 class TestOdysseysRegistry:

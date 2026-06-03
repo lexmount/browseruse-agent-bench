@@ -35,7 +35,7 @@ def test_run_agent_installs_dependencies_for_existing_venv(
     monkeypatch.setattr(
         run_module,
         "load_tasks_with_benchmark_support",
-        lambda benchmark_data, prompt_fmt, default_url: [
+        lambda benchmark_data, prompt_fmt, default_url, prompt_fmt_multi=None: [
             {"task_id": "task-1", "task_text": "Open page", "url": "https://example.com"}
         ],
     )
@@ -111,7 +111,7 @@ def _patch_minimal_run_dependencies(
     monkeypatch.setattr(
         run_module,
         "load_tasks_with_benchmark_support",
-        lambda benchmark_data, prompt_fmt, default_url: [
+        lambda benchmark_data, prompt_fmt, default_url, prompt_fmt_multi=None: [
             {"task_id": "task-1", "task_text": "Open page", "url": "https://example.com"}
         ],
     )

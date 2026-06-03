@@ -142,24 +142,48 @@ def resolve_data_file(benchmark_path: Path, split: str | None) -> str:
     raise SystemExit("[FAILED] data_info.json format is incorrect, must include split")
 
 
-def _prompt_format_for_benchmark(benchmark_name: str) -> str:
-    """Return benchmark-specific task prompt formatting."""
+_AVOID_LOOPS_TAIL = (
+    "Avoid action loops: do not repeatedly switch between the same tabs or click the same filter "
+    "more than twice. If a filter has no data after 1 retry, fallback to available results, "
+    "return the best-effort answer with clear uncertainty, and finish."
+)
+
+
+def _prompt_format_for_benchmark(benchmark_name: str) -> tuple[str, str | None]:
+    """Return ``(prompt_fmt, prompt_fmt_multi)`` for the benchmark.
+
+    ``prompt_fmt`` is the single-site template (placeholders ``{task}`` and
+    ``{url}``). ``prompt_fmt_multi`` is the template for tasks whose
+    ``target_website`` lists several sites (e.g. ``a.com + b.com``); it adds a
+    ``{urls}`` placeholder for the full site list. ``load_tasks`` picks one of
+    the two per task based on how many URLs the task declares, so a multi-site
+    task is never pinned to a single-site "use only" constraint.
+
+    The second element is ``None`` for benchmarks that need only one template
+    (Odysseys is already permissive across sites).
+    """
     if benchmark_name == "Odysseys":
-        return (
+        prompt_fmt = (
             "{task}\n"
             "Start from {url}. You may visit any websites needed to complete the task, "
             "and keep requested proof pages open when the task asks for visual evidence.\n"
-            "Avoid action loops: do not repeatedly switch between the same tabs or click the same filter "
-            "more than twice. If a filter has no data after 1 retry, fallback to available results, "
-            "return the best-effort answer with clear uncertainty, and finish."
+            + _AVOID_LOOPS_TAIL
         )
-    return (
+        return prompt_fmt, None
+    prompt_fmt = (
         "{task}\n"
-        "Only use {url} to achieve the task. Don't go to any other site. Starting URL: {url}\n"
-        "Avoid action loops: do not repeatedly switch between the same tabs or click the same filter "
-        "more than twice. If a filter has no data after 1 retry, fallback to available results, "
-        "return the best-effort answer with clear uncertainty, and finish."
+        "Use only {url} to achieve the task. Regional or country versions of the same "
+        "site (a different subdomain or domain ending) count as the same site and are "
+        "allowed; do not navigate to unrelated third-party sites. Starting URL: {url}\n"
+        + _AVOID_LOOPS_TAIL
     )
+    prompt_fmt_multi = (
+        "{task}\n"
+        "You may use the following websites to complete the task: {urls}. "
+        "Start with {url}.\n"
+        + _AVOID_LOOPS_TAIL
+    )
+    return prompt_fmt, prompt_fmt_multi
 
 
 # Running subprocesses (keyed by pid) — accessed by signal handler.
@@ -560,11 +584,12 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
 
     # Load tasks
     default_task_url = config.get("default", {}).get("task_start_url")
-    prompt_fmt = _prompt_format_for_benchmark(benchmark_name)
+    prompt_fmt, prompt_fmt_multi = _prompt_format_for_benchmark(benchmark_name)
     tasks = load_tasks_with_benchmark_support(
         benchmark_data,
         prompt_fmt=prompt_fmt,
         default_url=default_task_url,
+        prompt_fmt_multi=prompt_fmt_multi,
     )
     if not tasks:
         raise SystemExit(f"No tasks found in {benchmark_data}")
