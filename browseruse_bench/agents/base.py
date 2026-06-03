@@ -49,16 +49,23 @@ class BaseAgent(ABC):
 
         Eliminates the duplicated prompt construction pattern across agents.
 
-        Multi-site tasks (``len(task_info["urls"]) > 1``) skip the
-        "Don't go to any other site" constraint, since the constraint would
-        contradict the requirement to use multiple sites.
+        The constraint strictness is controlled by ``task_info["only_use"]``:
+        - ``True``  → strict: agent must stay on the listed site(s) (regional
+          subdomains like .de/.uk/.cn are still allowed for single-site tasks).
+          Used when the user's query explicitly named the site(s) (e.g.
+          "Search X on Amazon", "在 B 站找…").
+        - ``False`` → permissive: the URL is only a suggested starting point
+          and the agent is free to navigate elsewhere. Used when the user's
+          query did NOT name a site (generic info-finding like "find me a
+          recipe", or safety-test tasks where the agent should refuse).
 
         Args:
-            task_info: Dict with "task_text" (or "prompt"), "url", and
-                optional "urls" (list[str]) keys. ``urls`` is populated by
+            task_info: Dict with "task_text" (or "prompt"), "url",
+                optional "urls" (list[str]) keys, and an "only_use" bool
+                (defaults to ``False`` if missing). ``urls`` is populated by
                 ``load_tasks`` for ``target_website`` values containing ``+``.
             template: Optional format string accepting {task_text} and {url}.
-                      Defaults to the standard single-site constraint format.
+                      When provided, bypasses the only_use branching.
 
         Returns:
             Formatted prompt ready to pass to the agent.
@@ -74,17 +81,30 @@ class BaseAgent(ABC):
                 "and keep requested proof pages open when the task asks for visual evidence."
             )
         urls = task_info.get("urls") or ([url] if url else [])
+        only_use = bool(task_info.get("only_use", False))
         if len(urls) > 1:
+            if only_use:
+                return (
+                    f"{task_text}\n"
+                    f"Stay within these websites only: {', '.join(urls)}. "
+                    f"Do not navigate to any other sites. Start with {urls[0]}."
+                )
             return (
                 f"{task_text}\n"
                 f"You may use the following websites to complete the task: {', '.join(urls)}\n"
                 f"Start with {urls[0]}"
             )
         if url:
+            if only_use:
+                return (
+                    f"{task_text}\n"
+                    f"Use only {url} (regional subdomains like .de/.uk/.cn are OK if needed) "
+                    f"to achieve the task. Do not navigate to any unrelated sites. "
+                    f"Starting URL: {url}"
+                )
             return (
                 f"{task_text}\n"
-                f"Only use {url} to achieve the task. "
-                f"Don't go to any other site. Starting URL: {url}"
+                f"Suggested starting URL: {url}, but you may navigate to other sites if needed."
             )
         return task_text
 

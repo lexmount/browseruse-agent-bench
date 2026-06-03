@@ -416,8 +416,11 @@ class ClaudeCodeAgent(CLIAgent):
         """Execute a browser automation task using Claude Code CLI."""
         warn_if_local_proxy_unsupported(agent_config, self.name)
         task_id = task_info["task_id"]
-        task_text = task_info.get("prompt") or task_info.get("task_text", "")
-        url = task_info.get("url", "")
+        # Prefer the pre-formatted prompt injected by cli/run.py (already contains
+        # the "Suggested starting URL" line + the "Avoid action loops" reminder);
+        # fall back to BaseAgent.build_task_prompt for direct (non-CLI) callers
+        # so the suggested-URL line is still added once.
+        prompt = task_info.get("prompt") or self.build_task_prompt(task_info)
 
         model = agent_config.get("model_id") or agent_config.get("model", "claude-sonnet-4-6")
         max_turns = int(agent_config.get("max_turns", 50))
@@ -430,15 +433,6 @@ class ClaudeCodeAgent(CLIAgent):
 
         allowed_tools = agent_config.get("allowed_tools", "mcp__playwright*")
         system_prompt = agent_config.get("system_prompt") or _DEFAULT_SYSTEM_PROMPT
-
-        if url:
-            prompt = (
-                f"{task_text}\n"
-                f"Only use {url} to achieve the task. "
-                f"Do not go to any other site. Starting URL: {url}"
-            )
-        else:
-            prompt = task_text
 
         api_key = agent_config.get("api_key")
         base_url = agent_config.get("base_url")

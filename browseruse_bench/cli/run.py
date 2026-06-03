@@ -142,24 +142,45 @@ def resolve_data_file(benchmark_path: Path, split: str | None) -> str:
     raise SystemExit("[FAILED] data_info.json format is incorrect, must include split")
 
 
-def _prompt_format_for_benchmark(benchmark_name: str) -> str:
-    """Return benchmark-specific task prompt formatting."""
-    if benchmark_name == "Odysseys":
-        return (
-            "{task}\n"
-            "Start from {url}. You may visit any websites needed to complete the task, "
-            "and keep requested proof pages open when the task asks for visual evidence.\n"
-            "Avoid action loops: do not repeatedly switch between the same tabs or click the same filter "
-            "more than twice. If a filter has no data after 1 retry, fallback to available results, "
-            "return the best-effort answer with clear uncertainty, and finish."
-        )
-    return (
-        "{task}\n"
-        "Only use {url} to achieve the task. Don't go to any other site. Starting URL: {url}\n"
+def _prompt_format_for_benchmark(benchmark_name: str) -> tuple[str, str | None]:
+    """Return ``(prompt_fmt, prompt_fmt_only_use)`` for the benchmark.
+
+    The second element is only populated for benchmarks that differentiate
+    prompt strictness per-task via the ``only_use`` flag in the JSONL
+    (currently LexBench-Browser): permissive when the user's query did NOT
+    name a specific site (generic info-finding, safety/refusal tasks);
+    strict when the user explicitly named the site (e.g. "Search X on
+    Amazon", "在 B 站找…"). ``load_tasks`` picks one of the two per task.
+
+    Returns ``None`` for ``prompt_fmt_only_use`` on benchmarks that keep a
+    single uniform format (Odysseys, etc.).
+    """
+    _avoid_loops_tail = (
         "Avoid action loops: do not repeatedly switch between the same tabs or click the same filter "
         "more than twice. If a filter has no data after 1 retry, fallback to available results, "
         "return the best-effort answer with clear uncertainty, and finish."
     )
+    if benchmark_name == "Odysseys":
+        prompt_fmt = (
+            "{task}\n"
+            "Start from {url}. You may visit any websites needed to complete the task, "
+            "and keep requested proof pages open when the task asks for visual evidence.\n"
+            + _avoid_loops_tail
+        )
+        return prompt_fmt, None
+    prompt_fmt = (
+        "{task}\n"
+        "Suggested starting URL: {url}, but you may navigate to other sites if needed.\n"
+        + _avoid_loops_tail
+    )
+    prompt_fmt_only_use = (
+        "{task}\n"
+        "Use only {url} (subdomains are OK if needed) "
+        "to achieve the task. Do not navigate to any unrelated sites. "
+        "Starting URL: {url}\n"
+        + _avoid_loops_tail
+    )
+    return prompt_fmt, prompt_fmt_only_use
 
 
 # Running subprocesses (keyed by pid) — accessed by signal handler.
@@ -560,11 +581,12 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
 
     # Load tasks
     default_task_url = config.get("default", {}).get("task_start_url")
-    prompt_fmt = _prompt_format_for_benchmark(benchmark_name)
+    prompt_fmt, prompt_fmt_only_use = _prompt_format_for_benchmark(benchmark_name)
     tasks = load_tasks_with_benchmark_support(
         benchmark_data,
         prompt_fmt=prompt_fmt,
         default_url=default_task_url,
+        prompt_fmt_only_use=prompt_fmt_only_use,
     )
     if not tasks:
         raise SystemExit(f"No tasks found in {benchmark_data}")

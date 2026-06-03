@@ -111,6 +111,7 @@ def load_tasks_with_benchmark_support(
     tasks_json_path: Path,
     prompt_fmt: Optional[str] = None,
     default_url: Optional[str] = None,
+    prompt_fmt_only_use: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Load tasks with support for different benchmarks (including BrowseComp)
@@ -119,6 +120,9 @@ def load_tasks_with_benchmark_support(
         tasks_json_path: Path to tasks JSON file
         prompt_fmt: Optional prompt template (ignored for BrowseComp which has its own template)
         default_url: Optional default starting URL used when task URL is missing
+        prompt_fmt_only_use: Optional stricter prompt template for tasks whose
+            JSONL record has ``only_use: true``. When not provided, ``prompt_fmt``
+            is used regardless of the ``only_use`` flag.
 
     Returns:
         List of task dictionaries
@@ -127,13 +131,19 @@ def load_tasks_with_benchmark_support(
         logger.info("[INFO] BrowseComp benchmark detected")
         return _load_browsecomp_tasks(tasks_json_path, default_url=default_url)
     else:
-        return load_tasks(tasks_json_path, prompt_fmt=prompt_fmt, default_url=default_url)
+        return load_tasks(
+            tasks_json_path,
+            prompt_fmt=prompt_fmt,
+            default_url=default_url,
+            prompt_fmt_only_use=prompt_fmt_only_use,
+        )
 
 
 def load_tasks(
     tasks_json_path: str,
     prompt_fmt: Optional[str] = None,
     default_url: Optional[str] = None,
+    prompt_fmt_only_use: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Load task data from JSON or JSONL file.
 
@@ -142,6 +152,9 @@ def load_tasks(
         prompt_fmt: Optional prompt template, format "{task}\n...{url}...".
                     If provided, a 'prompt' field will be added to the task dictionary.
         default_url: Optional default starting URL used when task URL is missing.
+        prompt_fmt_only_use: Optional alternate template applied to tasks whose
+                    JSONL record has ``only_use: true``. Falls back to
+                    ``prompt_fmt`` when omitted.
 
     Returns:
         List[Dict[str, Any]]: List of tasks, each containing task_id, task_text, url.
@@ -198,8 +211,18 @@ def load_tasks(
                     'url': url,
                     'urls': urls,
                 })
-                if prompt_fmt:
-                    task_dict['prompt'] = prompt_fmt.format(task=task_text, url=url)
+                # Pick prompt template based on only_use flag (manually labelled
+                # per-task in JSONL). When prompt_fmt_only_use is omitted, falls
+                # back to prompt_fmt regardless of the flag — preserves prior
+                # behaviour for callers that haven't opted in.
+                only_use_flag = bool(it.get("only_use", False))
+                active_fmt = (
+                    prompt_fmt_only_use
+                    if only_use_flag and prompt_fmt_only_use is not None
+                    else prompt_fmt
+                )
+                if active_fmt:
+                    task_dict['prompt'] = active_fmt.format(task=task_text, url=url)
                 tasks.append(task_dict)
     except (OSError, ValueError, TypeError) as exc:
         logger.exception("[FAILED] Failed to load tasks from %s: %s", tasks_json_path, exc)
