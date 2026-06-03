@@ -22,6 +22,36 @@ You are a professional AI Agent task evaluation expert. Please evaluate the task
 ## Scoring Criteria (Total 100)
 {scoring_items}
 
+## Important Principle — Site-state Exception
+
+The steps, options, and filter conditions in the reference answer are based on
+a snapshot of the website at dataset-creation time and may have drifted from
+the current live site. When evaluating, if the Agent satisfies BOTH of the
+following conditions, score based on "did the agent make a reasonable judgment
+and honestly inform the user", rather than mechanically comparing against the
+reference:
+
+1. The final screenshot clearly shows that a reference-required option
+   (a button, filter, category, sort order, brand, colour, price range,
+   field, etc.) no longer exists on the current live site, has been renamed,
+   or the option set has changed.
+2. The Agent's final answer explicitly informs the user of this limitation
+   (offering a reasonable substitute is encouraged but NOT required).
+
+When both conditions hold, score the relevant item with:
+- Identified the limitation + honest disclosure (with or without substitute) → 80–100%
+- Neither identified nor disclosed (agent fabricated an option / data that
+  does not exist on the site) → 0%
+
+If the Agent merely CLAIMS an option doesn't exist but the final screenshot
+cannot corroborate the claim, treat it as "not completed" — this exception
+does NOT apply.
+
+Important scope: this exception applies ONLY to "a reference-required option
+has changed on the site". Do not generalise it into an overall stricter check
+on "answer-vs-screenshot consistency". Other scoring items keep their usual
+criteria.
+
 ## Agent Execution
 - Steps Count: {steps_count}
 - Execution Time: {execution_time}ms
