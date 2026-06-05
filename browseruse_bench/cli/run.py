@@ -5,6 +5,7 @@ import json
 import os
 import re
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -314,6 +315,17 @@ def _write_run_manifest(
         logger.info("Config snapshot written to %s", config_snapshot_path)
     except OSError as exc:
         logger.warning("Failed to write config_snapshot.json: %s", exc)
+
+
+def _reset_task_workspace(task_workspace: Path) -> None:
+    """Start one task run from an empty workspace."""
+    if task_workspace.is_symlink() or task_workspace.is_file():
+        task_workspace.unlink()
+    elif task_workspace.exists():
+        shutil.rmtree(task_workspace)
+    task_workspace.mkdir(parents=True, exist_ok=True)
+
+
 _processes_lock = __import__("threading").Lock()
 
 
@@ -686,7 +698,7 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
         logger.info("\n%s\n%s %s…\n%s", "=" * 80, prefix, task_text, "=" * 80)
 
         task_workspace = output_dir / "tasks" / current_task_id
-        task_workspace.mkdir(parents=True, exist_ok=True)
+        _reset_task_workspace(task_workspace)
         session_state_file = task_workspace / ".browser_session_state.json"
         session_state_file.unlink(missing_ok=True)
         task_info = {**task_info, "benchmark_name": benchmark_name}
