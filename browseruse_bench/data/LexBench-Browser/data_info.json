@@ -3,7 +3,8 @@
   "split": {
     "All": "task.jsonl",
     "lexmount": "task_lexmount.jsonl",
-    "global": "task_global.jsonl"
+    "global": "task_global.jsonl",
+    "sample50": "task_sample50.jsonl"
   },
   "version_info": {
     "LexBench-Browser": {
