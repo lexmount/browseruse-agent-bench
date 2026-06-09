@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterator
+from typing import Any
 
 import pytest
 
@@ -18,13 +19,13 @@ def test_run_task_uses_backend_manager_session_context(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    captured: Dict[str, Any] = {}
+    captured: dict[str, Any] = {}
 
     @contextmanager
     def fake_open_browser_session(
         browser_id: str,
         agent_name: str,
-        agent_config: Dict[str, Any],
+        agent_config: dict[str, Any],
     ) -> Iterator[BrowserSessionContext]:
         captured["browser_id"] = browser_id
         captured["agent_name"] = agent_name
@@ -37,13 +38,13 @@ def test_run_task_uses_backend_manager_session_context(
 
     async def fake_run_task_async(
         self: BrowserUseAgent,
-        task_info: Dict[str, Any],
+        task_info: dict[str, Any],
         task_workspace: Path,
         timeout: int,
         flash_mode: bool,
-        agent_config: Dict[str, Any],
+        agent_config: dict[str, Any],
         session_context: BrowserSessionContext,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         captured["session_context"] = session_context
         captured["timeout"] = timeout
         captured["flash_mode"] = flash_mode
@@ -81,6 +82,78 @@ def test_run_task_rejects_unknown_backend(tmp_path: Path) -> None:
             agent_config={"BROWSER_ID": "not-exists"},
             task_workspace=tmp_path,
         )
+
+
+def test_browser_use_browser_extends_sdk_cdp_connect_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_timeouts: list[float | None] = []
+
+    async def fake_wait_for(fut: Any, timeout: float | None = None) -> Any:
+        observed_timeouts.append(timeout)
+        return await fut
+
+    async def fake_start(self: Any) -> str:
+        del self
+
+        async def ready() -> str:
+            return "started"
+
+        return await browser_use_module.browser_use_session_module.asyncio.wait_for(
+            ready(),
+            timeout=15.0,
+        )
+
+    async def fake_auto_reconnect(self: Any) -> str:
+        del self
+
+        async def ready() -> str:
+            return "reconnected"
+
+        return await browser_use_module.browser_use_session_module.asyncio.wait_for(
+            ready(),
+            timeout=15.0,
+        )
+
+    monkeypatch.setattr(
+        browser_use_module.browser_use_session_module.asyncio,
+        "wait_for",
+        fake_wait_for,
+    )
+    monkeypatch.setattr(browser_use_module.BrowserUseSDKBrowser, "start", fake_start)
+    monkeypatch.setattr(
+        browser_use_module.BrowserUseSDKBrowser,
+        "_auto_reconnect",
+        fake_auto_reconnect,
+    )
+
+    browser = browser_use_module.Browser(cdp_url="wss://agentbay.example/cdp")
+
+    assert asyncio.run(browser.start()) == "started"
+    assert asyncio.run(browser._auto_reconnect()) == "reconnected"
+    assert observed_timeouts == [
+        browser_use_module.BROWSER_USE_CDP_CONNECT_TIMEOUT_SECONDS,
+        browser_use_module.BROWSER_USE_CDP_CONNECT_TIMEOUT_SECONDS,
+    ]
+    assert browser_use_module.browser_use_session_module.asyncio.wait_for is fake_wait_for
+
+
+def test_browser_use_browser_rewrites_sdk_cdp_timeout_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_start(self: Any) -> None:
+        del self
+        raise RuntimeError(
+            "connect() timed out after 15s - CDP connection to wss://lexmount.example/cdp "
+            "is too slow or unresponsive"
+        )
+
+    monkeypatch.setattr(browser_use_module.BrowserUseSDKBrowser, "start", fake_start)
+
+    browser = browser_use_module.Browser(cdp_url="wss://lexmount.example/cdp")
+
+    with pytest.raises(RuntimeError, match="timed out after 30s"):
+        asyncio.run(browser.start())
 
 
 def test_create_browser_instance_rejects_cloud_transport_for_unknown_backend() -> None:
@@ -171,7 +244,7 @@ def test_run_task_async_tolerates_temp_dir_cleanup_error(
 def test_create_browser_instance_passes_local_proxy_to_browser(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: Dict[str, Any] = {}
+    captured: dict[str, Any] = {}
 
     class FakeBrowser:
         def __init__(self, **kwargs: Any) -> None:
@@ -208,7 +281,7 @@ def test_create_browser_instance_passes_local_proxy_to_browser(
 def test_create_browser_instance_no_proxy_omits_kwarg(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: Dict[str, Any] = {}
+    captured: dict[str, Any] = {}
 
     class FakeBrowser:
         def __init__(self, **kwargs: Any) -> None:
