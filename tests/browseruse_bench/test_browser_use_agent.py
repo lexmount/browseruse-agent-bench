@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterator
+from typing import Any
 
 import pytest
 
@@ -18,13 +19,13 @@ def test_run_task_uses_backend_manager_session_context(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    captured: Dict[str, Any] = {}
+    captured: dict[str, Any] = {}
 
     @contextmanager
     def fake_open_browser_session(
         browser_id: str,
         agent_name: str,
-        agent_config: Dict[str, Any],
+        agent_config: dict[str, Any],
     ) -> Iterator[BrowserSessionContext]:
         captured["browser_id"] = browser_id
         captured["agent_name"] = agent_name
@@ -37,13 +38,13 @@ def test_run_task_uses_backend_manager_session_context(
 
     async def fake_run_task_async(
         self: BrowserUseAgent,
-        task_info: Dict[str, Any],
+        task_info: dict[str, Any],
         task_workspace: Path,
         timeout: int,
         flash_mode: bool,
-        agent_config: Dict[str, Any],
+        agent_config: dict[str, Any],
         session_context: BrowserSessionContext,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         captured["session_context"] = session_context
         captured["timeout"] = timeout
         captured["flash_mode"] = flash_mode
@@ -159,8 +160,146 @@ def test_run_task_async_tolerates_temp_dir_cleanup_error(
         )
     )
 
-    assert result.env_status.value == "success"
+    assert result.env_status.value == "failed"
+    assert result.agent_done.value == "error"
+    assert result.error == "Agent returned no history before completion"
     assert any("Failed to cleanup temporary directory" in record.message for record in caplog.records)
+
+
+def test_run_task_async_maps_early_unfinished_history_to_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class FakeHistory:
+        history: list[Any] = []
+
+        def extracted_content(self) -> list[str]:
+            return ["Waited for 3 seconds"]
+
+        def number_of_steps(self) -> int:
+            return 4
+
+        def screenshots(self) -> list[str]:
+            return []
+
+        def errors(self) -> list[str | None]:
+            return [None, None, None, None]
+
+        def is_done(self) -> bool:
+            return False
+
+        def final_result(self) -> str:
+            return "Waited for 3 seconds"
+
+    class FakeAgent:
+        def __init__(self, **_: Any) -> None:
+            self.history = FakeHistory()
+
+        async def run(self, max_steps: int) -> FakeHistory:
+            assert max_steps == 40
+            return self.history
+
+    class FakeBrowser:
+        async def stop(self) -> None:
+            return None
+
+    monkeypatch.setattr(browser_use_module, "Agent", FakeAgent)
+    monkeypatch.setattr(
+        BrowserUseAgent,
+        "_create_browser_instance",
+        staticmethod(lambda session_context: (FakeBrowser(), None)),
+    )
+    monkeypatch.setattr(
+        BrowserUseAgent,
+        "_create_llm",
+        lambda self, model_type, model_id, agent_config, config_info: object(),
+    )
+
+    result = asyncio.run(
+        BrowserUseAgent()._run_task_async(
+            task_info={"task_id": "t-incomplete", "task_text": "search", "url": "https://example.com"},
+            task_workspace=tmp_path,
+            timeout=600,
+            flash_mode=False,
+            agent_config={"MODEL_TYPE": "OPENAI", "MODEL_ID": "gpt-test", "SAVE_API_LOGS": False},
+            session_context=BrowserSessionContext(backend_id="Chrome-Local", transport="local"),
+        )
+    )
+
+    assert result.env_status.value == "failed"
+    assert result.agent_done.value == "error"
+    assert result.agent_success is None
+    assert result.metrics.steps == 4
+    assert result.error == "Agent stopped before completion after 4 steps without reporting done"
+    assert result.answer == "[Task Failed: Agent stopped before completion after 4 steps without reporting done]"
+
+
+def test_run_task_async_keeps_real_max_steps_status(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class FakeHistory:
+        history: list[Any] = []
+
+        def extracted_content(self) -> list[str]:
+            return []
+
+        def number_of_steps(self) -> int:
+            return 40
+
+        def screenshots(self) -> list[str]:
+            return []
+
+        def errors(self) -> list[str | None]:
+            return [None, "Failed to complete task in maximum steps"]
+
+        def is_done(self) -> bool:
+            return False
+
+        def final_result(self) -> str:
+            return "last non-final content"
+
+    class FakeAgent:
+        def __init__(self, **_: Any) -> None:
+            self.history = FakeHistory()
+
+        async def run(self, max_steps: int) -> FakeHistory:
+            assert max_steps == 40
+            return self.history
+
+    class FakeBrowser:
+        async def stop(self) -> None:
+            return None
+
+    monkeypatch.setattr(browser_use_module, "Agent", FakeAgent)
+    monkeypatch.setattr(
+        BrowserUseAgent,
+        "_create_browser_instance",
+        staticmethod(lambda session_context: (FakeBrowser(), None)),
+    )
+    monkeypatch.setattr(
+        BrowserUseAgent,
+        "_create_llm",
+        lambda self, model_type, model_id, agent_config, config_info: object(),
+    )
+
+    result = asyncio.run(
+        BrowserUseAgent()._run_task_async(
+            task_info={"task_id": "t-max", "task_text": "search", "url": "https://example.com"},
+            task_workspace=tmp_path,
+            timeout=600,
+            flash_mode=False,
+            agent_config={"MODEL_TYPE": "OPENAI", "MODEL_ID": "gpt-test", "SAVE_API_LOGS": False},
+            session_context=BrowserSessionContext(backend_id="Chrome-Local", transport="local"),
+        )
+    )
+
+    assert result.env_status.value == "success"
+    assert result.agent_done.value == "max_steps"
+    assert result.agent_success is None
+    assert result.metrics.steps == 40
+    assert result.error == "Failed to complete task in maximum steps"
+    assert result.answer == "[Task Failed: Failed to complete task in maximum steps]"
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +310,7 @@ def test_run_task_async_tolerates_temp_dir_cleanup_error(
 def test_create_browser_instance_passes_local_proxy_to_browser(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: Dict[str, Any] = {}
+    captured: dict[str, Any] = {}
 
     class FakeBrowser:
         def __init__(self, **kwargs: Any) -> None:
@@ -208,7 +347,7 @@ def test_create_browser_instance_passes_local_proxy_to_browser(
 def test_create_browser_instance_no_proxy_omits_kwarg(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: Dict[str, Any] = {}
+    captured: dict[str, Any] = {}
 
     class FakeBrowser:
         def __init__(self, **kwargs: Any) -> None:

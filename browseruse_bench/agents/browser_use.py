@@ -19,12 +19,12 @@ from typing import Any
 
 from browser_use import Agent as BrowserUseSDKAgent
 from browser_use import Browser as BrowserUseSDKBrowser
-from browser_use.browser.profile import ProxySettings as BrowserUseProxySettings
 from browser_use import ChatAnthropic as BrowserUseSDKChatAnthropic
 from browser_use import ChatAzureOpenAI as BrowserUseSDKChatAzureOpenAI
 from browser_use import ChatBrowserUse as BrowserUseSDKChatBrowserUse
 from browser_use import ChatGoogle as BrowserUseSDKChatGoogle
 from browser_use import ChatOpenAI as BrowserUseSDKChatOpenAI
+from browser_use.browser.profile import ProxySettings as BrowserUseProxySettings
 
 from browseruse_bench.agents.base import BaseAgent
 from browseruse_bench.agents.registry import register_agent
@@ -43,11 +43,46 @@ ChatOpenAI: type[Any] = BrowserUseSDKChatOpenAI
 logger = logging.getLogger(__name__)
 
 
+_MAX_STEPS_ERROR = "Failed to complete task in maximum steps"
+
+
 def _get_config_value(agent_config: dict[str, Any], *keys: str, default: Any = None) -> Any:
     for key in keys:
         if key in agent_config and agent_config[key] is not None:
             return agent_config[key]
     return default
+
+
+def _history_errors(history: Any) -> list[str]:
+    errors = getattr(history, "errors", None)
+    if not callable(errors):
+        return []
+    try:
+        raw_errors = errors() or []
+    except (AttributeError, TypeError, ValueError):
+        return []
+    return [error for error in raw_errors if isinstance(error, str) and error]
+
+
+def _history_reached_max_steps(
+    *,
+    history_errors: list[str],
+    steps_count: int,
+    max_steps: int,
+) -> bool:
+    if steps_count >= max_steps:
+        return True
+    return any("maximum steps" in error.lower() or "max steps" in error.lower() for error in history_errors)
+
+
+def _unfinished_history_error(
+    *,
+    history_errors: list[str],
+    steps_count: int,
+) -> str:
+    if history_errors:
+        return history_errors[-1]
+    return f"Agent stopped before completion after {steps_count} steps without reporting done"
 
 
 @register_agent
@@ -286,14 +321,39 @@ class BrowserUseAgent(BaseAgent):
                     except Exception as exc:
                         logger.warning(f"Failed to generate API logs for task {task_id}: {exc}")
 
-        final_answer = ""
-        if not error_msg and history:
-            final_answer = history.final_result() or ""
-        elif error_msg:
-            final_answer = f"[Task Failed: {error_msg}]"
-
         # Determine env_status, agent_done, and agent_success
         agent_success: bool | None = None
+        history_errors = _history_errors(history) if history else []
+        max_steps_reached = (
+            _history_reached_max_steps(
+                history_errors=history_errors,
+                steps_count=steps_count,
+                max_steps=max_steps,
+            )
+            if history
+            else False
+        )
+        unfinished_error = None
+        if not error_msg and history and not history.is_done():
+            unfinished_error = (
+                _MAX_STEPS_ERROR
+                if max_steps_reached
+                else _unfinished_history_error(
+                    history_errors=history_errors,
+                    steps_count=steps_count,
+                )
+            )
+        elif not error_msg and not history:
+            unfinished_error = "Agent returned no history before completion"
+
+        final_answer = ""
+        if error_msg:
+            final_answer = f"[Task Failed: {error_msg}]"
+        elif history and history.is_done():
+            final_answer = history.final_result() or ""
+        elif unfinished_error:
+            final_answer = f"[Task Failed: {unfinished_error}]"
+
         if error_msg and "Timeout" in error_msg:
             # Timeout: environment is fine, agent was killed by timeout
             env_status = "success"
@@ -307,10 +367,12 @@ class BrowserUseAgent(BaseAgent):
             env_status = "success"
             agent_done = "done"
             agent_success = history.is_successful()
-        else:
-            # No error but agent didn't self-report done → max_steps
+        elif max_steps_reached:
             env_status = "success"
             agent_done = "max_steps"
+        else:
+            env_status = "failed"
+            agent_done = "error"
 
         return AgentResult(
             task_id=task_id,
@@ -330,7 +392,7 @@ class BrowserUseAgent(BaseAgent):
                 usage=AgentUsage(**usage_data) if usage_data else None,
             ),
             config=config_info,
-            error=error_msg if error_msg else None,
+            error=error_msg or unfinished_error,
         )
 
     def _create_llm(
