@@ -139,19 +139,18 @@ from browseruse_bench.agents import my_agent  # noqa: F401
 
 ### 3. Register in config
 
-In the root `config.yaml` under `agents`:
+In the root `config.yaml`, add a shared model and agent runtime fields:
 
 ```yaml
+models:
+  my-agent-default:
+    model_id: your-model-id
+    api_key: $YOUR_API_KEY
+
 agents:
   my-agent:
-    active_model: default
-    models:
-      default:
-        model_id: your-model-id
-        api_key: $YOUR_API_KEY
-    defaults:
-      timeout: 300
-      max_steps: 40
+    timeout: 300
+    max_steps: 40
 ```
 
 Also add metadata to `configs/agent_registry.yaml`:
@@ -347,7 +346,7 @@ Optional but recommended: `answer` (`str`) — the agent's final answer string, 
 
 **`task_info`** is loaded from the benchmark dataset. Standard fields: `task_id`, `task_text`, `url`, `prompt` (optional).
 
-**`agent_config`** comes from `agents.<agent>.models[active_model]` in root `config.yaml`. The framework injects `timeout_seconds` at runtime.
+**`agent_config`** is resolved from root `config.yaml` as `agents.<agent> + models.<model> + browsers.<browser>`. The framework injects `timeout_seconds` at runtime.
 
 **`task_workspace`** is the per-task output directory (`<output_dir>/tasks/<task_id>/`). The framework writes `result.json` there; you can write screenshots, logs, or any artifacts alongside it.
 

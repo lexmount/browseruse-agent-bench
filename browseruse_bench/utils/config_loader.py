@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import uuid
 import warnings
 from copy import deepcopy
 from pathlib import Path
@@ -18,6 +19,11 @@ from browseruse_bench.utils.repo_root import REPO_ROOT
 
 logger = logging.getLogger(__name__)
 _EVAL_STRUCTURAL_KEYS = {"api_key", "base_url"}
+
+
+def _skyvern_temp_database_string() -> str:
+    db_name = f"bubench_skyvern_{uuid.uuid4().hex}"
+    return f"postgresql+psycopg:///{db_name}?host=/tmp"
 
 
 def load_eval_config(benchmark_name: str) -> dict[str, Any]:
@@ -223,15 +229,21 @@ def resolve_agent_inline_config(
     agent: str,
     root_config: dict[str, Any],
     model_name: str | None = None,
+    browser_id: str | None = None,
 ) -> dict[str, Any] | None:
-    """Resolve runtime config from root config's agents.<agent>.models[selected_model].
+    """Resolve runtime config for an agent/model/browser selection.
 
-    Merges agent-level defaults with model-specific params (model params win).
+    New-style root config resolves as:
+    ``agents.<agent> runtime fields + models.<selected_model> + browsers.<selected_browser>``.
+
+    Legacy root config remains supported and resolves as:
+    ``agents.<agent>.browser + agents.<agent>.defaults + agents.<agent>.models.<selected_model>``.
 
     Args:
         agent: Agent name.
         root_config: Root configuration dictionary.
         model_name: Optional explicit model key override.
+        browser_id: Optional explicit browser backend key override.
 
     Returns:
         Dict with runtime params, or None if not using inline model config.
@@ -239,12 +251,45 @@ def resolve_agent_inline_config(
     agents = root_config.get("agents", {})
     agent = _resolve_agent_key(agent, agents)
     agent_entry = agents.get(agent, {})
+
+    structural_agent_keys = {
+        "active_model",
+        "active_browser",
+        "models",
+        "browser",
+        "defaults",
+    }
+    agent_defaults = {
+        key: value
+        for key, value in agent_entry.items()
+        if key not in structural_agent_keys
+    }
+    defaults = {**agent_defaults, **(agent_entry.get("defaults", {}) or {})}
+    shared_models = root_config.get("models", {})
+    shared_browsers = root_config.get("browsers", {})
+    if isinstance(shared_models, dict) and isinstance(shared_browsers, dict) and shared_models:
+        active_model = model_name or agent_entry.get("active_model") or root_config.get("default", {}).get("model")
+        active_browser = (
+            browser_id
+            or agent_entry.get("active_browser")
+            or root_config.get("default", {}).get("browser")
+            or root_config.get("default", {}).get("browser_id")
+        )
+        if not (active_model and active_model in shared_models):
+            return None
+        model_cfg = shared_models[active_model] or {}
+        browser_cfg = shared_browsers.get(active_browser, {}) if active_browser else {}
+        if active_browser and active_browser not in shared_browsers:
+            browser_cfg = {"browser_id": active_browser}
+        return {**defaults, **model_cfg, **browser_cfg}
+
     active_model = model_name or agent_entry.get("active_model")
     models = agent_entry.get("models", {})
     if not (active_model and models and active_model in models):
         return None
     browser = agent_entry.get("browser", {})
-    defaults = agent_entry.get("defaults", {})
+    if browser_id:
+        browser = {**browser, "browser_id": browser_id}
     return {**browser, **defaults, **models[active_model]}
 
 
@@ -356,14 +401,20 @@ def apply_skyvern_env(agent_config: dict[str, Any], env: dict[str, str]) -> None
         "supports_vision": "OPENAI_COMPATIBLE_SUPPORTS_VISION",
         "llm_key": "LLM_KEY",
         "skyvern_api_key": "SKYVERN_API_KEY",
+        "database_string": "DATABASE_STRING",
     }
     for config_key, env_key in key_map.items():
         if config_key in agent_config and agent_config[config_key] is not None:
             value = agent_config[config_key]
-            if isinstance(value, bool):
+            if config_key == "database_string" and value == "":
+                env.pop(env_key, None)
+            elif isinstance(value, bool):
                 env[env_key] = "true" if value else "false"
             else:
                 env[env_key] = str(value)
 
     if agent_config.get("enable_openai_compatible") and not env.get("LLM_KEY"):
         env["LLM_KEY"] = "OPENAI_COMPATIBLE"
+
+    if agent_config.get("enable_openai_compatible") and "database_string" not in agent_config:
+        env["DATABASE_STRING"] = _skyvern_temp_database_string()

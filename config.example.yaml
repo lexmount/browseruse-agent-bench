@@ -1,419 +1,260 @@
 # browseruse-bench configuration file
-# =====================================
-# This file is git-ignored. Copy config.example.yaml to config.yaml to get started.
-# API keys and runtime parameters are stored here.
+#
+# Shared runtime config is intentionally flat:
+#   runtime config = agents.<agent> + models.<model> + browsers.<browser>
+# Select defaults globally with default.model/default.browser. Override per run
+# with `--model` and `--browser-id`.
 
 default:
   agent: browser-use
   data: LexBench-Browser
-
-# Agent Runtime Configuration
-# Each agent has an active_model and a models section with per-model parameters.
-# Registration info (venv, path, supported_benchmarks) is in configs/agent_registry.yaml
+  model: gpt-5.4
+  browser: lexmount
+models:
+  # Browser Use official hosted model. Only supported by the browser-use agent.
+  browser-use:
+    model_type: BROWSER_USE
+    model_id: bu-2-0
+    api_key: $BROWSER_USE_API_KEY
+  gpt-5.4:
+    model_type: OPENAI
+    model_provider: openai
+    model_id: gpt-5.4
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+  qwen-plus:
+    model_type: OPENAI
+    model_provider: openai
+    model_id: qwen3.5-plus
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+    dont_force_structured_output: true
+    add_schema_to_system_prompt: true
+    max_tokens: 16000
+    temperature: 0.0
+    request_timeout: 600
+  kimi-k2.5:
+    model_type: OPENAI
+    model_id: kimi-k2.5
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+    temperature: 1.0
+    frequency_penalty: 0
+    remove_min_items_from_schema: true
+    remove_defaults_from_schema: true
+    add_schema_to_system_prompt: true
+  minimax-m2.5:
+    model_type: OPENAI
+    model_id: MiniMax-M2.5
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+    dont_force_structured_output: true
+    add_schema_to_system_prompt: true
+  doubao-seed:
+    model_type: AZURE
+    model_id: doubao-seed-2-0-pro
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+  claude-sonnet:
+    model_type: OPENAI
+    model_id: claude-sonnet-4-6
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+    dont_force_structured_output: true
+    add_schema_to_system_prompt: true
+  gemini-2.5-pro:
+    model_type: OPENAI
+    model_id: gemini-2.5-pro
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+    frequency_penalty: null
+  gpt-5-mini:
+    model_type: OPENAI
+    model_id: gpt-5-mini
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+  gemini-3-pro-preview:
+    model_type: OPENAI
+    model_id: gemini-3.1-pro-preview
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+    frequency_penalty: null
+  gemini:
+    model_type: OPENAI
+    model_provider: openai
+    model_id: gemini-3.1-pro-preview
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+    supports_vision: true
+    max_tokens: 16000
+    temperature: 0.0
+    request_timeout: 600
+  gpt:
+    model_type: OPENAI
+    model_provider: openai
+    model_id: gpt-5.4
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+    supports_vision: true
+    temperature: 1.0
+    max_tokens: 16000
+    request_timeout: 600
+  claude:
+    model_type: OPENAI
+    model_provider: openai
+    model_id: dmx-claude-sonnet-4-6
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+    supports_vision: true
+    max_tokens: 16000
+    temperature: 0.0
+    request_timeout: 600
+  minimax:
+    model_type: OPENAI
+    model_provider: openai
+    model_id: MiniMax-M2.5
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+    supports_vision: true
+    max_tokens: 16000
+    temperature: 0.0
+    request_timeout: 600
+  kimi:
+    model_type: OPENAI
+    model_provider: openai
+    model_id: kimi-k2.5
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+    supports_vision: false
+    temperature: 1.0
+    frequency_penalty: 0
+    remove_min_items_from_schema: true
+    remove_defaults_from_schema: true
+    add_schema_to_system_prompt: true
+    max_tokens: 16000
+    request_timeout: 600
+  glm-5:
+    model_type: OPENAI
+    model_provider: openai
+    model_id: glm-5
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+    supports_vision: true
+    max_tokens: 16000
+    temperature: 0.0
+    request_timeout: 600
+  sonnet:
+    model_id: claude-sonnet-4-6
+    api_key: $ANTHROPIC_API_KEY
+  opus:
+    model_id: claude-opus-4-6
+    api_key: $ANTHROPIC_API_KEY
+  openrouter:
+    model_type: OPENROUTER
+    model_id: openai/gpt-5.4
+    api_key: $OPENROUTER_API_KEY
+    base_url: https://openrouter.ai/api/v1/chat/completions
+browsers:
+  lexmount:
+    browser_id: lexmount
+    lexmount_browser_mode: normal
+    lexmount_api_key: $LEXMOUNT_API_KEY
+    lexmount_project_id: $LEXMOUNT_PROJECT_ID
+  local:
+    browser_id: local
+    headless: false
+    local_proxy_server: ''
+  browser-use-cloud:
+    browser_id: browser-use-cloud
+    browser_use_cloud_profile_id: your_profile_id
+    browser_use_cloud_proxy_country_code: US
+    browser_use_cloud_timeout: 5
+  skyvern-cloud:
+    browser_id: skyvern-cloud
+    proxy_location: RESIDENTIAL
+  agentbay:
+    browser_id: agentbay
+    agentbay_api_key: $AGENTBAY_API_KEY
+    agentbay_image_id: browser_latest
+    agentbay_enable_browser_replay: true
+    agentbay_browser_use_stealth: false
+  browserbase:
+    browser_id: browserbase
+    browserbase_api_key: $BROWSERBASE_API_KEY
+    browserbase_project_id: $BROWSERBASE_PROJECT_ID
+    browserbase_region: us-west-2
+    browserbase_timeout: 600
+    browserbase_keep_alive: false
+  browserless:
+    browser_id: browserless
+    browserless_token: $BROWSERLESS_TOKEN
+    browserless_ws_url: wss://production-sfo.browserless.io
+    browserless_browser_path: ''
+  steel:
+    browser_id: steel
+    steel_api_key: $STEEL_API_KEY
+    steel_region: iad
+    steel_timeout: 600000
+    steel_use_proxy: false
+    steel_solve_captcha: false
+    steel_block_ads: false
+  cdp:
+    browser_id: cdp
+    CDP_ADDRESS: http://localhost:9222
 agents:
   browser-use:
-    active_model: browser-use
-    models:
-      browser-use:
-        model_type: BROWSER_USE
-        model_id: bu-2-0
-        api_key: $BROWSER_USE_API_KEY
-      gpt-5.4:
-        model_type: OPENAI
-        model_id: gpt-5.4
-        api_key: $OPENAI_API_KEY
-        base_url: $OPENAI_BASE_URL
-      qwen-plus:
-        model_type: OPENAI
-        model_id: qwen3.5-plus
-        api_key: $OPENAI_API_KEY
-        base_url: $OPENAI_BASE_URL
-        dont_force_structured_output: true
-        add_schema_to_system_prompt: true
-      kimi-k2.5:
-        model_type: OPENAI
-        model_id: kimi-k2.5
-        api_key: $OPENAI_API_KEY
-        base_url: $OPENAI_BASE_URL
-        temperature: 1.0          # Kimi enforces temperature >= 1.0
-        frequency_penalty: 0      # Kimi only allows frequency_penalty = 0
-        remove_min_items_from_schema: true
-        remove_defaults_from_schema: true
-        add_schema_to_system_prompt: true
-      minimax-m2.5:
-        model_type: OPENAI
-        model_id: MiniMax-M2.5
-        api_key: $OPENAI_API_KEY
-        base_url: $OPENAI_BASE_URL
-        dont_force_structured_output: true
-        add_schema_to_system_prompt: true
-      doubao-seed:
-        model_type: AZURE
-        model_id: doubao-seed-2-0-pro
-        api_key: $OPENAI_API_KEY
-        base_url: $OPENAI_BASE_URL
-      claude-sonnet:
-        model_type: OPENAI
-        model_id: claude-sonnet-4-6
-        api_key: $OPENAI_API_KEY
-        base_url: $OPENAI_BASE_URL
-        dont_force_structured_output: true
-        add_schema_to_system_prompt: true
-      gemini-2.5-pro:
-        model_type: OPENAI
-        model_id: gemini-2.5-pro
-        api_key: $OPENAI_API_KEY
-        base_url: $OPENAI_BASE_URL
-        # browser-use 0.12 ChatOpenAI defaults frequency_penalty=0.3, but LiteLLM's
-        # vertex_ai backend rejects this param — set null to drop it from the request.
-        frequency_penalty: null
-      gpt-5-mini:
-        model_type: OPENAI
-        model_id: gpt-5-mini
-        api_key: $OPENAI_API_KEY
-        base_url: $OPENAI_BASE_URL
-      gemini-3-pro-preview:
-        model_type: OPENAI
-        model_id: gemini-3.1-pro-preview
-        api_key: $OPENAI_API_KEY
-        base_url: $OPENAI_BASE_URL
-        # See gemini-2.5-pro entry above for the rationale.
-        frequency_penalty: null
-    browser:
-      # ── Active browser backend ──────────────────────────────────────────────
-      browser_id: lexmount
-      lexmount_browser_mode: normal   # normal | light
-      lexmount_api_key: $LEXMOUNT_API_KEY
-      lexmount_project_id: $LEXMOUNT_PROJECT_ID
-      # lexmount_base_url: $LEXMOUNT_BASE_URL       # override default; pick the endpoint for your region:
-                                                  #   https://api.lexmount.cn            — production (mainland China / 国内, default)
-                                                  #   https://api.lexmount.com           — production (international / 国外)
-                                                  #   https://apitest.local.lexmount.net — staging / test
-      # lexmount_verify_ssl: false                  # set false for self-signed certs
-
-      # Per-region profiles. Keys mirror the dataset's `website_region` field
-      # (zh / en today). The runner picks one per case automatically; users
-      # register against each profile via `bubench login add <site>` (the
-      # command iterates configured profiles). Top-level lexmount_* keys
-      # above act as a fallback when a profile lacks a particular field.
-      # lexmount_profiles:
-      #   zh:
-      #     api_key: $LEXMOUNT_API_KEY_ZH
-      #     project_id: $LEXMOUNT_PROJECT_ID_ZH
-      #     base_url: $LEXMOUNT_BASE_URL_ZH
-      #   en:
-      #     api_key: $LEXMOUNT_API_KEY_EN
-      #     project_id: $LEXMOUNT_PROJECT_ID_EN
-      #     base_url: $LEXMOUNT_BASE_URL_EN
-
-      # Optional proxy for lexmount sessions:
-      # lexmount_proxy_server: http://1.2.3.4:8080
-      # lexmount_proxy_type: external
-      # lexmount_proxy_username: your_username
-      # lexmount_proxy_password: your_password
-
-      # ── Other browser backends (uncomment to switch) ─────────────────────────
-      # Chrome-Local — launch a local Chrome/Chromium instance
-      # browser_id: Chrome-Local
-      # The local browser does NOT inherit your OS / clash / v2ray proxy.
-      # If you need to reach sites your direct connection can't (GFW etc.),
-      # set the fields below. Empty server == no proxy (direct connection).
-      # local_proxy_server: ""           # e.g. http://127.0.0.1:7890 (clash) or socks5://127.0.0.1:1080
-      # local_proxy_username: ""         # optional auth
-      # local_proxy_password: ""
-      # local_proxy_bypass: ""           # comma-separated, e.g. 127.0.0.1,localhost,*.local
-      # NOTE: only `skyvern` and `browser-use` agents currently honour these
-      # fields. For Agent-TARS / Claude Code / OpenAI CUA / DeepBrowse, the
-      # underlying CLI/SDK launches Chrome itself and ignores them — switch
-      # to `browser_id: lexmount` (cloud, ex-CN egress) instead.
-
-      # browser-use-cloud — browser session managed by the browser-use SDK
-      # browser_id: browser-use-cloud
-      # browser_use_cloud_profile_id: your_profile_id
-      # browser_use_cloud_proxy_country_code: US
-      # browser_use_cloud_timeout: 5              # minutes
-
-      # AgentBay — Alibaba Cloud remote browser (set AGENTBAY_API_KEY in .env)
-      # browser_id: agentbay
-      # agentbay_api_key: $AGENTBAY_API_KEY
-      # agentbay_image_id: browser_latest
-      # agentbay_enable_browser_replay: true
-      # agentbay_browser_use_stealth: false
-
-      # CDP — connect to any browser that exposes a remote-debugging port
-      # browser_id: cdp
-      # CDP_ADDRESS: http://localhost:9222
-    defaults:
-      use_judge: false
-      use_vision: false
-      max_steps: 40
-      flash_mode: true
-      timeout: 600
-
+    use_judge: false
+    use_vision: false
+    max_steps: 40
+    flash_mode: true
+    timeout: 600
   skyvern:
-    active_model: gemini
-    models:
-      gemini:
-        model_id: gemini-3.1-pro-preview
-        supports_vision: true
-      gpt:
-        model_id: gpt-5.4
-        supports_vision: true
-        temperature: 1.0  # gpt-5 only supports temperature=1
-      claude:
-        model_id: claude-sonnet-4-6
-        supports_vision: true
-      doubao-seed:
-        model_id: doubao-seed-2-0-pro
-        supports_vision: true
-      minimax:
-        model_id: MiniMax-M2.5
-        supports_vision: true
-      qwen-plus:
-        model_id: qwen3.5-plus
-        supports_vision: false
-      kimi:
-        model_id: kimi-k2.5
-        supports_vision: false
-        temperature: 1.0
-      glm-5:
-        model_id: glm-5
-        supports_vision: true
-    browser:
-      # ── Active browser backend ──────────────────────────────────────────────
-      browser_id: local
-      headless: false
-      # Local browser does NOT inherit your OS / clash / v2ray proxy. Set the
-      # fields below to point Chromium at one. Empty server == no proxy.
-      local_proxy_server: ""             # e.g. http://127.0.0.1:7890 (clash) or socks5://127.0.0.1:1080
-      # local_proxy_username: ""         # optional auth
-      # local_proxy_password: ""
-      # local_proxy_bypass: ""           # comma-separated, e.g. 127.0.0.1,localhost,*.local
-
-      # ── Other browser backends (uncomment to switch) ─────────────────────────
-      # lexmount — Lexmount cloud browser
-      # browser_id: lexmount
-      # lexmount_browser_mode: normal   # normal | light
-      # lexmount_api_key: $LEXMOUNT_API_KEY
-      # lexmount_project_id: $LEXMOUNT_PROJECT_ID
-      # lexmount_proxy_server: http://1.2.3.4:8080
-      # lexmount_proxy_type: external
-      # lexmount_proxy_username: your_username
-      # lexmount_proxy_password: your_password
-
-      # AgentBay — Alibaba Cloud remote browser (set AGENTBAY_API_KEY in .env)
-      # browser_id: agentbay
-      # agentbay_api_key: $AGENTBAY_API_KEY
-      # agentbay_image_id: browser_latest
-      # agentbay_enable_browser_replay: true
-      # agentbay_browser_use_stealth: false
-
-      # skyvern-cloud — browser session managed by Skyvern cloud (requires skyvern_api_key)
-      # browser_id: skyvern-cloud
-      # proxy_location: RESIDENTIAL
-    defaults:
-      engine: skyvern_v2
-      max_steps: 50
-      timeout: 600
-      max_screenshot_scrolls: 5
-      include_action_history_in_verification: true
-      max_consecutive_repeats: 3
-      max_action_occurrences: 5
-      enable_openai_compatible: true
-      # Renamed from $OPENAI_COMPATIBLE_API_KEY / $OPENAI_COMPATIBLE_BASE_URL —
-      # update your .env if you were using the old variable names.
-      api_key: $OPENAI_API_KEY
-      base_url: $OPENAI_BASE_URL
-      max_tokens: 16000
-      temperature: 0.0
-      request_timeout: 600  # LiteLLM per-request timeout in seconds (default)
-
+    engine: skyvern_v2
+    max_steps: 50
+    timeout: 600
+    max_screenshot_scrolls: 5
+    include_action_history_in_verification: true
+    max_consecutive_repeats: 3
+    max_action_occurrences: 5
+    enable_openai_compatible: true
+    # Default: ignore inherited DATABASE_STRING and use a temporary PostgreSQL DB.
+    # Set database_string only when you want a managed/persistent Skyvern database.
+    # database_string: postgresql+psycopg://skyvern@localhost/skyvern
   claude-code:
-    # NOTE: model_id is passed as `--model` to the `claude` CLI, which only supports
-    # Anthropic Claude models (claude-*). GPT or other third-party models are not supported.
-    active_model: sonnet
-    models:
-      sonnet:
-        model_id: claude-sonnet-4-6
-        api_key: $ANTHROPIC_API_KEY
-        # base_url: $ANTHROPIC_BASE_URL
-      opus:
-        model_id: claude-opus-4-6
-        api_key: $ANTHROPIC_API_KEY
-        # base_url: $ANTHROPIC_BASE_URL
-    defaults:
-      max_turns: 50
-      timeout: 300
-      allowed_tools: "mcp__playwright*"
-
+    max_turns: 50
+    timeout: 300
+    allowed_tools: mcp__playwright*
   deepbrowse:
-    active_model: gpt
-    models:
-      gpt:
-        model_type: OPENAI
-        model_id: gpt-5.4
-        api_key: $OPENAI_API_KEY
-        base_url: $OPENAI_BASE_URL
-        # model_api_style: chat_completions  # set for gateways that do not support /responses
-      gemini:
-        model_type: GEMINI
-        model_id: gemini-2.5-pro
-        api_key: $GOOGLE_API_KEY
-        # base_url: $GOOGLE_BASE_URL
-    browser:
-      browser_id: lexmount
-      lexmount_api_key: $LEXMOUNT_API_KEY
-      lexmount_project_id: $LEXMOUNT_PROJECT_ID
-      # lexmount_base_url: $LEXMOUNT_BASE_URL
-      # Per-region profiles — see the browser-use agent block above for the
-      # full explanation. Top-level lexmount_* keys remain the fallback.
-      # lexmount_profiles:
-      #   zh:
-      #     api_key: $LEXMOUNT_API_KEY_ZH
-      #     project_id: $LEXMOUNT_PROJECT_ID_ZH
-      #     base_url: $LEXMOUNT_BASE_URL_ZH
-      #   en:
-      #     api_key: $LEXMOUNT_API_KEY_EN
-      #     project_id: $LEXMOUNT_PROJECT_ID_EN
-      #     base_url: $LEXMOUNT_BASE_URL_EN
-    defaults:
-      use_vision: auto
-      max_steps: 50
-      max_action_history_steps: 10
-      keep_last_n_rounds: 0
-      enable_dom_retry: false
-      disable_security: true
-      enable_api_tool: false
-      enable_network_recording: true
-      debug_artifacts: true
-      timeout: 600
-
+    use_vision: auto
+    max_steps: 50
+    max_action_history_steps: 10
+    keep_last_n_rounds: 0
+    enable_dom_retry: false
+    disable_security: true
+    enable_api_tool: false
+    enable_network_recording: true
+    debug_artifacts: true
+    timeout: 600
   webwright:
-    active_model: gpt
-    models:
-      gpt:
-        model_type: OPENAI
-        model_id: gpt-5.4
-        api_key: $OPENAI_API_KEY
-        base_url: $OPENAI_BASE_URL
-      claude:
-        model_type: ANTHROPIC
-        model_id: claude-opus-4-6
-        api_key: $ANTHROPIC_API_KEY
-        # base_url: $ANTHROPIC_BASE_URL
-      openrouter:
-        model_type: OPENROUTER
-        model_id: openai/gpt-5.4
-        api_key: $OPENROUTER_API_KEY
-        base_url: https://openrouter.ai/api/v1/chat/completions
-    browser:
-      browser_id: lexmount
-      lexmount_browser_mode: normal
-      lexmount_api_key: $LEXMOUNT_API_KEY
-      lexmount_project_id: $LEXMOUNT_PROJECT_ID
-      # lexmount_base_url: $LEXMOUNT_BASE_URL
-    defaults:
-      max_steps: 100
-      timeout: 600
-      request_timeout_seconds: 120
-
+    max_steps: 100
+    timeout: 600
+    request_timeout_seconds: 120
   Agent-TARS:
-    active_model: claude
-    browser:
-      # ── Active browser backend ──────────────────────────────────────────────
-      # local — launch a local headless browser
-      browser_id: local
-      # local_proxy_*: unsupported on Agent-TARS (CLI 0.3.0 has no browser.proxy
-      # config field). Use browser_id=lexmount if you need a proxy / out-of-CN
-      # egress. See docs/{en,zh}/browser/local.mdx for the full agent matrix.
-
-      # ── Other browser backends (uncomment to switch) ─────────────────────────
-      # lexmount — Lexmount cloud browser (LEXMOUNT_API_KEY must be in .env)
-      # browser_id: lexmount
-      # lexmount_browser_mode: normal   # normal | light
-      # lexmount_api_key: $LEXMOUNT_API_KEY
-      # lexmount_project_id: $LEXMOUNT_PROJECT_ID
-      # lexmount_proxy_server: http://1.2.3.4:8080
-      # lexmount_proxy_type: external
-      # lexmount_proxy_username: your_username
-      # lexmount_proxy_password: your_password
-    defaults:
-      # ── browser_control options ──────────────────────────────────────────────
-      # dom              — DOM-only: fast & stable, but fails on canvas / dynamic UI
-      # visual-grounding — screenshot + VLM coordinate click; handles any visible element
-      # hybrid           — model chooses DOM or vision per step; best fault tolerance
-      browser_control: hybrid
-      timeout: 300
-      max_turns: 50
-    models:
-      gpt-5.4:
-        model_provider: openai
-        model_id: gpt-5.4-mini
-        api_key: $OPENAI_API_KEY
-        base_url: $OPENAI_BASE_URL
-        timeout: 600
-        temperature: 1.0  # gpt-5 only supports temperature=1
-      gemini:
-        model_provider: openai
-        model_id: gemini-3.1-pro-preview
-        api_key: $OPENAI_API_KEY
-        base_url: $OPENAI_BASE_URL
-      claude:
-        model_provider: openai
-        model_id: dmx-claude-sonnet-4-6
-        api_key: $OPENAI_API_KEY
-        base_url: $OPENAI_BASE_URL
-      doubao-seed:
-        model_provider: openai
-        model_id: doubao-seed-2-0-pro
-        api_key: $OPENAI_API_KEY
-        base_url: $OPENAI_BASE_URL
-      minimax:
-        model_provider: openai
-        model_id: MiniMax-M2.5
-        api_key: $OPENAI_API_KEY
-        base_url: $OPENAI_BASE_URL
-      qwen-plus:
-        model_provider: openai
-        model_id: qwen3.6-plus
-        api_key: $OPENAI_API_KEY
-        base_url: $OPENAI_BASE_URL
-        dont_force_structured_output: true
-        add_schema_to_system_prompt: true
-      kimi:
-        model_provider: openai
-        model_id: kimi-k2.5
-        api_key: $OPENAI_API_KEY
-        base_url: $OPENAI_BASE_URL
-        temperature: 1.0          # Kimi enforces temperature >= 1.0
-        frequency_penalty: 0      # Kimi only allows frequency_penalty = 0
-        remove_min_items_from_schema: true
-        remove_defaults_from_schema: true
-        add_schema_to_system_prompt: true
-      glm-5:
-        model_provider: openai
-        model_id: glm-5
-        api_key: $OPENAI_API_KEY
-        base_url: $OPENAI_BASE_URL
-
-# Eval Model Configuration
-# All graders share these settings. api_key and base_url are CLI-only (not forwarded to graders).
+    browser_control: hybrid
+    timeout: 300
+    max_turns: 50
 eval:
   model: gpt-5.4
   api_key: $OPENAI_API_KEY
-  base_url: $OPENAI_BASE_URL # optional, remove if using OpenAI directly
-  temperature: 1.0           # gpt-5 only supports temperature=1
-  max_tries: 5               # shared default for all benchmark graders
+  base_url: $OPENAI_BASE_URL
+  temperature: 1.0
+  max_tries: 5
   api_max_images: 50
   detail: high
-  max_tokens: 512            # grader output token limit (max_new_tokens also accepted for compat)
-
-# Leaderboard Configuration
+  max_tokens: 512
 leaderboard:
   default_timeout_seconds: 300
   regenerate_timeout_seconds: 300
-
-# Systemd Service Configuration (Linux only)
 service:
   name: benchmark-server
   description: BrowserUse Bench Leaderboard Server

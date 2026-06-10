@@ -90,47 +90,58 @@ icon: "rocket"
     根目录 `config.yaml` 是项目的运行时主配置，`$VAR` 占位符会在运行时从 `.env` 解析。
     需要配置三部分：
 
-    **1. Agent 模型** — 在 `agents.<agent>` 下指定默认使用的模型：
+    **1. 模型** — 在顶层 `models` 定义共享模型配置，并通过 `default.model` 选择默认模型：
 
     ```yaml
+    default:
+      model: gpt-5.4
+
+    models:
+      gpt-5.4:
+        model_type: OPENAI        # OPENAI | GEMINI | ANTHROPIC | AZURE | BROWSER_USE
+        model_id: gpt-5.4
+        api_key: $OPENAI_API_KEY
+        base_url: $OPENAI_BASE_URL
+      browser-use:
+        model_type: BROWSER_USE
+        model_id: bu-2-0
+        api_key: $BROWSER_USE_API_KEY
+        # 仅 browser-use agent 支持。
+
     agents:
       browser-use:
-        active_model: gpt-5.4         # 指向下方 models 里的任一 key
-        models:
-          gpt-5.4:
-            model_type: OPENAI        # OPENAI | GEMINI | ANTHROPIC | AZURE | BROWSER_USE
-            model_id: gpt-5.4
-            api_key: $OPENAI_API_KEY
-            base_url: $OPENAI_BASE_URL
-          browser-use:
-            model_type: BROWSER_USE
-            model_id: bu-2-0
-            api_key: $BROWSER_USE_API_KEY
+        max_steps: 40
+        timeout: 600
     ```
 
     <Tip>
       运行时可通过 `--model <name>` 覆盖 `active_model`，无需改文件。
     </Tip>
 
-    **2. 浏览器后端** — 在 `agents.<agent>.browser` 下选择一个 `browser_id`，
-    只保留对应后端所需的参数，其它注释掉：
+    **2. 浏览器后端** — 在顶层 `browsers` 定义共享浏览器配置，并通过 `default.browser` 选择默认浏览器：
 
     ```yaml
+    default:
+      browser: lexmount
+
+    browsers:
+      lexmount:
+        browser_id: lexmount          # lexmount | Chrome-Local | agentbay | browserbase | browserless | steel | cdp
+        lexmount_browser_mode: normal
+        lexmount_api_key: $LEXMOUNT_API_KEY
+        lexmount_project_id: $LEXMOUNT_PROJECT_ID
+      Chrome-Local:
+        browser_id: Chrome-Local
+      agentbay:
+        browser_id: agentbay
+        agentbay_api_key: $AGENTBAY_API_KEY
+
     agents:
       browser-use:
-        browser:
-          browser_id: lexmount          # lexmount | Chrome-Local | agentbay | browser-use-cloud | cdp
-          # --- lexmount ---
-          lexmount_browser_mode: normal
-          lexmount_api_key: $LEXMOUNT_API_KEY
-          lexmount_project_id: $LEXMOUNT_PROJECT_ID
-          # --- Chrome-Local ---
-          # browser_id: Chrome-Local   # 无需额外参数
-          # --- agentbay ---
-          # browser_id: agentbay       # 需在 .env 中设置 AGENTBAY_API_KEY
+        max_steps: 40
     ```
 
-    详细后端选项参见 [本地 Chromium 浏览器](/zh/browser/local)、[Lexmount 云浏览器](/zh/browser/lexmount) 及各 Agent 的文档页。**重要**：本地 Chromium 不会继承系统 / clash / v2ray 代理——若需访问裸连不可达的站点（如 `bloomberg.com`、`archive.org`），请配 `local_proxy_server`。
+    运行时可用 `--browser-id <name>` 覆盖浏览器。详细后端选项参见 [本地 Chromium 浏览器](/zh/browser/local)、[Lexmount 云浏览器](/zh/browser/lexmount)、[第三方云浏览器](/zh/browser/cloud-browsers)。**重要**：本地 Chromium 不会继承系统 / clash / v2ray 代理——若需访问裸连不可达的站点（如 `bloomberg.com`、`archive.org`），请配 `local_proxy_server`。
 
     **3. Eval 评估模型** — 供 `bubench eval` 作为 LLM-as-judge 评判使用：
 

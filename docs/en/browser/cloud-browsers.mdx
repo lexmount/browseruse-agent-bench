@@ -1,0 +1,178 @@
+---
+title: "Third-party Cloud Browsers"
+description: "Use Browserbase, Browserless, or Steel.dev as CDP-compatible cloud browser backends"
+---
+
+browseruse-bench can run CDP-compatible agents against third-party cloud browser providers.
+These backends are useful when local Chrome is unavailable, when you need a clean cloud egress
+environment, or when you want provider features such as session viewers, proxies, CAPTCHA support,
+or managed browser capacity.
+
+<Info>
+Lexmount has a dedicated guide because it also integrates with `bubench login` persistent contexts.
+See [Lexmount Cloud Browser](./lexmount).
+</Info>
+
+## Supported Backends
+
+| `browser_id` | Provider | Session model | Required secret |
+| --- | --- | --- | --- |
+| `browserbase` | Browserbase | Creates and releases a Browserbase session through the Sessions API | `BROWSERBASE_API_KEY` |
+| `browserless` | Browserless BaaS v2 | Builds a WebSocket/CDP URL; Browserless creates the session when the agent connects | `BROWSERLESS_TOKEN` |
+| `steel` | Steel.dev | Creates and releases a Steel session through the Sessions API | `STEEL_API_KEY` |
+
+All three return `transport: cdp`, so they are meant for agents that can connect to a remote Chrome
+DevTools Protocol endpoint.
+
+## Get API Keys
+
+<Steps>
+  <Step title="Browserbase">
+    Sign up at [browserbase.com/sign-up](https://www.browserbase.com/sign-up). In the Browserbase
+    dashboard, open **Settings** and copy your API key. If your account uses projects, also copy the
+    project ID and set it as `BROWSERBASE_PROJECT_ID`.
+  </Step>
+  <Step title="Browserless">
+    Sign up at [browserless.io](https://www.browserless.io/). Copy your API token from the
+    Browserless account dashboard. The token is passed as the `?token=` query parameter on the
+    BaaS v2 connection URL.
+  </Step>
+  <Step title="Steel.dev">
+    Sign up at [steel.dev](https://steel.dev/). In the Steel dashboard, go to
+    **Settings > API Keys**, create an API key, and store it securely. Steel shows the key once.
+  </Step>
+</Steps>
+
+Add the secrets to `.env`:
+
+```bash
+BROWSERBASE_API_KEY=bb_live_...
+BROWSERBASE_PROJECT_ID=your_browserbase_project_id
+
+BROWSERLESS_TOKEN=your_browserless_token
+BROWSERLESS_WS_URL=wss://production-sfo.browserless.io
+
+STEEL_API_KEY=your_steel_api_key
+```
+
+## Browserbase
+
+Use `browserbase` when you want Browserbase-managed sessions with explicit create/release
+lifecycle.
+
+```yaml
+browsers:
+  browserbase:
+    browser_id: browserbase
+    browserbase_api_key: $BROWSERBASE_API_KEY
+    browserbase_project_id: $BROWSERBASE_PROJECT_ID
+    browserbase_region: us-west-2
+    browserbase_timeout: 600
+    browserbase_keep_alive: false
+```
+
+Optional keys:
+
+| Key | Notes |
+| --- | --- |
+| `browserbase_base_url` | Override the API base URL; defaults to `https://api.browserbase.com` |
+| `browserbase_project_id` | Browserbase project ID, if your account requires one |
+| `browserbase_region` | Region passed into `browserSettings.region` |
+| `browserbase_timeout` | Session timeout in seconds |
+| `browserbase_keep_alive` | Whether Browserbase should keep the session alive after disconnect |
+| `browserbase_context_id` | Existing Browserbase context ID |
+| `browserbase_extension_id` | Existing Browserbase extension ID |
+
+On close, browseruse-bench requests `REQUEST_RELEASE` for the Browserbase session.
+
+## Browserless
+
+Use `browserless` when you want a simple BaaS v2 WebSocket endpoint. No explicit session create API
+is called by browseruse-bench; Browserless starts a browser when the agent connects.
+
+```yaml
+browsers:
+  browserless:
+    browser_id: browserless
+    browserless_token: $BROWSERLESS_TOKEN
+    browserless_ws_url: wss://production-sfo.browserless.io
+    browserless_browser_path: ''
+    browserless_timeout: 600
+```
+
+Optional keys:
+
+| Key | Notes |
+| --- | --- |
+| `browserless_ws_url` | Browserless WebSocket host; defaults to `wss://production-sfo.browserless.io` |
+| `browserless_browser_path` | Browser endpoint path; empty matches the standard Browser Use example, advanced routes include `/chromium` and `/chromium/stealth` |
+| `browserless_timeout` | Browserless launch/session timeout in seconds; legacy millisecond values are converted |
+| `browserless_solveCaptchas` | Enable Browserless CAPTCHA solving |
+| `browserless_integrations` | Browserless integration bridge, for example `browseruse` |
+| `browserless_proxy` | Proxy type, for example `residential` |
+| `browserless_proxyCountry` | Proxy country/region, for example `US` |
+| `browserless_resolve_debugger_url` | Whether to call `/json/version` first and use `webSocketDebuggerUrl`; defaults to `false` |
+
+Browserless sessions are normally cleaned up by disconnecting the CDP client.
+
+## Steel.dev
+
+Use `steel` when you want Steel-managed sessions with optional proxies, CAPTCHA solving, or
+profile-related options.
+
+```yaml
+browsers:
+  steel:
+    browser_id: steel
+    steel_api_key: $STEEL_API_KEY
+    steel_region: iad
+    steel_timeout: 600000
+    steel_use_proxy: false
+    steel_solve_captcha: false
+    steel_block_ads: false
+```
+
+Optional keys:
+
+| Key | Notes |
+| --- | --- |
+| `steel_base_url` | Override the API base URL; defaults to `https://api.steel.dev` |
+| `steel_connect_url` | Override the CDP connect host; defaults to `wss://connect.steel.dev` |
+| `steel_region` | Steel region, for example `lax`, `ord`, or `iad` |
+| `steel_timeout` | Session timeout in milliseconds |
+| `steel_use_proxy` | Enable Steel-provided proxy support |
+| `steel_proxy_url` | Custom proxy URL |
+| `steel_solve_captcha` | Enable Steel CAPTCHA solving when available on your plan |
+| `steel_block_ads` | Ask Steel to block ads |
+| `steel_profile_id` | Existing Steel profile ID |
+| `steel_user_agent` | Custom user agent |
+
+On close, browseruse-bench calls Steel's session release endpoint.
+
+## Run a Smoke Test
+
+After editing `config.yaml`, run one real task:
+
+```bash
+uv run bubench run \
+  --agent browser-use \
+  --data LexBench-Browser \
+  --mode first_n --count 1
+```
+
+For agent-touching changes or before committing backend work, run the project-required real smoke:
+
+```bash
+uv run bubench run --agent <agent> --data LexBench-Browser --mode single
+```
+
+## Notes
+
+<Warning>
+Keep cloud browser API keys in `.env` or your secret manager. Do not commit `config.yaml` with
+expanded keys, browser cookies, CDP URLs, or provider session tokens.
+</Warning>
+
+- Provider pricing, regions, and quota limits change over time; check the provider dashboard before large runs.
+- `browserbase` and `steel` write session state so the orphan cleanup path can release leaked sessions after a crash.
+- `browserless` does not write session state because browseruse-bench does not create a named session up front.

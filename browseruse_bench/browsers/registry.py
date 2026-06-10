@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import Callable, Dict
+from collections.abc import Callable
 
 from browseruse_bench.browsers.base import BrowserBackend
 
-_BACKEND_FACTORIES: Dict[str, Callable[[], BrowserBackend]] = {}
+_BACKEND_FACTORIES: dict[str, Callable[[], BrowserBackend]] = {}
 _DEFAULTS_REGISTERED = False
 
 
@@ -38,6 +38,24 @@ def _create_agentbay_backend() -> BrowserBackend:
     return AgentBayBackend("agentbay")
 
 
+def _create_browserbase_backend() -> BrowserBackend:
+    from browseruse_bench.browsers.providers.browserbase import BrowserbaseBackend
+
+    return BrowserbaseBackend("browserbase")
+
+
+def _create_browserless_backend() -> BrowserBackend:
+    from browseruse_bench.browsers.providers.browserless import BrowserlessBackend
+
+    return BrowserlessBackend("browserless")
+
+
+def _create_steel_backend() -> BrowserBackend:
+    from browseruse_bench.browsers.providers.steel import SteelBackend
+
+    return SteelBackend("steel")
+
+
 def register_backend(browser_id: str, factory: Callable[[], BrowserBackend]) -> None:
     if browser_id in _BACKEND_FACTORIES:
         raise ValueError(f"Browser backend already registered: {browser_id}")
@@ -56,6 +74,9 @@ def _register_default_backends() -> None:
     register_backend("cdp", _create_cdp_backend)
     register_backend("lexmount", _create_lexmount_backend)
     register_backend("agentbay", _create_agentbay_backend)
+    register_backend("browserbase", _create_browserbase_backend)
+    register_backend("browserless", _create_browserless_backend)
+    register_backend("steel", _create_steel_backend)
     _DEFAULTS_REGISTERED = True
 
 

@@ -139,19 +139,18 @@ from browseruse_bench.agents import my_agent  # noqa: F401
 
 ### 3. 注册配置
 
-在根目录 `config.yaml` 的 `agents` 下添加：
+在根目录 `config.yaml` 中添加共享模型和 agent 运行参数：
 
 ```yaml
+models:
+  my-agent-default:
+    model_id: your-model-id
+    api_key: $YOUR_API_KEY
+
 agents:
   my-agent:
-    active_model: default
-    models:
-      default:
-        model_id: your-model-id
-        api_key: $YOUR_API_KEY
-    defaults:
-      timeout: 300
-      max_steps: 40
+    timeout: 300
+    max_steps: 40
 ```
 
 同时在 `configs/agent_registry.yaml` 中添加元数据：
@@ -343,7 +342,7 @@ bubench run --agent my-agent --data LexBench-Browser --mode first_n --count 1
 
 **`task_info`** 从 benchmark 数据集加载。标准字段：`task_id`、`task_text`、`url`、`prompt`（可选）。
 
-**`agent_config`** 来自根目录 `config.yaml` 中 `agents.<agent>.models[active_model]` 的配置。框架在运行时会注入 `timeout_seconds`。
+**`agent_config`** 来自根目录 `config.yaml`，按 `agents.<agent> + models.<model> + browsers.<browser>` 合并得到。框架在运行时会注入 `timeout_seconds`。
 
 **`task_workspace`** 是每个任务的输出目录（`<output_dir>/tasks/<task_id>/`）。框架会在此写入 `result.json`，你可以在同目录保存截图、日志或其他产物。
 
