@@ -12,7 +12,8 @@ import logging
 import os
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ from browser_use import ChatAzureOpenAI as BrowserUseSDKChatAzureOpenAI
 from browser_use import ChatBrowserUse as BrowserUseSDKChatBrowserUse
 from browser_use import ChatGoogle as BrowserUseSDKChatGoogle
 from browser_use import ChatOpenAI as BrowserUseSDKChatOpenAI
+from browser_use.browser import session as browser_use_session_module
 from browser_use.browser.profile import ProxySettings as BrowserUseProxySettings
 
 from browseruse_bench.agents.base import BaseAgent
@@ -33,7 +35,6 @@ from browseruse_bench.schemas import AgentMetrics, AgentResult, AgentUsage
 from browseruse_bench.utils.api_logger import APICallLogger
 
 Agent: type[Any] = BrowserUseSDKAgent
-Browser: type[Any] = BrowserUseSDKBrowser
 ChatBrowserUse: type[Any] = BrowserUseSDKChatBrowserUse
 ChatAnthropic: type[Any] = BrowserUseSDKChatAnthropic
 ChatGoogle: type[Any] = BrowserUseSDKChatGoogle
@@ -41,6 +42,10 @@ ChatAzureOpenAI: type[Any] = BrowserUseSDKChatAzureOpenAI
 ChatOpenAI: type[Any] = BrowserUseSDKChatOpenAI
 
 logger = logging.getLogger(__name__)
+
+BROWSER_USE_CDP_CONNECT_TIMEOUT_SECONDS = 30.0
+_BROWSER_USE_SDK_CDP_CONNECT_TIMEOUT_SECONDS = 15.0
+_BROWSER_USE_CDP_CONNECT_TIMEOUT_LABEL = f"{BROWSER_USE_CDP_CONNECT_TIMEOUT_SECONDS:g}s"
 
 
 _MAX_STEPS_ERROR = "Failed to complete task in maximum steps"
@@ -51,6 +56,59 @@ def _get_config_value(agent_config: dict[str, Any], *keys: str, default: Any = N
         if key in agent_config and agent_config[key] is not None:
             return agent_config[key]
     return default
+
+
+@contextmanager
+def _browser_use_cdp_connect_timeout(timeout_seconds: float) -> Iterator[None]:
+    """Override browser-use SDK's hard-coded 15s CDP connect guard."""
+    original_wait_for = browser_use_session_module.asyncio.wait_for
+
+    async def wait_for_with_cdp_timeout(
+        fut: Any,
+        timeout: float | None = None,
+    ) -> Any:
+        if timeout == _BROWSER_USE_SDK_CDP_CONNECT_TIMEOUT_SECONDS:
+            timeout = timeout_seconds
+        return await original_wait_for(fut, timeout=timeout)
+
+    browser_use_session_module.asyncio.wait_for = wait_for_with_cdp_timeout
+    try:
+        yield
+    finally:
+        browser_use_session_module.asyncio.wait_for = original_wait_for
+
+
+def _browser_use_cdp_timeout_message(message: str) -> str:
+    if "timed out after 15s" in message and "CDP connection" in message:
+        return message.replace("15s", _BROWSER_USE_CDP_CONNECT_TIMEOUT_LABEL)
+    return message
+
+
+class BrowserUseBenchBrowser(BrowserUseSDKBrowser):
+    """browser-use BrowserSession with benchmark-specific CDP connect timeout."""
+
+    async def start(self, *args: Any, **kwargs: Any) -> Any:
+        try:
+            with _browser_use_cdp_connect_timeout(BROWSER_USE_CDP_CONNECT_TIMEOUT_SECONDS):
+                return await super().start(*args, **kwargs)
+        except RuntimeError as exc:
+            message = _browser_use_cdp_timeout_message(str(exc))
+            if message != str(exc):
+                raise RuntimeError(message) from exc
+            raise
+
+    async def _auto_reconnect(self, *args: Any, **kwargs: Any) -> Any:
+        try:
+            with _browser_use_cdp_connect_timeout(BROWSER_USE_CDP_CONNECT_TIMEOUT_SECONDS):
+                return await super()._auto_reconnect(*args, **kwargs)
+        except RuntimeError as exc:
+            message = _browser_use_cdp_timeout_message(str(exc))
+            if message != str(exc):
+                raise RuntimeError(message) from exc
+            raise
+
+
+Browser: type[Any] = BrowserUseBenchBrowser
 
 
 def _history_errors(history: Any) -> list[str]:

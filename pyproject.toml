@@ -62,11 +62,10 @@ browser-use = [
 ]
 
 skyvern = [
-    "skyvern>=1.0.0",
-    # TODO: Re-enable playwright when skyvern execution becomes a regular path
-    # and we verify the explicit dependency is required in this repo.
-    # "playwright>=1.57.0; python_full_version >= '3.12'",
-    "psycopg[binary,pool]>=3.2.13; python_full_version >= '3.14'",
+    # Local Skyvern execution imports forge/server components even when using
+    # an OpenAI-compatible llm_config.
+    "skyvern[local]>=1.0.37",
+    "psycopg[binary,pool]>=3.2.13; python_full_version >= '3.13'",
 ]
 
 openai-cua = [

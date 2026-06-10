@@ -1,0 +1,173 @@
+---
+title: "第三方云浏览器"
+description: "使用 Browserbase、Browserless 或 Steel.dev 作为 CDP 兼容云浏览器后端"
+---
+
+browseruse-bench 可以把支持 CDP 的 agent 连接到第三方云浏览器。适用场景包括：本机没有
+Chrome、需要干净的云端出口、需要 provider 的会话回放/代理/CAPTCHA/托管浏览器容量等能力。
+
+<Info>
+Lexmount 有单独手册，因为它还集成了 `bubench login` 持久登录上下文。
+见 [Lexmount 云浏览器](./lexmount)。
+</Info>
+
+## 支持的后端
+
+| `browser_id` | Provider | 会话模式 | 必填密钥 |
+| --- | --- | --- | --- |
+| `browserbase` | Browserbase | 通过 Sessions API 创建和释放 Browserbase session | `BROWSERBASE_API_KEY` |
+| `browserless` | Browserless BaaS v2 | 拼接 WebSocket/CDP URL；agent 连接时由 Browserless 创建 session | `BROWSERLESS_TOKEN` |
+| `steel` | Steel.dev | 通过 Sessions API 创建和释放 Steel session | `STEEL_API_KEY` |
+
+三者都会返回 `transport: cdp`，适合能连接远程 Chrome DevTools Protocol endpoint 的 agent。
+
+## 注册和获取 API Key
+
+<Steps>
+  <Step title="Browserbase">
+    在 [browserbase.com/sign-up](https://www.browserbase.com/sign-up) 注册。进入 Browserbase
+    dashboard 后打开 **Settings**，复制 API key。如果你的账号使用 project，也复制 project ID，
+    并配置为 `BROWSERBASE_PROJECT_ID`。
+  </Step>
+  <Step title="Browserless">
+    在 [browserless.io](https://www.browserless.io/) 注册。进入 Browserless account dashboard
+    复制 API token。该 token 会作为 BaaS v2 连接 URL 的 `?token=` 查询参数传入。
+  </Step>
+  <Step title="Steel.dev">
+    在 [steel.dev](https://steel.dev/) 注册。进入 Steel dashboard 的 **Settings > API Keys**，
+    创建 API key 并妥善保存；Steel 只会展示一次完整密钥。
+  </Step>
+</Steps>
+
+把密钥写入 `.env`：
+
+```bash
+BROWSERBASE_API_KEY=bb_live_...
+BROWSERBASE_PROJECT_ID=your_browserbase_project_id
+
+BROWSERLESS_TOKEN=your_browserless_token
+BROWSERLESS_WS_URL=wss://production-sfo.browserless.io
+
+STEEL_API_KEY=your_steel_api_key
+```
+
+## Browserbase
+
+当你希望使用 Browserbase 托管会话，并由框架显式创建/释放 session 时，选择 `browserbase`。
+
+```yaml
+browsers:
+  browserbase:
+    browser_id: browserbase
+    browserbase_api_key: $BROWSERBASE_API_KEY
+    browserbase_project_id: $BROWSERBASE_PROJECT_ID
+    browserbase_region: us-west-2
+    browserbase_timeout: 600
+    browserbase_keep_alive: false
+```
+
+可选配置：
+
+| Key | 说明 |
+| --- | --- |
+| `browserbase_base_url` | 覆盖 API base URL；默认 `https://api.browserbase.com` |
+| `browserbase_project_id` | Browserbase project ID；账号要求时填写 |
+| `browserbase_region` | 传入 `browserSettings.region` 的区域 |
+| `browserbase_timeout` | session 超时时间，单位秒 |
+| `browserbase_keep_alive` | 断开后是否让 Browserbase 保持 session |
+| `browserbase_context_id` | 已存在的 Browserbase context ID |
+| `browserbase_extension_id` | 已存在的 Browserbase extension ID |
+
+关闭时，browseruse-bench 会对 Browserbase session 请求 `REQUEST_RELEASE`。
+
+## Browserless
+
+当你只需要一个简单的 BaaS v2 WebSocket endpoint 时，选择 `browserless`。browseruse-bench
+不会提前调用创建 session 的 API；agent 连接时 Browserless 会启动浏览器。
+
+```yaml
+browsers:
+  browserless:
+    browser_id: browserless
+    browserless_token: $BROWSERLESS_TOKEN
+    browserless_ws_url: wss://production-sfo.browserless.io
+    browserless_browser_path: ''
+    browserless_timeout: 600
+```
+
+可选配置：
+
+| Key | 说明 |
+| --- | --- |
+| `browserless_ws_url` | Browserless WebSocket host；默认 `wss://production-sfo.browserless.io` |
+| `browserless_browser_path` | 浏览器 endpoint 路径；标准 Browser Use 示例为空，高级场景可用 `/chromium`、`/chromium/stealth` |
+| `browserless_timeout` | Browserless 启动/session 超时时间，单位秒；旧的毫秒值会自动折算 |
+| `browserless_solveCaptchas` | 是否开启 Browserless CAPTCHA solving |
+| `browserless_integrations` | Browserless integration bridge，例如 `browseruse` |
+| `browserless_proxy` | 代理类型，例如 `residential` |
+| `browserless_proxyCountry` | 代理国家/地区，例如 `US` |
+| `browserless_resolve_debugger_url` | 是否先请求 `/json/version` 并使用返回的 `webSocketDebuggerUrl`；默认 `false` |
+
+Browserless session 通常会在 CDP client 断开后由 Browserless 清理。
+
+## Steel.dev
+
+当你希望使用 Steel 托管会话，并按需打开代理、CAPTCHA solving 或 profile 相关能力时，选择
+`steel`。
+
+```yaml
+browsers:
+  steel:
+    browser_id: steel
+    steel_api_key: $STEEL_API_KEY
+    steel_region: iad
+    steel_timeout: 600000
+    steel_use_proxy: false
+    steel_solve_captcha: false
+    steel_block_ads: false
+```
+
+可选配置：
+
+| Key | 说明 |
+| --- | --- |
+| `steel_base_url` | 覆盖 API base URL；默认 `https://api.steel.dev` |
+| `steel_connect_url` | 覆盖 CDP connect host；默认 `wss://connect.steel.dev` |
+| `steel_region` | Steel 区域，例如 `lax`、`ord` 或 `iad` |
+| `steel_timeout` | session 超时时间，单位毫秒 |
+| `steel_use_proxy` | 启用 Steel 提供的代理能力 |
+| `steel_proxy_url` | 自定义代理 URL |
+| `steel_solve_captcha` | 在套餐支持时启用 Steel CAPTCHA solving |
+| `steel_block_ads` | 请求 Steel 屏蔽广告 |
+| `steel_profile_id` | 已存在的 Steel profile ID |
+| `steel_user_agent` | 自定义 user agent |
+
+关闭时，browseruse-bench 会调用 Steel 的 session release endpoint。
+
+## 运行 Smoke Test
+
+编辑 `config.yaml` 后，先跑一个真实任务：
+
+```bash
+uv run bubench run \
+  --agent browser-use \
+  --data LexBench-Browser \
+  --mode first_n --count 1
+```
+
+如果改动触及 agent 运行路径，或准备提交后端相关代码，按项目要求跑真实 smoke：
+
+```bash
+uv run bubench run --agent <agent> --data LexBench-Browser --mode single
+```
+
+## 注意事项
+
+<Warning>
+云浏览器 API key 应放在 `.env` 或密钥管理系统里。不要提交展开后的 `config.yaml`、浏览器
+cookie、CDP URL 或 provider session token。
+</Warning>
+
+- Provider 的价格、区域、额度会变化；大规模运行前请先查看对应 dashboard。
+- `browserbase` 和 `steel` 会写入 session state，崩溃后的 orphan cleanup 可以释放泄漏 session。
+- `browserless` 不会写 session state，因为 browseruse-bench 不会提前创建具名 session。

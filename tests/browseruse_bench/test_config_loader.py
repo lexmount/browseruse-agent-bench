@@ -7,7 +7,6 @@ import pytest
 import yaml
 
 import browseruse_bench.utils.config_loader as config_loader_module
-from browseruse_bench.utils.config_loader import load_eval_config
 from browseruse_bench.utils import (
     REPO_ROOT,
     get_default_split,
@@ -17,6 +16,7 @@ from browseruse_bench.utils import (
     resolve_agent_entry,
     resolve_agent_inline_config,
 )
+from browseruse_bench.utils.config_loader import load_eval_config
 
 
 class TestLoadConfigFile:
@@ -159,6 +159,114 @@ def test_resolve_agent_inline_config_uses_explicit_model_override(tmp_path: Path
     assert inline.get("browser_id") == "lexmount"
 
 
+def test_resolve_agent_inline_config_merges_flat_model_and_browser_config() -> None:
+    config = {
+        "default": {"model": "gpt", "browser": "browserbase"},
+        "models": {
+            "gpt": {
+                "model_id": "gpt-5.4",
+                "api_key": "$OPENAI_API_KEY",
+                "temperature": 1.0,
+            },
+        },
+        "browsers": {
+            "browserbase": {
+                "browser_id": "browserbase",
+                "browserbase_api_key": "$BROWSERBASE_API_KEY",
+                "timeout": 999,
+            },
+        },
+        "agents": {
+            "browser-use": {
+                "max_steps": 40,
+                "timeout": 600,
+            },
+        },
+    }
+
+    inline = resolve_agent_inline_config("browser-use", config)
+
+    assert inline == {
+        "max_steps": 40,
+        "timeout": 999,
+        "model_id": "gpt-5.4",
+        "api_key": "$OPENAI_API_KEY",
+        "temperature": 1.0,
+        "browser_id": "browserbase",
+        "browserbase_api_key": "$BROWSERBASE_API_KEY",
+    }
+
+
+def test_resolve_agent_inline_config_uses_top_level_defaults_without_agent_active_keys() -> None:
+    config = {
+        "default": {"model": "gpt", "browser": "lexmount"},
+        "models": {"gpt": {"model_id": "gpt-5.4"}},
+        "browsers": {"lexmount": {"browser_id": "lexmount"}},
+        "agents": {"browser-use": {"timeout": 600}},
+    }
+
+    inline = resolve_agent_inline_config("browser-use", config)
+
+    assert inline == {
+        "timeout": 600,
+        "model_id": "gpt-5.4",
+        "browser_id": "lexmount",
+    }
+
+
+def test_resolve_agent_inline_config_still_accepts_legacy_defaults_key() -> None:
+    config = {
+        "default": {"model": "gpt", "browser": "lexmount"},
+        "models": {"gpt": {"model_id": "gpt-5.4"}},
+        "browsers": {"lexmount": {"browser_id": "lexmount"}},
+        "agents": {"browser-use": {"timeout": 300, "defaults": {"timeout": 600}}},
+    }
+
+    inline = resolve_agent_inline_config("browser-use", config)
+
+    assert inline is not None
+    assert inline["timeout"] == 600
+
+
+def test_resolve_agent_inline_config_flat_browser_override() -> None:
+    config = {
+        "default": {"model": "gpt", "browser": "lexmount"},
+        "models": {"gpt": {"model_id": "gpt-5.4"}},
+        "browsers": {
+            "lexmount": {"browser_id": "lexmount"},
+            "steel": {"browser_id": "steel", "steel_api_key": "$STEEL_API_KEY"},
+        },
+        "agents": {"browser-use": {"timeout": 600}},
+    }
+
+    inline = resolve_agent_inline_config("browser-use", config, browser_id="steel")
+
+    assert inline is not None
+    assert inline["browser_id"] == "steel"
+    assert inline["steel_api_key"] == "$STEEL_API_KEY"
+    assert inline["model_id"] == "gpt-5.4"
+
+
+def test_resolve_agent_inline_config_legacy_browser_override() -> None:
+    config = {
+        "agents": {
+            "browser-use": {
+                "active_model": "gpt",
+                "browser": {"browser_id": "lexmount", "lexmount_api_key": "$LEXMOUNT_API_KEY"},
+                "defaults": {"timeout": 600},
+                "models": {"gpt": {"model_id": "gpt-5.4"}},
+            },
+        },
+    }
+
+    inline = resolve_agent_inline_config("browser-use", config, browser_id="browserbase")
+
+    assert inline is not None
+    assert inline["browser_id"] == "browserbase"
+    assert inline["lexmount_api_key"] == "$LEXMOUNT_API_KEY"
+    assert inline["model_id"] == "gpt-5.4"
+
+
 def test_resolve_agent_entry_uses_registry_venvs_for_builtin_agents(tmp_path: Path) -> None:
     config = load_config_file(_write_runtime_root_config(tmp_path))
 
@@ -285,3 +393,24 @@ class TestSkyvernConfigCanonicalization:
             and "openai_compatible_model_name" in str(w.message)
             for w in caught
         )
+
+    def test_apply_skyvern_env_uses_temp_postgres_db_by_default(self) -> None:
+        env = {"DATABASE_STRING": "postgresql+psycopg://old/skyvern"}
+
+        config_loader_module.apply_skyvern_env({"enable_openai_compatible": True}, env)
+
+        assert env["DATABASE_STRING"].startswith("postgresql+psycopg:///bubench_skyvern_")
+        assert env["DATABASE_STRING"].endswith("?host=/tmp")
+
+    def test_apply_skyvern_env_preserves_explicit_database_string(self) -> None:
+        env = {"DATABASE_STRING": "postgresql+psycopg://old/skyvern"}
+
+        config_loader_module.apply_skyvern_env(
+            {
+                "enable_openai_compatible": True,
+                "database_string": "postgresql+psycopg://new/skyvern",
+            },
+            env,
+        )
+
+        assert env["DATABASE_STRING"] == "postgresql+psycopg://new/skyvern"

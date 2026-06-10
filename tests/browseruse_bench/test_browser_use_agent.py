@@ -84,6 +84,78 @@ def test_run_task_rejects_unknown_backend(tmp_path: Path) -> None:
         )
 
 
+def test_browser_use_browser_extends_sdk_cdp_connect_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_timeouts: list[float | None] = []
+
+    async def fake_wait_for(fut: Any, timeout: float | None = None) -> Any:
+        observed_timeouts.append(timeout)
+        return await fut
+
+    async def fake_start(self: Any) -> str:
+        del self
+
+        async def ready() -> str:
+            return "started"
+
+        return await browser_use_module.browser_use_session_module.asyncio.wait_for(
+            ready(),
+            timeout=15.0,
+        )
+
+    async def fake_auto_reconnect(self: Any) -> str:
+        del self
+
+        async def ready() -> str:
+            return "reconnected"
+
+        return await browser_use_module.browser_use_session_module.asyncio.wait_for(
+            ready(),
+            timeout=15.0,
+        )
+
+    monkeypatch.setattr(
+        browser_use_module.browser_use_session_module.asyncio,
+        "wait_for",
+        fake_wait_for,
+    )
+    monkeypatch.setattr(browser_use_module.BrowserUseSDKBrowser, "start", fake_start)
+    monkeypatch.setattr(
+        browser_use_module.BrowserUseSDKBrowser,
+        "_auto_reconnect",
+        fake_auto_reconnect,
+    )
+
+    browser = browser_use_module.Browser(cdp_url="wss://agentbay.example/cdp")
+
+    assert asyncio.run(browser.start()) == "started"
+    assert asyncio.run(browser._auto_reconnect()) == "reconnected"
+    assert observed_timeouts == [
+        browser_use_module.BROWSER_USE_CDP_CONNECT_TIMEOUT_SECONDS,
+        browser_use_module.BROWSER_USE_CDP_CONNECT_TIMEOUT_SECONDS,
+    ]
+    assert browser_use_module.browser_use_session_module.asyncio.wait_for is fake_wait_for
+
+
+def test_browser_use_browser_rewrites_sdk_cdp_timeout_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_start(self: Any) -> None:
+        del self
+        raise RuntimeError(
+            "connect() timed out after 15s - CDP connection to wss://lexmount.example/cdp "
+            "is too slow or unresponsive"
+        )
+
+    monkeypatch.setattr(browser_use_module.BrowserUseSDKBrowser, "start", fake_start)
+
+    browser = browser_use_module.Browser(cdp_url="wss://lexmount.example/cdp")
+
+    with pytest.raises(RuntimeError, match="timed out after 30s"):
+        asyncio.run(browser.start())
+
+
 def test_create_browser_instance_rejects_cloud_transport_for_unknown_backend() -> None:
     with pytest.raises(ValueError, match="Unsupported browser backend for browser-use agent"):
         BrowserUseAgent._create_browser_instance(

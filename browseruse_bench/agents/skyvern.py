@@ -8,12 +8,15 @@ wraps the existing implementation rather than reimplementing from scratch.
 Prerequisites
 =============
 
-1. PostgreSQL (required by Skyvern internally)
+1. Local database
    ------------------------------------------------
-   Skyvern is a SaaS product that uses PostgreSQL as its backend database
-   for org/auth/artifact metadata. The skyvern package has a built-in
-   default connection string (``postgresql+psycopg://skyvern@localhost/skyvern``),
-   so you only need to create the database and user — no .env config needed.
+   In benchmark local mode, this adapter defaults Skyvern to an isolated
+   temporary PostgreSQL database so smoke tests do not depend on a shared
+   PostgreSQL schema.
+
+   Set ``database_string`` in config.yaml only when you intentionally want a
+   managed/persistent Skyvern database, for example:
+   ``postgresql+psycopg://skyvern@localhost/skyvern``.
 
    # Install (Ubuntu/Debian)
    sudo apt install postgresql postgresql-contrib
@@ -24,9 +27,6 @@ Prerequisites
 
    On first ``Skyvern.local()`` call, ``start_forge_app()`` runs Alembic
    migrations automatically to initialize the schema.
-
-   If you need a custom connection string, set ``DATABASE_STRING`` in the
-   skyvern package's own .env or environment.
 
 2. Skyvern API Key
    ------------------------------------------------
@@ -62,6 +62,7 @@ Prerequisites
 from __future__ import annotations
 
 import asyncio
+import atexit
 import base64
 import binascii
 import importlib
@@ -69,10 +70,12 @@ import json
 import logging
 import os
 import shutil
+import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -89,9 +92,6 @@ except ImportError:
     except ImportError:
         TargetClosedError = None
 
-import tempfile
-import uuid
-
 from browseruse_bench.agents.base import BaseAgent
 from browseruse_bench.agents.registry import register_agent
 from browseruse_bench.browsers import BrowserSessionContext
@@ -106,6 +106,91 @@ RunEngine: type[Any] | None = None
 RunStatus: type[Any] | None = None
 skyvern_settings: Any | None = None
 _SKYVERN_IMPORT_ERROR: str | None = None
+
+
+def _make_temp_database_string() -> str:
+    db_name = f"bubench_skyvern_{uuid.uuid4().hex}"
+    return f"postgresql+psycopg:///{db_name}?host=/tmp"
+
+
+def _parse_temp_postgres_database(database_string: str) -> tuple[str, urllib.parse.SplitResult] | None:
+    parsed = urllib.parse.urlsplit(database_string)
+    if parsed.scheme not in {"postgresql", "postgresql+psycopg"}:
+        return None
+
+    db_name = parsed.path.lstrip("/")
+    if not db_name.startswith("bubench_skyvern_"):
+        return None
+
+    return db_name, parsed
+
+
+def _psycopg_conninfo(parsed: urllib.parse.SplitResult, database: str) -> str:
+    query = f"?{parsed.query}" if parsed.query else ""
+    if parsed.netloc:
+        return f"postgresql://{parsed.netloc}/{database}{query}"
+    return f"postgresql:///{database}{query}"
+
+
+def _drop_temp_postgres_database(parsed: urllib.parse.SplitResult, db_name: str) -> None:
+    try:
+        import psycopg
+        from psycopg import sql
+    except ImportError:
+        return
+
+    admin_conninfo = _psycopg_conninfo(parsed, "postgres")
+    try:
+        with (
+            psycopg.connect(admin_conninfo, autocommit=True) as connection,
+            connection.cursor() as cursor,
+        ):
+            cursor.execute(
+                "SELECT pg_terminate_backend(pid) "
+                "FROM pg_stat_activity "
+                "WHERE datname = %s AND pid <> pg_backend_pid()",
+                (db_name,),
+            )
+            cursor.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(db_name)))
+    except psycopg.Error as exc:
+        logger.warning("Failed to drop temporary Skyvern database %s: %s", db_name, exc)
+
+
+def _ensure_temp_postgres_database(database_string: str) -> bool:
+    parsed_db = _parse_temp_postgres_database(database_string)
+    if parsed_db is None:
+        return False
+
+    db_name, parsed = parsed_db
+    try:
+        import psycopg
+        from psycopg import sql
+        from psycopg.errors import DuplicateDatabase
+    except ImportError as exc:
+        raise ImportError(
+            "Skyvern temporary Postgres mode requires psycopg. "
+            "Install/run with the skyvern extra."
+        ) from exc
+
+    admin_conninfo = _psycopg_conninfo(parsed, "postgres")
+    with (
+        psycopg.connect(admin_conninfo, autocommit=True) as connection,
+        connection.cursor() as cursor,
+    ):
+        try:
+            cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name)))
+        except DuplicateDatabase:
+            logger.info("Temporary Skyvern database already exists: %s", db_name)
+        else:
+            logger.info("Created temporary Skyvern database: %s", db_name)
+    target_conninfo = _psycopg_conninfo(parsed, db_name)
+    with (
+        psycopg.connect(target_conninfo, autocommit=True) as connection,
+        connection.cursor() as cursor,
+    ):
+        cursor.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+    atexit.register(_drop_temp_postgres_database, parsed, db_name)
+    return True
 
 
 def _build_local_chromium_args(
@@ -667,7 +752,9 @@ class SkyvernAgent(BaseAgent):
             # Config value takes priority, then existing env var
             config_val = agent_config.get(config_key)
             if config_val is not None:
-                if isinstance(config_val, bool):
+                if config_key == "database_string" and config_val == "":
+                    os.environ.pop(env_key, None)
+                elif isinstance(config_val, bool):
                     os.environ[env_key] = "true" if config_val else "false"
                 else:
                     os.environ[env_key] = str(config_val)
@@ -680,6 +767,13 @@ class SkyvernAgent(BaseAgent):
                 or os.getenv("OPENAI_COMPATIBLE_MODEL_KEY")
                 or "OPENAI_COMPATIBLE"
             )
+
+        # For benchmark smoke runs, default Skyvern local mode to an isolated
+        # temporary Postgres DB. A repo/root .env may contain a DATABASE_STRING
+        # for an older Skyvern schema; only use it when explicitly selected in
+        # config.
+        if agent_config.get("enable_openai_compatible") and "database_string" not in agent_config:
+            os.environ["DATABASE_STRING"] = _make_temp_database_string()
 
         # NOTE: local_proxy_* is NOT wired through Skyvern's own setup_proxy()
         # (which reads ENABLE_PROXY / HOSTED_PROXY_POOL env vars). The bench's
@@ -1264,12 +1358,19 @@ class SkyvernAgent(BaseAgent):
         in PostgreSQL. The key is also written to .env and os.environ
         so the embedded server transport can use it.
         """
+        from skyvern.forge import app
         from skyvern.forge.forge_app_initializer import start_forge_app
+        from skyvern.forge.sdk.db.models import Base
         from skyvern.forge.sdk.services.local_org_auth_token_service import (
             regenerate_local_api_key,
         )
 
+        database_string = os.getenv("DATABASE_STRING", "")
+        uses_temp_postgres = _ensure_temp_postgres_database(database_string)
         start_forge_app()
+        if database_string.startswith("sqlite") or uses_temp_postgres:
+            async with app.DATABASE.engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
         api_key, org_id, _, _ = await regenerate_local_api_key()
         logger.info(
             "Local Skyvern auth ready: org_id=%s, key=%s...%s",
