@@ -10,23 +10,6 @@ from browseruse_bench.browsers.types import BrowserSessionContext
 logger = logging.getLogger(__name__)
 
 
-def _normalize_browserless_query(config_key: str, value: Any) -> Any:
-    if config_key != "browserless_timeout":
-        return value
-    timeout = cloud_utils.read_int(value, config_key)
-    if timeout is None:
-        return value
-    if timeout > 60_000:
-        normalized = max(1, timeout // 1000)
-        logger.warning(
-            "browserless_timeout=%s looks like milliseconds; sending %s seconds to Browserless",
-            timeout,
-            normalized,
-        )
-        return normalized
-    return timeout
-
-
 class BrowserlessBackend(BrowserBackend):
     """Browserless BaaS backend that exposes a connection URL directly."""
 
@@ -68,7 +51,7 @@ class BrowserlessBackend(BrowserBackend):
             cfg_key = f"browserless_{key}"
             value = cloud_utils.read_config(agent_config, cfg_key)
             if value not in (None, ""):
-                query[key] = _normalize_browserless_query(cfg_key, value)
+                query[key] = value
 
         cdp_url = cloud_utils.append_query(base_url, query)
         resolve_debugger_url = cloud_utils.read_bool(

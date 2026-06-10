@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import urllib.parse
 import uuid
 import warnings
 from copy import deepcopy
@@ -23,7 +24,11 @@ _EVAL_STRUCTURAL_KEYS = {"api_key", "base_url"}
 
 def _skyvern_temp_database_string() -> str:
     db_name = f"bubench_skyvern_{uuid.uuid4().hex}"
-    return f"postgresql+psycopg:///{db_name}?host=/tmp"
+    socket_host = os.getenv("BUBENCH_SKYVERN_POSTGRES_HOST")
+    if not socket_host:
+        socket_host = "/var/run/postgresql" if Path("/var/run/postgresql").exists() else "/tmp"
+    encoded_host = urllib.parse.quote(socket_host, safe="/")
+    return f"postgresql+psycopg:///{db_name}?host={encoded_host}"
 
 
 def load_eval_config(benchmark_name: str) -> dict[str, Any]:

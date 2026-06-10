@@ -21,6 +21,7 @@ def write_session_state(
     backend_id: str,
     session_id: str,
     forked_context_id: str | None = None,
+    cleanup_metadata: dict[str, str] | None = None,
 ) -> None:
     path = _resolve_session_state_path()
     if path is None or not session_id:
@@ -31,6 +32,8 @@ def write_session_state(
     }
     if forked_context_id:
         payload["forked_context_id"] = forked_context_id
+    if cleanup_metadata:
+        payload["cleanup_metadata"] = json.dumps(cleanup_metadata, ensure_ascii=True)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
