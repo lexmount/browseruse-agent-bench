@@ -45,3 +45,74 @@ def test_cleanup_returns_success_when_state_file_removed(tmp_path: Path) -> None
 
     assert result == 0
     assert not state_file.exists()
+
+
+def test_cleanup_browserbase_session_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls = []
+    state_file = tmp_path / "state.json"
+    state_file.write_text(
+        json.dumps({"backend_id": "browserbase", "session_id": "bb-session-1"}),
+        encoding="utf-8",
+    )
+
+    def fake_post_json(**kwargs):
+        calls.append(kwargs)
+        return {"id": "bb-session-1"}
+
+    monkeypatch.setenv("BROWSERBASE_API_KEY", "bb-key")
+    monkeypatch.setenv("BROWSERBASE_PROJECT_ID", "project-1")
+    monkeypatch.setattr(
+        "browseruse_bench.browsers.providers.cloud_utils.post_json",
+        fake_post_json,
+    )
+
+    result = orphan_cleanup_module.cleanup_orphaned_session_state(state_file)
+
+    assert result == 0
+    assert not state_file.exists()
+    assert calls == [
+        {
+            "url": "https://api.browserbase.com/v1/sessions/bb-session-1",
+            "headers": {"X-BB-API-Key": "bb-key"},
+            "body": {"status": "REQUEST_RELEASE", "projectId": "project-1"},
+            "timeout_seconds": 30,
+        }
+    ]
+
+
+def test_cleanup_steel_session_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls = []
+    state_file = tmp_path / "state.json"
+    state_file.write_text(
+        json.dumps({"backend_id": "steel", "session_id": "steel-session-1"}),
+        encoding="utf-8",
+    )
+
+    def fake_post_json(**kwargs):
+        calls.append(kwargs)
+        return {"id": "steel-session-1"}
+
+    monkeypatch.setenv("STEEL_API_KEY", "steel-key")
+    monkeypatch.setattr(
+        "browseruse_bench.browsers.providers.cloud_utils.post_json",
+        fake_post_json,
+    )
+
+    result = orphan_cleanup_module.cleanup_orphaned_session_state(state_file)
+
+    assert result == 0
+    assert not state_file.exists()
+    assert calls == [
+        {
+            "url": "https://api.steel.dev/v1/sessions/steel-session-1/release",
+            "headers": {"steel-api-key": "steel-key"},
+            "body": None,
+            "timeout_seconds": 30,
+        }
+    ]

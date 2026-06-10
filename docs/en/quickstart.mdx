@@ -90,48 +90,59 @@ icon: "rocket"
     The root `config.yaml` is the canonical runtime config. `$VAR` placeholders are
     resolved from `.env` at runtime. Three parts to set up:
 
-    **1. Agent (model)** — pick the active model for each agent under `agents.<agent>`:
+    **1. Models** — define shared model profiles under top-level `models` and pick the default in `default.model`:
 
     ```yaml
+    default:
+      model: gpt-5.4
+
+    models:
+      gpt-5.4:
+        model_type: OPENAI        # OPENAI | GEMINI | ANTHROPIC | AZURE | BROWSER_USE
+        model_id: gpt-5.4
+        api_key: $OPENAI_API_KEY
+        base_url: $OPENAI_BASE_URL
+      browser-use:
+        model_type: BROWSER_USE
+        model_id: bu-2-0
+        api_key: $BROWSER_USE_API_KEY
+        # Only supported by the browser-use agent.
+
     agents:
       browser-use:
-        active_model: gpt-5.4         # pick any key from models below
-        models:
-          gpt-5.4:
-            model_type: OPENAI        # OPENAI | GEMINI | ANTHROPIC | AZURE | BROWSER_USE
-            model_id: gpt-5.4
-            api_key: $OPENAI_API_KEY
-            base_url: $OPENAI_BASE_URL
-          browser-use:
-            model_type: BROWSER_USE
-            model_id: bu-2-0
-            api_key: $BROWSER_USE_API_KEY
+        max_steps: 40
+        timeout: 600
     ```
 
     <Tip>
       Override the active model per run with `--model <name>` — no need to edit the file.
     </Tip>
 
-    **2. Browser backend** — set `browser_id` under `agents.<agent>.browser`. Only one
-    backend is active at a time; fill in its required keys and leave others commented:
+    **2. Browser backend** — define shared browser profiles under top-level `browsers`
+    and pick the default in `default.browser`:
 
     ```yaml
+    default:
+      browser: lexmount
+
+    browsers:
+      lexmount:
+        browser_id: lexmount          # lexmount | Chrome-Local | agentbay | browserbase | browserless | steel | cdp
+        lexmount_browser_mode: normal
+        lexmount_api_key: $LEXMOUNT_API_KEY
+        lexmount_project_id: $LEXMOUNT_PROJECT_ID
+      Chrome-Local:
+        browser_id: Chrome-Local
+      agentbay:
+        browser_id: agentbay
+        agentbay_api_key: $AGENTBAY_API_KEY
+
     agents:
       browser-use:
-        browser:
-          browser_id: lexmount          # lexmount | Chrome-Local | agentbay | browser-use-cloud | cdp
-          # --- lexmount ---
-          lexmount_browser_mode: normal
-          lexmount_api_key: $LEXMOUNT_API_KEY
-          lexmount_project_id: $LEXMOUNT_PROJECT_ID
-          # --- Chrome-Local ---
-          # browser_id: Chrome-Local
-          # local_proxy_server: ""     # http://127.0.0.1:7890 etc. — local Chromium does NOT inherit OS / clash / v2ray proxy
-          # --- agentbay ---
-          # browser_id: agentbay       # set AGENTBAY_API_KEY in .env
+        max_steps: 40
     ```
 
-    See [Local Chromium Browser](/en/browser/local) and [Lexmount Cloud Browser](/en/browser/lexmount), plus each agent's page, for backend-specific options. **Important**: the local Chromium does NOT pick up your OS / clash / v2ray proxy — set `local_proxy_server` if you need to reach sites the bare-connect can't (e.g. `bloomberg.com`, `archive.org`).
+    Override the browser per run with `--browser-id <name>`. See [Local Chromium Browser](/en/browser/local), [Lexmount Cloud Browser](/en/browser/lexmount), and [Third-party Cloud Browsers](/en/browser/cloud-browsers) for backend-specific options. **Important**: local Chromium does NOT pick up your OS / clash / v2ray proxy — set `local_proxy_server` if you need to reach sites the bare-connect can't (e.g. `bloomberg.com`, `archive.org`).
 
     **3. Eval model** — used by `bubench eval` for LLM-as-judge scoring:
 

@@ -60,6 +60,7 @@
                                         "pages": [
                                             "en/browser/local",
                                             "en/browser/lexmount",
+                                            "en/browser/cloud-browsers",
                                             "en/browser/custom-backend"
                                         ]
                                     },
@@ -165,6 +166,7 @@
                                         "pages": [
                                             "zh/browser/local",
                                             "zh/browser/lexmount",
+                                            "zh/browser/cloud-browsers",
                                             "zh/browser/custom-backend"
                                         ]
                                     },

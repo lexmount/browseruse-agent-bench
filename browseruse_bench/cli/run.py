@@ -479,8 +479,8 @@ def configure_run_parser(parser: argparse.ArgumentParser, config: dict[str, Any]
         default=None,
         help=(
             "Optional path to an alternate root-config YAML (same shape as the repo "
-            "config.yaml). The runtime config for --agent is resolved from that file "
-            "via agents.<agent>.models. By default the repo root config.yaml is used."
+            "config.yaml). The runtime config for --agent is resolved from that file. "
+            "By default the repo root config.yaml is used."
         ),
     )
     parser.add_argument(
@@ -488,7 +488,14 @@ def configure_run_parser(parser: argparse.ArgumentParser, config: dict[str, Any]
         "--model",
         dest="model_name",
         default=None,
-        help="Optional model config name under config.yaml agents.<agent>.models to override active_model for this run.",
+        help="Optional model config name under config.yaml models to override default.model for this run.",
+    )
+    parser.add_argument(
+        "--browser-id",
+        "--browser",
+        dest="browser_id",
+        default=None,
+        help="Optional browser backend id under config.yaml browsers to override the selected browser for this run.",
     )
     parser.add_argument(
         "--force-download",
@@ -905,15 +912,15 @@ def run_command(args: argparse.Namespace, config: dict[str, Any]) -> int:
         source_cfg = load_config_file(cfg_path)
         source_label = str(cfg_path)
 
-    # --agent-config only overrides the inline model config (agents.<agent>.models.*).
+    # --agent-config only overrides the inline runtime config (models/browsers/agents defaults).
     # Benchmark definitions and the agent registry keep coming from the root config,
     # which is why run_agent still receives `config`, not `source_cfg`.
-    inline = resolve_agent_inline_config(args.agent, source_cfg, args.model_name)
+    inline = resolve_agent_inline_config(args.agent, source_cfg, args.model_name, args.browser_id)
     if inline is None:
         model_hint = (
-            f"agents.{args.agent}.models.{args.model_name}"
+            f"models.{args.model_name}"
             if args.model_name
-            else f"agents.{args.agent}.active_model"
+            else "default.model plus models.<name>"
         )
         raise SystemExit(
             f"[FAILED] Inline agent runtime config not found in {source_label}.\n"

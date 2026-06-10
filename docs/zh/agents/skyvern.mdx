@@ -21,31 +21,34 @@ skyvern 与 browser-use 的 extra 依赖冲突，建议使用独立 venv（`conf
 
 ## 配置
 
-在根目录 `config.yaml` 的 `agents.skyvern` 下配置：
+在根目录 `config.yaml` 中配置共享模型/浏览器 profile，以及 Skyvern 运行参数：
 
 ```yaml
+models:
+  gemini:
+    enable_openai_compatible: true
+    model_id: gemini-3-flash-preview
+    max_tokens: 16000
+    temperature: 0.0
+    supports_vision: true
+    api_key: $OPENAI_COMPATIBLE_API_KEY
+    base_url: $OPENAI_BASE_URL
+
+browsers:
+  local:
+    browser_id: local
+    headless: false
+
 agents:
   skyvern:
-    active_model: gemini        # 当前使用的模型配置名
-    models:
-      gemini:
-        enable_openai_compatible: true
-        model_id: gemini-3-flash-preview
-        max_tokens: 16000
-        temperature: 0.0
-        supports_vision: true
-        api_key: $OPENAI_COMPATIBLE_API_KEY
-    browser:
-      browser_id: local
-      headless: false
-    defaults:
-      engine: skyvern_v2
-      max_steps: 25
-      timeout: 600
-      max_screenshot_scrolls: 5
-      include_action_history_in_verification: true
-      max_consecutive_repeats: 3
-      max_action_occurrences: 5
+    enable_openai_compatible: true
+    engine: skyvern_v2
+    max_steps: 25
+    timeout: 600
+    max_screenshot_scrolls: 5
+    include_action_history_in_verification: true
+    max_consecutive_repeats: 3
+    max_action_occurrences: 5
 ```
 
 敏感密钥（如 `OPENAI_COMPATIBLE_API_KEY`、`SKYVERN_API_KEY`）请放在根目录 `.env` 中。
@@ -69,11 +72,10 @@ agents:
 | `lexmount` | Lexmount 云浏览器（可配 `LEXMOUNT_BROWSER_MODE`） |
 | `skyvern-cloud` | Skyvern 云浏览器 |
 
-### 常用参数
+### 模型参数
 
 | 参数 | 说明 | 示例值 |
 |------|------|--------|
-| `enable_openai_compatible` | 启用 OpenAI-Compatible 运行模式 | `true` |
 | `model_id` | LLM 模型名 | `gemini-3-flash-preview` |
 | `api_key` | LLM API 密钥（推荐 `$ENV_VAR` 形式） | `$OPENAI_COMPATIBLE_API_KEY` |
 | `base_url` | LLM API 地址 | `$OPENAI_BASE_URL` |
@@ -81,6 +83,12 @@ agents:
 | `temperature` | 温度 | `0.0` |
 | `supports_vision` | 模型是否支持视觉 | `true` |
 | `request_timeout` | LiteLLM 单次请求超时（秒） | `600` |
+
+### Agent 参数
+
+| 参数 | 说明 | 示例值 |
+|------|------|--------|
+| `enable_openai_compatible` | 启用 OpenAI-Compatible 运行模式 | `true` |
 | `headless` | 本地浏览器无头模式 | `true` / `false` |
 | `timeout` | 任务超时（秒） | `600` |
 | `max_steps` | 最大任务步数 | `25` |

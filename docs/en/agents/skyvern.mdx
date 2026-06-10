@@ -21,31 +21,34 @@ Activate `.venv` (or use `uv run bubench ...`) before running `bubench` commands
 
 ## Configuration
 
-Configure Skyvern in the root `config.yaml` under `agents.skyvern`:
+Configure shared model/browser profiles and Skyvern runtime fields in the root `config.yaml`:
 
 ```yaml
+models:
+  gemini:
+    enable_openai_compatible: true
+    model_id: gemini-3-flash-preview
+    max_tokens: 16000
+    temperature: 0.0
+    supports_vision: true
+    api_key: $OPENAI_COMPATIBLE_API_KEY
+    base_url: $OPENAI_BASE_URL
+
+browsers:
+  local:
+    browser_id: local
+    headless: false
+
 agents:
   skyvern:
-    active_model: gemini        # active model profile
-    models:
-      gemini:
-        enable_openai_compatible: true
-        model_id: gemini-3-flash-preview
-        max_tokens: 16000
-        temperature: 0.0
-        supports_vision: true
-        api_key: $OPENAI_COMPATIBLE_API_KEY
-    browser:
-      browser_id: local
-      headless: false
-    defaults:
-      engine: skyvern_v2
-      max_steps: 25
-      timeout: 600
-      max_screenshot_scrolls: 5
-      include_action_history_in_verification: true
-      max_consecutive_repeats: 3
-      max_action_occurrences: 5
+    enable_openai_compatible: true
+    engine: skyvern_v2
+    max_steps: 25
+    timeout: 600
+    max_screenshot_scrolls: 5
+    include_action_history_in_verification: true
+    max_consecutive_repeats: 3
+    max_action_occurrences: 5
 ```
 
 Store sensitive keys (e.g. `OPENAI_COMPATIBLE_API_KEY`, `SKYVERN_API_KEY`) in the repo root `.env`.
@@ -69,11 +72,10 @@ Store sensitive keys (e.g. `OPENAI_COMPATIBLE_API_KEY`, `SKYVERN_API_KEY`) in th
 | `lexmount` | Lexmount cloud browser (set `LEXMOUNT_BROWSER_MODE`) |
 | `skyvern-cloud` | Skyvern cloud browser |
 
-### Common Parameters
+### Model Parameters
 
 | Parameter | Description | Example |
 |-----------|-------------|---------|
-| `enable_openai_compatible` | Enable OpenAI-compatible mode | `true` |
 | `model_id` | LLM model name | `gemini-3-flash-preview` |
 | `api_key` | LLM API key (use `$ENV_VAR` form) | `$OPENAI_COMPATIBLE_API_KEY` |
 | `base_url` | LLM API base URL | `$OPENAI_BASE_URL` |
@@ -81,6 +83,12 @@ Store sensitive keys (e.g. `OPENAI_COMPATIBLE_API_KEY`, `SKYVERN_API_KEY`) in th
 | `temperature` | Temperature | `0.0` |
 | `supports_vision` | Model supports vision | `true` |
 | `request_timeout` | LiteLLM per-request timeout (seconds) | `600` |
+
+### Agent Parameters
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `enable_openai_compatible` | Enable OpenAI-compatible mode | `true` |
 | `execution_engine` | Skyvern execution engine | `skyvern_v2` (default) |
 | `headless` | Headless mode for local browser | `true` / `false` |
 | `timeout` | Task timeout (seconds) | `600` |

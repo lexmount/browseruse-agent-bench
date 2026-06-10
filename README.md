@@ -51,8 +51,8 @@ Together they make external results easy to run, compare, cite, and submit back.
 
 | Agent | Supported Browsers |
 |-------|-------------------|
-| [browser-use](https://github.com/browser-use/browser-use) | `Chrome-Local`, `lexmount`, `browser-use-cloud`, `agentbay` |
-| [skyvern](https://github.com/Skyvern-AI/Skyvern/) | `local`, `lexmount`, `skyvern-cloud` |
+| [browser-use](https://github.com/browser-use/browser-use) | `Chrome-Local`, `lexmount`, `browser-use-cloud`, `agentbay`, `browserbase`, `browserless`, `steel` |
+| [skyvern](https://github.com/Skyvern-AI/Skyvern/) | `local`, `lexmount`, `skyvern-cloud`, `agentbay`, `browserbase`, `browserless`, `steel` |
 | [Agent-TARS](https://github.com/bytedance/UI-TARS-desktop) | Built-in browser |
 | More agents | — |
 
@@ -123,6 +123,9 @@ vim .env
 | `LEXMOUNT_API_KEY` + `LEXMOUNT_PROJECT_ID` | Lexmount cloud browser | [browser.lexmount.cn](https://browser.lexmount.cn/) | When using lexmount |
 | `BROWSER_USE_API_KEY` | Browser Use cloud browser | [browser-use.com](https://www.browser-use.com/) | When using browser-use-cloud |
 | `AGENTBAY_API_KEY` | AgentBay cloud browser | [agentbay.ai](https://agentbay.ai/) | When using agentbay |
+| `BROWSERBASE_API_KEY` + optional `BROWSERBASE_PROJECT_ID` | Browserbase cloud browser | [browserbase.com](https://www.browserbase.com/) | When using browserbase |
+| `BROWSERLESS_API_KEY` | Browserless BaaS cloud browser | [browserless.io](https://www.browserless.io/) | When using browserless |
+| `STEEL_API_KEY` | Steel.dev cloud browser | [steel.dev](https://steel.dev/) | When using steel |
 | `HF_ENDPOINT=https://hf-mirror.com` | HuggingFace mirror (China) | — | Optional |
 
 **3.2 Runtime config (`config.yaml`)**
@@ -132,20 +135,22 @@ cp config.example.yaml config.yaml
 vim config.yaml
 ```
 
-All agents are configured in one file. Key fields under `agents.<agent>`:
+All agents are configured in one file. Runtime config is resolved as:
+`agents.<agent> + models.<model> + browsers.<browser>`.
 
 | Field | Description |
 |-------|-------------|
-| `active_model` | Which model entry to use (must match a key under `models`) |
+| `default.model` | Default model key (overridden by `--model`) |
+| `default.browser` | Default browser key (overridden by `--browser-id`) |
+| `agents.<agent>.*` | Agent params: `max_steps`, `timeout`, `use_vision`, etc. |
 | `models.<name>.model_type` | Provider: `BROWSER_USE`, `OPENAI`, `AZURE`, `GEMINI`, `ANTHROPIC` |
 | `models.<name>.model_id` | Model ID (e.g. `gpt-4.1`, `qwen3.5-plus`, `kimi-k2.5`) |
 | `models.<name>.api_key` | API key for this model (supports `$ENV_VAR` expansion) |
 | `models.<name>.base_url` | API base URL (optional, supports `$ENV_VAR` expansion) |
-| `browser.browser_id` | Browser backend: `Chrome-Local`, `lexmount`, `browser-use-cloud`, `agentbay`, `cdp` |
-| `defaults.*` | Shared agent params: `max_steps`, `timeout`, `use_vision`, etc. |
+| `browsers.<name>.browser_id` | Browser backend: `Chrome-Local`, `lexmount`, `browser-use-cloud`, `agentbay`, `browserbase`, `browserless`, `steel`, `cdp` |
 | `eval.model` + `eval.api_key` + `eval.base_url` | Evaluation model settings |
 
-To switch models, change `active_model` and ensure the matching entry exists under `models`.
+To switch per run, use `--model <name>` and `--browser-id <name>`.
 
 **4. Install Skills (Optional)**
 

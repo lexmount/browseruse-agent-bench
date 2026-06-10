@@ -105,6 +105,56 @@ def _cleanup_agentbay_session(session_id: str) -> bool:
         return False
 
 
+def _cleanup_browserbase_session(session_id: str) -> bool:
+    api_key = os.getenv("BROWSERBASE_API_KEY")
+    if not api_key:
+        logger.error("BROWSERBASE_API_KEY is required for Browserbase cleanup")
+        return False
+
+    base_url = os.getenv("BROWSERBASE_BASE_URL", "https://api.browserbase.com").rstrip("/")
+    project_id = os.getenv("BROWSERBASE_PROJECT_ID", "")
+    body: dict[str, str] = {"status": "REQUEST_RELEASE"}
+    if project_id:
+        body["projectId"] = project_id
+    try:
+        from browseruse_bench.browsers.providers.cloud_utils import post_json
+
+        post_json(
+            url=f"{base_url}/v1/sessions/{session_id}",
+            headers={"X-BB-API-Key": api_key},
+            body=body,
+            timeout_seconds=30,
+        )
+        logger.info("Requested Browserbase session release: %s", session_id)
+        return True
+    except (ConnectionError, OSError, RuntimeError, TimeoutError) as exc:
+        logger.error("Browserbase session cleanup failed (session_id=%s): %s", session_id, exc)
+        return False
+
+
+def _cleanup_steel_session(session_id: str) -> bool:
+    api_key = os.getenv("STEEL_API_KEY")
+    if not api_key:
+        logger.error("STEEL_API_KEY is required for Steel cleanup")
+        return False
+
+    base_url = os.getenv("STEEL_BASE_URL", "https://api.steel.dev").rstrip("/")
+    try:
+        from browseruse_bench.browsers.providers.cloud_utils import post_json
+
+        post_json(
+            url=f"{base_url}/v1/sessions/{session_id}/release",
+            headers={"steel-api-key": api_key},
+            body=None,
+            timeout_seconds=30,
+        )
+        logger.info("Requested Steel session release: %s", session_id)
+        return True
+    except (ConnectionError, OSError, RuntimeError, TimeoutError) as exc:
+        logger.error("Steel session cleanup failed (session_id=%s): %s", session_id, exc)
+        return False
+
+
 def _remove_state_file(path: Path) -> bool:
     try:
         path.unlink(missing_ok=True)
@@ -140,6 +190,10 @@ def cleanup_orphaned_session_state(state_file: Path) -> int:
         )
     elif backend_id == "agentbay":
         success = _cleanup_agentbay_session(session_id=session_id)
+    elif backend_id == "browserbase":
+        success = _cleanup_browserbase_session(session_id=session_id)
+    elif backend_id == "steel":
+        success = _cleanup_steel_session(session_id=session_id)
     else:
         logger.info("Unsupported backend_id in session state (%s), skipping cleanup", backend_id)
         success = True
