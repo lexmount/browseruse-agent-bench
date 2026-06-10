@@ -122,17 +122,20 @@ class AnalyzerHandler(SimpleHTTPRequestHandler):
     """Extends SimpleHTTPRequestHandler with API endpoints."""
 
     def translate_path(self, path):
-        # Map /experiments/... requests directly to REPO_ROOT/experiments/
-        # so no symlink is needed inside the package directory.
+        # Map repo-owned artifact directories directly so no symlink is needed
+        # inside the package directory.
         p = posixpath.normpath(urllib.parse.unquote(path.split('?', 1)[0].split('#', 1)[0]))
-        if p == '/experiments' or p.startswith('/experiments/'):
-            rel = p[len('/experiments'):]
-            exp_root = (REPO_ROOT / 'experiments').resolve()
-            final = Path(str(exp_root) + rel).resolve()
+        for prefix in ('experiments', 'output'):
+            route = f'/{prefix}'
+            if p != route and not p.startswith(f'{route}/'):
+                continue
+            rel = p[len(route):]
+            artifact_root = (REPO_ROOT / prefix).resolve()
+            final = Path(str(artifact_root) + rel).resolve()
             # Defense-in-depth: even after normpath, make sure the resolved
-            # path is still confined to REPO_ROOT/experiments/. Fall back to
-            # SCRIPT_DIR (which has no matching file) to produce a 404.
-            if final != exp_root and not final.is_relative_to(exp_root):
+            # path is still confined to the intended artifact directory. Fall
+            # back to SCRIPT_DIR (which has no matching file) to produce a 404.
+            if final != artifact_root and not final.is_relative_to(artifact_root):
                 return str(SCRIPT_DIR)
             return str(final)
         return super().translate_path(path)
@@ -246,7 +249,7 @@ def run_server(
         print(f"  Network access      → http://{host}:{port}")
     print(f"  Bind: {host}:{port}")
     print(f"  Watch mode: {'ON' if watch else 'OFF'}")
-    print(f"  Press Ctrl+C to stop\n")
+    print("  Press Ctrl+C to stop\n")
 
     try:
         server.serve_forever()

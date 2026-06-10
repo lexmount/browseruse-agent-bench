@@ -20,6 +20,7 @@ class DataLoader {
         this.cache = new Map();
         this.apiLogCache = new Map();
         this.systemPromptCache = new Map();
+        this.textFileCache = new Map();
         this.judgeModes = [
             { value: 'lexjudge_per_task', label: 'LexJudge / Per-task threshold' },
             { value: 'lexjudge_fixed_60', label: 'LexJudge / Fixed 60' },
@@ -72,6 +73,7 @@ class DataLoader {
             config: run.config,
             stats: this.getRunStats(run, judgeMode),
             path: run.path,
+            outputLogs: run.output_logs || [],
             evalMode: run.eval_data?.summary?.evaluation_config?.mode || null,
             displayName: this.getRunDisplayName(run)
         }));
@@ -458,6 +460,21 @@ class DataLoader {
             if (!response.ok) return null;
             const text = await response.text();
             this.systemPromptCache.set(url, text);
+            return text;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    async loadTextFile(path) {
+        if (this.textFileCache.has(path)) {
+            return this.textFileCache.get(path);
+        }
+        try {
+            const response = await fetch(path);
+            if (!response.ok) return null;
+            const text = await response.text();
+            this.textFileCache.set(path, text);
             return text;
         } catch (e) {
             return null;

@@ -11,7 +11,6 @@ from browseruse_bench.cli.run import configure_run_parser, run_command
 from browseruse_bench.cli.server import configure_server_parser, server_command
 from browseruse_bench.cli.service import configure_service_parser, service_command
 from browseruse_bench.cli.skills import configure_skills_parser, skills_command
-from browseruse_bench.cli.submit import configure_submit_parser, submit_command
 from browseruse_bench.cli.viz import configure_viz_parser, viz_command
 from browseruse_bench.utils import (
     REPO_ROOT,
@@ -28,6 +27,13 @@ load_env_file(REPO_ROOT / ".env")
 
 # Setup logger
 logger = setup_logger("bubench")
+
+
+def _submit_dependency_missing(args: argparse.Namespace, config: Dict[str, Any]) -> int:
+    raise SystemExit(
+        "[FAILED] The 'submit' command requires the optional lexbench_sdk dependency. "
+        "Install the submit extras or run a non-submit command."
+    )
 
 
 def _build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
@@ -56,8 +62,15 @@ def _build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
     run_parser.set_defaults(handler=run_command)
 
     submit_parser = subparsers.add_parser("submit", help="Submit a job to LexBench")
-    configure_submit_parser(submit_parser, config)
-    submit_parser.set_defaults(handler=submit_command)
+    try:
+        from browseruse_bench.cli.submit import configure_submit_parser, submit_command
+    except ModuleNotFoundError as exc:
+        if exc.name != "lexbench_sdk":
+            raise
+        submit_parser.set_defaults(handler=_submit_dependency_missing)
+    else:
+        configure_submit_parser(submit_parser, config)
+        submit_parser.set_defaults(handler=submit_command)
 
     eval_parser = subparsers.add_parser("eval", help="Evaluate benchmark results")
     configure_eval_parser(eval_parser, config)

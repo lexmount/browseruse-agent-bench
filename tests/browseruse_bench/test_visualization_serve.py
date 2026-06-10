@@ -44,6 +44,10 @@ class TestTranslatePath:
         result = self._translate("/experiments/bench/agent/task/screenshot.png")
         assert result == str(self.repo_root / "experiments") + "/bench/agent/task/screenshot.png"
 
+    def test_output_subpath(self):
+        result = self._translate("/output/logs/run/20260101_120000.log")
+        assert result == str(self.repo_root / "output") + "/logs/run/20260101_120000.log"
+
     def test_experiments_with_query_string(self):
         result = self._translate("/experiments/foo.png?v=1")
         assert result == str(self.repo_root / "experiments") + "/foo.png"
@@ -62,6 +66,10 @@ class TestTranslatePath:
         result = self._translate("/experiments_extra/foo")
         assert result != str(self.repo_root / "experiments") + "_extra/foo"
         assert not result.startswith(str(self.repo_root / "experiments") + "/")
+
+        result = self._translate("/output_extra/foo")
+        assert result != str(self.repo_root / "output") + "_extra/foo"
+        assert not result.startswith(str(self.repo_root / "output") + "/")
 
     def test_non_experiments_path_falls_through(self):
         # /index.html should be served from SCRIPT_DIR, not from experiments

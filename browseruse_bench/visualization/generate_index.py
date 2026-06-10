@@ -26,7 +26,6 @@ Usage:
 """
 
 import json
-import os
 import re
 import statistics
 import sys
@@ -207,6 +206,61 @@ def task_rubrics() -> Dict[str, Dict]:
 
 def _natural_sort_key(s: str):
     return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", s)]
+
+
+def _relative_repo_path(path: Path) -> Optional[str]:
+    if REPO_ROOT is None:
+        return None
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return None
+
+
+def _collect_run_output_logs(timestamp_dir: Path) -> List[Dict[str, str]]:
+    """Collect run-level logs that should be visible with an experiment."""
+    if REPO_ROOT is None:
+        return []
+
+    candidates: List[tuple[str, Path]] = []
+
+    for path in (timestamp_dir / "run.log", timestamp_dir / "eval.log"):
+        if path.is_file():
+            candidates.append(("experiment", path))
+
+    logs_dir = timestamp_dir / "logs"
+    if logs_dir.is_dir():
+        for path in sorted(logs_dir.glob("*.log"), key=lambda p: _natural_sort_key(p.name)):
+            if path.is_file():
+                candidates.append(("experiment", path))
+
+    eval_log = timestamp_dir / "tasks_eval_result" / "eval.log"
+    if eval_log.is_file():
+        candidates.append(("experiment", eval_log))
+
+    output_logs_dir = REPO_ROOT / "output" / "logs"
+    timestamp = timestamp_dir.name
+    if output_logs_dir.is_dir():
+        for category_dir in sorted(output_logs_dir.iterdir(), key=lambda p: _natural_sort_key(p.name)):
+            if not category_dir.is_dir():
+                continue
+            for path in sorted(category_dir.glob(f"*{timestamp}*.log"), key=lambda p: _natural_sort_key(p.name)):
+                if path.is_file():
+                    candidates.append((f"output/{category_dir.name}", path))
+
+    seen: set[str] = set()
+    logs: List[Dict[str, str]] = []
+    for source, path in candidates:
+        rel_path = _relative_repo_path(path)
+        if not rel_path or rel_path in seen:
+            continue
+        seen.add(rel_path)
+        logs.append({
+            "name": path.name,
+            "path": rel_path,
+            "source": source,
+        })
+    return logs
 
 
 # ------------------------------------------------------------------
@@ -450,6 +504,7 @@ def scan_run(benchmark: str, split: str, agent: str, timestamp_dir: Path, model:
         "task_ids": task_ids,
         "task_files": task_files,
         "task_meta": task_meta,
+        "output_logs": _collect_run_output_logs(timestamp_dir),
         "path": run_path_rel,
         "eval_data": eval_data,
     }

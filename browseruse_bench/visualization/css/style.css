@@ -576,6 +576,40 @@ body {
     gap: 12px;
 }
 
+.output-logs-section {
+    margin-top: 0;
+    margin-bottom: 24px;
+}
+
+.output-logs-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.output-log-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    padding: 7px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 0.82rem;
+}
+
+.output-log-item:hover {
+    border-color: var(--accent-blue);
+}
+
+.output-log-source {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
 /* ========================================
    Task Header
    ======================================== */

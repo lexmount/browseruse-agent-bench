@@ -118,6 +118,29 @@ class TestScanRunModelField:
         assert result is not None
         assert result["stats"]["avg_steps"] == 0
 
+    def test_scan_run_includes_experiment_and_output_logs(self, tmp_path, patch_repo_root):
+        run_dir = make_run_dir(tmp_path)
+        (run_dir / "run.log").write_text("experiment run log", encoding="utf-8")
+        output_log_dir = tmp_path / "output" / "logs" / "run"
+        output_log_dir.mkdir(parents=True)
+        (output_log_dir / "20260101_120000.log").write_text("outer run log", encoding="utf-8")
+
+        result = gi.scan_run("bench", "split", "agent", run_dir)
+
+        assert result is not None
+        assert result["output_logs"] == [
+            {
+                "name": "run.log",
+                "path": "20260101_120000/run.log",
+                "source": "experiment",
+            },
+            {
+                "name": "20260101_120000.log",
+                "path": "output/logs/run/20260101_120000.log",
+                "source": "output/run",
+            },
+        ]
+
 
 class TestRepoRootMissing:
     """Regression: import must succeed and generate_index() must fail cleanly when REPO_ROOT is unresolved."""

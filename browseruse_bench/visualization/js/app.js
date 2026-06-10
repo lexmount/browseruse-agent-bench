@@ -371,6 +371,7 @@ class BrowserAgentAnalyzer {
         document.getElementById('task-header').classList.add('hidden');
         document.getElementById('replay-section').classList.add('hidden');
         document.getElementById('eval-panel').classList.add('hidden');
+        document.getElementById('run-output-logs').classList.add('hidden');
 
         // Show tasks sidebar for experiment set tasks
         document.getElementById('sidebar-right').classList.remove('hidden');
@@ -945,6 +946,7 @@ class BrowserAgentAnalyzer {
         this.populateTasksList(document.getElementById('task-search').value);
         const run = dataLoader.getRuns().find(r => r.uuid === uuid);
         if (run) document.getElementById('current-run-badge').textContent = run.displayName;
+        this.renderRunOutputLogs(run);
 
         if (this.currentTask) {
             // Re-highlight the task in the refreshed list
@@ -973,6 +975,7 @@ class BrowserAgentAnalyzer {
                 this.currentRun = runs[0].uuid;
                 document.querySelector('.run-item')?.classList.add('active');
                 document.getElementById('current-run-badge').textContent = runs[0].displayName;
+                this.renderRunOutputLogs(runs[0]);
                 document.getElementById('sidebar-right').classList.remove('hidden');
                 this.populateTasksList(document.getElementById('task-search').value);
             }
@@ -1011,6 +1014,33 @@ class BrowserAgentAnalyzer {
         document.getElementById('task-description').textContent = d.task || '';
         this.renderTaskStatusBadge(String(d.task_id));
         this.renderTaskJudgeSummary(String(d.task_id));
+    }
+
+    renderRunOutputLogs(run) {
+        const section = document.getElementById('run-output-logs');
+        const container = document.getElementById('run-output-logs-list');
+        const logs = run?.outputLogs || [];
+
+        if (logs.length === 0) {
+            section.classList.add('hidden');
+            container.innerHTML = '';
+            return;
+        }
+
+        section.classList.remove('hidden');
+        container.innerHTML = logs.map((log, index) => `
+            <button class="output-log-item" data-log-index="${index}">
+                <span class="output-log-name">${this.escapeHtml(log.name || 'log')}</span>
+                <span class="output-log-source">${this.escapeHtml(log.source || '')}</span>
+            </button>
+        `).join('');
+
+        container.querySelectorAll('.output-log-item').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const log = logs[parseInt(btn.dataset.logIndex, 10)];
+                this.showOutputLogModal(log);
+            });
+        });
     }
 
     renderTaskStatusBadge(taskId) {
@@ -1452,6 +1482,7 @@ class BrowserAgentAnalyzer {
 
         const modal = document.getElementById('api-log-modal');
         modal.classList.remove('hidden');
+        modal.querySelector('.conversation-tabs').classList.remove('hidden');
         document.getElementById('modal-title').textContent = `API Log - Step ${stepNumber}`;
 
         // Prepare parsed data bundle
@@ -1474,6 +1505,26 @@ class BrowserAgentAnalyzer {
         modal.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         modal.querySelector('.tab-btn').classList.add('active');
         this.renderApiLogTab(bundle, 'memory');
+    }
+
+    async showOutputLogModal(log) {
+        if (!log?.path) return;
+        const text = await dataLoader.loadTextFile(log.path);
+        if (text === null) {
+            this.showError(`Failed to load output log: ${log.name || log.path}`);
+            return;
+        }
+
+        const modal = document.getElementById('api-log-modal');
+        modal.classList.remove('hidden');
+        modal.querySelector('.conversation-tabs').classList.add('hidden');
+        document.getElementById('modal-title').textContent = `Output Log - ${log.name || 'log'}`;
+        document.getElementById('conversation-content').innerHTML = `
+            <div class="conv-section">
+                <h4>${this.escapeHtml(log.source || '')}</h4>
+                <pre>${this.escapeHtml(text)}</pre>
+            </div>
+        `;
     }
 
     renderApiLogTab(bundle, tab) {
@@ -1822,6 +1873,7 @@ class BrowserAgentAnalyzer {
         document.getElementById('stats-view').classList.add('hidden');
         document.getElementById('btn-stats').classList.remove('active');
         document.getElementById('exp-set-view').classList.add('hidden');
+        document.getElementById('run-output-logs').classList.add('hidden');
 
         // Show welcome
         document.getElementById('welcome-screen').classList.remove('hidden');

@@ -31,6 +31,7 @@ from browseruse_bench.utils import (
     REPO_ROOT,
     DataSource,
     add_common_task_args,
+    add_file_handler,
     apply_skyvern_env,
     check_uv_available,
     ensure_venv,
@@ -305,13 +306,21 @@ class _TaskBriefWriter:
 def _write_run_manifest(
     output_dir: Path,
     *,
-    agent_config: dict[str, Any],
+    config: dict[str, Any] | None = None,
+    agent_config: dict[str, Any] | None = None,
+    resolved_agent_config: dict[str, Any] | None = None,
+    run_context: dict[str, Any] | None = None,
 ) -> None:
-    """Write config_snapshot.json for backward compatibility."""
+    """Write a redacted config snapshot for reproducibility."""
     try:
+        runtime_config = resolved_agent_config or agent_config or config or {}
+        snapshot = {
+            "run": _redact_config_secrets(run_context or {}),
+            "runtime_config": _redact_config_secrets(runtime_config),
+        }
         config_snapshot_path = output_dir / "config_snapshot.json"
         with open(config_snapshot_path, "w", encoding="utf-8") as fh:
-            json.dump(_redact_config_secrets(agent_config), fh, indent=2, ensure_ascii=False)
+            json.dump(snapshot, fh, indent=2, ensure_ascii=False)
         logger.info("Config snapshot written to %s", config_snapshot_path)
     except OSError as exc:
         logger.warning("Failed to write config_snapshot.json: %s", exc)
@@ -597,6 +606,7 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
         output_dir = output_base / timestamp
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    add_file_handler(logger, output_dir / "run.log", format_mode="plain")
 
     logger.info("Running %s on %s", agent_name, benchmark_name)
     logger.info("   Output: %s", output_dir)
@@ -903,7 +913,23 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
         try:
             _write_run_manifest(
                 output_dir,
-                agent_config=agent_config_dict,
+                resolved_agent_config=agent_cfg,
+                run_context={
+                    "agent": agent_name,
+                    "benchmark": benchmark_name,
+                    "split": args.split,
+                    "model_id": model_id,
+                    "timestamp": timestamp,
+                    "model_name_override": getattr(args, "model_name", None),
+                    "browser_id_override": getattr(args, "browser_id", None),
+                    "mode": getattr(args, "mode", None),
+                    "task_ids": getattr(args, "task_ids", None),
+                    "task_id": getattr(args, "id", None),
+                    "count": getattr(args, "count", None),
+                    "region": getattr(args, "region", None),
+                    "concurrency": getattr(args, "concurrency", None),
+                    "agent_config_path": str(getattr(args, "agent_config", None) or ""),
+                },
             )
         except (OSError, KeyError, AttributeError, TypeError) as exc:
             logger.warning("Failed to finalize run manifest: %s", exc)
