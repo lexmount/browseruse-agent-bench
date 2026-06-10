@@ -33,7 +33,10 @@ Note: I will provide the final screenshot after Agent execution. Please evaluate
 Please evaluate whether the Agent successfully completed the task based on the final screenshot and answer:
 
 1. **Result Analysis**: Judge from final screenshot whether the Agent achieved the task goal
-2. **Item-by-Item Scoring**: Provide specific scores and reasons according to scoring criteria
+2. **Item-by-Item Scoring**: Provide specific scores and reasons according to scoring criteria.
+   **You MUST also apply the following rules when scoring**:
+   - **Upstream-unreachable tolerance**: If the site resource/data the task depends on does not actually exist in the current environment or the site does not provide it (the final screenshot confirms the agent reached the correct target location AND the answer explicitly reports "I searched / the site does not provide it" or gives another clear explanation), the corresponding **upstream retrieval items** ("locate target / extract target info / count statistics / key info identification / retrieval / lookup / query") **may receive full or near-full credit**. Conversely, if the agent skipped steps before claiming "not found" or fabricated results, deduct per the original standard.
+   - **Downstream knock-on tolerance**: When upstream is confirmed unreachable per the previous rule AND the agent did not forcibly fabricate placeholder records, **downstream write items** that depend on that upstream data ("create Lead/Quotation/Task/Event/Time Off / field filling / status update / cross-system data consistency / transcription / writing / type mapping / priority judgment") **should not be flat-zeroed**; award **30%-50%** tolerance credit of their full points (up to 50% if the agent explicitly states "skipped due to upstream unavailability").
 3. **Deduction Explanation**: List triggered deduction items
 4. **Total Score Calculation**: Scoring items score - Deductions = Final score
 
