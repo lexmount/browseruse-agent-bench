@@ -171,12 +171,16 @@ class BrowserAgentAnalyzer {
                 const modelsHtml = agent.models.map(model => {
                     const mKey = `${aKey}|||${model.name}`;
                     const isModelExpanded = this.expandedModels.has(mKey);
-                    const runsHtml = model.runs.map(run => `
+                    const runsHtml = model.runs.map(run => {
+                        const browserBadge = this.renderBrowserChip(run.browser, 'tree-run-browser');
+                        return `
                         <div class="tree-run" data-uuid="${this.escapeHtml(run.uuid)}">
                             <span class="tree-run-ts">${this.escapeHtml(run.uuid.replace(/^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})/, '$1-$2-$3 $4:$5'))}</span>
+                            ${browserBadge}
                             <span class="tree-run-stats">${run.stats.successRate.toFixed(1)}% (${run.stats.successCount}/${run.stats.evaluatedTasks})</span>
                         </div>
-                    `).join('');
+                    `;
+                    }).join('');
                     return `
                         <div class="tree-model ${isModelExpanded ? 'expanded' : 'collapsed'}" data-model-key="${this.escapeHtml(mKey)}">
                             <div class="tree-model-header">
@@ -945,7 +949,7 @@ class BrowserAgentAnalyzer {
         document.getElementById('sidebar-right').classList.remove('hidden');
         this.populateTasksList(document.getElementById('task-search').value);
         const run = dataLoader.getRuns().find(r => r.uuid === uuid);
-        if (run) document.getElementById('current-run-badge').textContent = run.displayName;
+        if (run) this.updateCurrentRunBadge(run);
         this.renderRunOutputLogs(run);
 
         if (this.currentTask) {
@@ -974,13 +978,24 @@ class BrowserAgentAnalyzer {
             if (runs.length > 0) {
                 this.currentRun = runs[0].uuid;
                 document.querySelector('.run-item')?.classList.add('active');
-                document.getElementById('current-run-badge').textContent = runs[0].displayName;
+                this.updateCurrentRunBadge(runs[0]);
                 this.renderRunOutputLogs(runs[0]);
                 document.getElementById('sidebar-right').classList.remove('hidden');
                 this.populateTasksList(document.getElementById('task-search').value);
             }
         }
         await this.loadAndDisplayTask();
+    }
+
+    /**
+     * Render the timestamp + browser badge into #current-run-badge.
+     * Kept in one place so run-mode and auto-select both stay in sync.
+     */
+    updateCurrentRunBadge(run) {
+        const el = document.getElementById('current-run-badge');
+        if (!el) return;
+        const browserBadge = this.renderBrowserChip(run.browser);
+        el.innerHTML = `<span class="run-name-text">${this.escapeHtml(run.displayName)}</span>${browserBadge}`;
     }
 
     // ==================================================================
@@ -1642,6 +1657,7 @@ class BrowserAgentAnalyzer {
             <label class="checkbox-label">
                 <input type="checkbox" class="compare-run-checkbox" data-uuid="${run.uuid}" ${i < 3 ? 'checked' : ''}>
                 ${this.escapeHtml(run.displayName)}
+                ${this.renderBrowserChip(run.browser)}
             </label>
         `).join('');
 
@@ -1680,10 +1696,13 @@ class BrowserAgentAnalyzer {
 
             container.innerHTML = `
                 <div class="compare-grid" style="grid-template-columns: repeat(${valid.length}, 1fr)">
-                    ${valid.map(d => `
+                    ${valid.map(d => {
+                        const cmpBrowserBadge = this.renderBrowserChip(d.runInfo?.browser);
+                        return `
                         <div class="compare-column">
                             <div class="compare-column-header">
                                 <span class="model-name">${this.escapeHtml(d.runInfo.displayName)}</span>
+                                ${cmpBrowserBadge}
                                 <span class="score-badge ${this.getTaskJudgeClass(d.runInfo.uuid, d.task_id)}">
                                     ${this.escapeHtml(this.getTaskJudgeLabel(d.runInfo.uuid, d.task_id))}
                                 </span>
@@ -1705,7 +1724,8 @@ class BrowserAgentAnalyzer {
                                     : ''}
                             </div>
                         </div>
-                    `).join('')}
+                    `;
+                    }).join('')}
                 </div>
             `;
         } catch (err) {
@@ -2067,6 +2087,21 @@ class BrowserAgentAnalyzer {
     truncate(str, maxLen) {
         if (!str) return '';
         return str.length > maxLen ? str.substring(0, maxLen) + '...' : str;
+    }
+
+    /**
+     * Render a small browser-identity chip ("Lexmount" / "Local" / "Unknown").
+     * Extra CSS class can be passed (e.g. "tree-run-browser" inside the run tree).
+     * Returns an empty string when the kind is unknown to avoid clutter.
+     */
+    renderBrowserChip(browser, extraClass = 'run-browser-chip') {
+        const info = browser || { kind: 'unknown' };
+        if (!info.kind || info.kind === 'unknown') return '';
+        const mixedSuffix = info.mixed ? ' (mixed across tasks)' : '';
+        const tooltip = `browser_id: ${info.raw || info.label}${mixedSuffix}`;
+        const mixedFlag = info.mixed ? ' mixed' : '';
+        const mixedSymbol = info.mixed ? ' ⚡' : '';
+        return `<span class="${extraClass} browser-${info.kind}${mixedFlag}" title="${this.escapeHtml(tooltip)}">${this.escapeHtml(info.label)}${mixedSymbol}</span>`;
     }
 
     getJudgeModeLabel(mode) {

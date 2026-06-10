@@ -75,8 +75,28 @@ class DataLoader {
             path: run.path,
             outputLogs: run.output_logs || [],
             evalMode: run.eval_data?.summary?.evaluation_config?.mode || null,
+            browser: this.getRunBrowserInfo(run),
             displayName: this.getRunDisplayName(run)
         }));
+    }
+
+    /**
+     * Browser identity for a run. Reads run.browser / browser_label /
+     * browser_id_raw / browser_mixed produced by generate_index.py, and
+     * falls back to "unknown" for older indexes that pre-date this field.
+     */
+    getRunBrowserInfo(run) {
+        const kind = run?.browser || 'unknown';
+        const label = run?.browser_label
+            || (kind === 'lexmount' ? 'Lexmount'
+                : kind === 'local' ? 'Local'
+                : 'Unknown');
+        return {
+            kind,
+            label,
+            raw: run?.browser_id_raw || '',
+            mixed: !!run?.browser_mixed,
+        };
     }
 
     getRunDisplayName(run) {
@@ -116,7 +136,11 @@ class DataLoader {
             const model = agent.modelMap.get(modelName);
 
             const stats = this.getRunStats(run, judgeMode);
-            model.runs.push({ uuid: run.uuid, stats });
+            model.runs.push({
+                uuid: run.uuid,
+                stats,
+                browser: this.getRunBrowserInfo(run),
+            });
         }
 
         // Compute aggregated stats and flatten Maps to arrays
@@ -379,6 +403,7 @@ class DataLoader {
             modelId: run.model_id,
             agent: run.agent,
             benchmark: run.benchmark,
+            browser: this.getRunBrowserInfo(run),
             displayName: this.getRunDisplayName(run)
         };
 
@@ -537,6 +562,7 @@ class DataLoader {
             benchmark: run.benchmark,
             displayName: this.getRunDisplayName(run),
             split: run.split,
+            browser: this.getRunBrowserInfo(run),
             ...this.getRunStats(run, judgeMode),
             avgSteps: run.stats.avg_steps || 0,
             avgCost: run.stats.avg_cost || 0

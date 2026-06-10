@@ -29,8 +29,9 @@ import json
 import re
 import statistics
 import sys
+from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def find_repo_root() -> Path:
@@ -263,6 +264,63 @@ def _collect_run_output_logs(timestamp_dir: Path) -> List[Dict[str, str]]:
     return logs
 
 
+# Normalized browser kinds exposed to the frontend. Per-task `browser_id`
+# values seen in real result.json files: "lexmount" (lex cloud browser),
+# "Chrome-Local" / "local" (local Chrome), "" or missing (older runs / agents
+# that don't record this field, e.g. early Agent-TARS / skyvern reconstructed).
+_BROWSER_LABEL = {
+    "lexmount": "Lexmount",
+    "local": "Local",
+    "unknown": "Unknown",
+}
+
+
+def _normalize_browser_id(raw: Optional[str]) -> str:
+    """Map a raw browser_id to one of {lexmount, local, unknown}."""
+    if not raw:
+        return "unknown"
+    s = str(raw).strip().lower()
+    if not s:
+        return "unknown"
+    if "lexmount" in s:
+        return "lexmount"
+    if "local" in s:  # matches "local" and "Chrome-Local"
+        return "local"
+    return "unknown"
+
+
+def _summarize_browsers(raw_values: List[str]) -> Tuple[str, str, str, bool]:
+    """Aggregate per-task browser_id values into run-level summary fields.
+
+    Returns a 4-tuple: (browser_kind, browser_label, browser_id_raw, is_mixed)
+    where `browser_kind` is the dominant normalized kind, `browser_id_raw`
+    is the most-common original string (for tooltip / debugging), and
+    `is_mixed` is True when more than one normalized kind appears (excluding
+    "unknown" — unknown plus a known kind is treated as the known kind, not
+    mixed).
+    """
+    if not raw_values:
+        return "unknown", _BROWSER_LABEL["unknown"], "", False
+
+    kinds = [_normalize_browser_id(v) for v in raw_values]
+    known_kinds = [k for k in kinds if k != "unknown"]
+
+    if known_kinds:
+        kind_counts = Counter(known_kinds)
+        dominant_kind = kind_counts.most_common(1)[0][0]
+        is_mixed = len(set(known_kinds)) > 1
+    else:
+        dominant_kind = "unknown"
+        is_mixed = False
+
+    # Most common non-empty raw string for display (helps distinguish
+    # "Chrome-Local" vs "local" inside the Local kind).
+    raw_counts = Counter(v for v in raw_values if v)
+    raw_dominant = raw_counts.most_common(1)[0][0] if raw_counts else ""
+
+    return dominant_kind, _BROWSER_LABEL[dominant_kind], raw_dominant, is_mixed
+
+
 # ------------------------------------------------------------------
 # Per-task scanning
 # ------------------------------------------------------------------
@@ -306,6 +364,7 @@ def scan_task(task_dir: Path, run_path_rel: str) -> Optional[Dict]:
         "task_id": task_id,
         "task": result.get("task", ""),
         "model_id": result.get("model_id", "unknown"),
+        "browser_id": result.get("browser_id", ""),
         "agent_success": result.get("agent_success"),
         "agent_done": result.get("agent_done"),
         "env_status": result.get("env_status"),
@@ -449,6 +508,13 @@ def scan_run(benchmark: str, split: str, agent: str, timestamp_dir: Path, model:
     model_id = first.get("model_id", "unknown")
     config = first.get("config", {})
 
+    # Aggregate browser_id across all tasks. Picking the dominant value
+    # (rather than only first task) is robust to synthetic / reconstructed
+    # placeholder records that may carry an empty browser_id.
+    browser_kind, browser_label, browser_raw, browser_mixed = _summarize_browsers(
+        [t.get("browser_id", "") for t in tasks.values()]
+    )
+
     # Stats
     total = len(tasks)
     evaluated = len(eval_data["task_results"])
@@ -493,6 +559,10 @@ def scan_run(benchmark: str, split: str, agent: str, timestamp_dir: Path, model:
         "model": model,
         "model_id": model_id,
         "config": config,
+        "browser": browser_kind,
+        "browser_label": browser_label,
+        "browser_id_raw": browser_raw,
+        "browser_mixed": browser_mixed,
         "stats": {
             "total_tasks": total,
             "evaluated_tasks": evaluated,
