@@ -341,10 +341,27 @@ class BrowserAgentAnalyzer {
                 `;
             }).join('');
         } else {
+            // Only show the per-task browser dot when the current run mixes
+            // browsers — otherwise every task would carry a redundant dot of
+            // the same color.
+            const run = this.currentRun ? dataLoader.getRunByUuid(this.currentRun) : null;
+            const showTaskBrowser = !!run?.browser_mixed;
+
             container.innerHTML = taskIds.map(taskId => {
                 const scoreInfo = this.getTaskScoreInfo(taskId);
+                let browserTag = '';
+                if (showTaskBrowser && this.currentRun) {
+                    const kind = dataLoader.getTaskBrowserKind(this.currentRun, taskId);
+                    const raw = dataLoader.getTaskBrowserRaw(this.currentRun, taskId);
+                    const label = kind === 'lexmount' ? 'Lexmount'
+                        : kind === 'local' ? 'Local'
+                        : 'Unknown';
+                    const tooltip = raw ? `browser_id: ${raw}` : 'browser_id missing';
+                    browserTag = `<span class="task-browser-tag browser-${kind}" title="${this.escapeHtml(tooltip)}">${label}</span>`;
+                }
                 return `
                     <div class="filter-item task-item" data-task-id="${taskId}">
+                        ${browserTag}
                         <span class="task-id">Task ${taskId}</span>
                         ${scoreInfo ? `<span class="task-score ${scoreInfo.cls}">${scoreInfo.text}</span>` : ''}
                     </div>
@@ -2090,18 +2107,37 @@ class BrowserAgentAnalyzer {
     }
 
     /**
-     * Render a small browser-identity chip ("Lexmount" / "Local" / "Unknown").
+     * Render a small browser-identity chip.
+     *   - non-mixed run: "Lexmount" / "Local"   (colored chip, kind = lexmount/local)
+     *   - mixed run     : "Mixed (47 lexmount + 2 local)"  (orange chip, kind = mixed)
+     *   - unknown      : empty string (no chip — avoids clutter for skyvern/old runs)
+     *
      * Extra CSS class can be passed (e.g. "tree-run-browser" inside the run tree).
-     * Returns an empty string when the kind is unknown to avoid clutter.
      */
     renderBrowserChip(browser, extraClass = 'run-browser-chip') {
         const info = browser || { kind: 'unknown' };
         if (!info.kind || info.kind === 'unknown') return '';
-        const mixedSuffix = info.mixed ? ' (mixed across tasks)' : '';
-        const tooltip = `browser_id: ${info.raw || info.label}${mixedSuffix}`;
-        const mixedFlag = info.mixed ? ' mixed' : '';
-        const mixedSymbol = info.mixed ? ' ⚡' : '';
-        return `<span class="${extraClass} browser-${info.kind}${mixedFlag}" title="${this.escapeHtml(tooltip)}">${this.escapeHtml(info.label)}${mixedSymbol}</span>`;
+
+        if (info.mixed) {
+            // Build the inline distribution from the breakdown: only show
+            // known kinds in the chip face (unknown is data noise, not a real
+            // browser switch — it goes in the tooltip instead).
+            const breakdown = info.breakdown || {};
+            const knownParts = Object.entries(breakdown)
+                .filter(([kind]) => kind === 'lexmount' || kind === 'local')
+                .map(([kind, count]) => `${count} ${kind}`);
+            const text = knownParts.length > 0
+                ? `Mixed (${knownParts.join(' + ')})`
+                : 'Mixed';
+            const tooltipParts = Object.entries(breakdown).map(
+                ([kind, count]) => `${count} ${kind}`
+            );
+            const tooltip = `Browser distribution across tasks: ${tooltipParts.join(', ')}`;
+            return `<span class="${extraClass} browser-mixed" title="${this.escapeHtml(tooltip)}">${this.escapeHtml(text)}</span>`;
+        }
+
+        const tooltip = `browser_id: ${info.raw || info.label}`;
+        return `<span class="${extraClass} browser-${info.kind}" title="${this.escapeHtml(tooltip)}">${this.escapeHtml(info.label)}</span>`;
     }
 
     getJudgeModeLabel(mode) {

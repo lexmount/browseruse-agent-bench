@@ -82,8 +82,9 @@ class DataLoader {
 
     /**
      * Browser identity for a run. Reads run.browser / browser_label /
-     * browser_id_raw / browser_mixed produced by generate_index.py, and
-     * falls back to "unknown" for older indexes that pre-date this field.
+     * browser_id_raw / browser_mixed / browser_breakdown produced by
+     * generate_index.py, and falls back to "unknown" for older indexes
+     * that pre-date these fields.
      */
     getRunBrowserInfo(run) {
         const kind = run?.browser || 'unknown';
@@ -96,7 +97,23 @@ class DataLoader {
             label,
             raw: run?.browser_id_raw || '',
             mixed: !!run?.browser_mixed,
+            breakdown: run?.browser_breakdown || {},
         };
+    }
+
+    /**
+     * Per-task browser kind. Used by populateTasksList to mark each task
+     * with the browser that ran it (only meaningful when the run is mixed).
+     * Returns one of {lexmount, local, unknown}.
+     */
+    getTaskBrowserKind(uuid, taskId) {
+        const meta = this.getTaskMeta(uuid, taskId);
+        return meta?.browser || 'unknown';
+    }
+
+    getTaskBrowserRaw(uuid, taskId) {
+        const meta = this.getTaskMeta(uuid, taskId);
+        return meta?.browser_id_raw || '';
     }
 
     getRunDisplayName(run) {
