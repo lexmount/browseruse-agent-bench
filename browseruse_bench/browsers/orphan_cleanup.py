@@ -18,10 +18,21 @@ def _load_session_state(state_file: Path) -> dict[str, str]:
     session_id = str(data.get("session_id") or "").strip()
     if not backend_id or not session_id:
         raise ValueError("Session state file must include backend_id and session_id")
+    cleanup_metadata_raw = str(data.get("cleanup_metadata") or "").strip()
+    cleanup_metadata: dict[str, str] = {}
+    if cleanup_metadata_raw:
+        try:
+            decoded_metadata = json.loads(cleanup_metadata_raw)
+        except json.JSONDecodeError:
+            decoded_metadata = {}
+        if isinstance(decoded_metadata, dict):
+            cleanup_metadata = {str(k): str(v) for k, v in decoded_metadata.items()}
+
     return {
         "backend_id": backend_id,
         "session_id": session_id,
         "forked_context_id": str(data.get("forked_context_id") or "").strip(),
+        "cleanup_metadata": json.dumps(cleanup_metadata, ensure_ascii=True),
     }
 
 
@@ -105,14 +116,32 @@ def _cleanup_agentbay_session(session_id: str) -> bool:
         return False
 
 
-def _cleanup_browserbase_session(session_id: str) -> bool:
-    api_key = os.getenv("BROWSERBASE_API_KEY")
+def _read_cleanup_metadata(state: dict[str, str]) -> dict[str, str]:
+    raw_metadata = state.get("cleanup_metadata", "")
+    if not raw_metadata:
+        return {}
+    try:
+        decoded = json.loads(raw_metadata)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(decoded, dict):
+        return {}
+    return {str(k): str(v) for k, v in decoded.items()}
+
+
+def _cleanup_browserbase_session(session_id: str, metadata: dict[str, str] | None = None) -> bool:
+    metadata = metadata or {}
+    api_key = metadata.get("api_key") or os.getenv("BROWSERBASE_API_KEY")
     if not api_key:
         logger.error("BROWSERBASE_API_KEY is required for Browserbase cleanup")
         return False
 
-    base_url = os.getenv("BROWSERBASE_BASE_URL", "https://api.browserbase.com").rstrip("/")
-    project_id = os.getenv("BROWSERBASE_PROJECT_ID", "")
+    base_url = (metadata.get("base_url") or os.getenv("BROWSERBASE_BASE_URL", "https://api.browserbase.com")).rstrip("/")
+    project_id = metadata.get("project_id") or os.getenv("BROWSERBASE_PROJECT_ID", "")
+    try:
+        timeout_seconds = int(metadata.get("request_timeout") or 30)
+    except ValueError:
+        timeout_seconds = 30
     body: dict[str, str] = {"status": "REQUEST_RELEASE"}
     if project_id:
         body["projectId"] = project_id
@@ -123,7 +152,7 @@ def _cleanup_browserbase_session(session_id: str) -> bool:
             url=f"{base_url}/v1/sessions/{session_id}",
             headers={"X-BB-API-Key": api_key},
             body=body,
-            timeout_seconds=30,
+            timeout_seconds=timeout_seconds,
         )
         logger.info("Requested Browserbase session release: %s", session_id)
         return True
@@ -191,7 +220,10 @@ def cleanup_orphaned_session_state(state_file: Path) -> int:
     elif backend_id == "agentbay":
         success = _cleanup_agentbay_session(session_id=session_id)
     elif backend_id == "browserbase":
-        success = _cleanup_browserbase_session(session_id=session_id)
+        success = _cleanup_browserbase_session(
+            session_id=session_id,
+            metadata=_read_cleanup_metadata(state),
+        )
     elif backend_id == "steel":
         success = _cleanup_steel_session(session_id=session_id)
     else:

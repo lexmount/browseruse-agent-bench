@@ -82,7 +82,16 @@ class BrowserbaseBackend(BrowserBackend):
             )
             raise RuntimeError("Browserbase session creation failed: connectUrl is empty")
 
-        write_session_state(backend_id=self.backend_id, session_id=session_id)
+        write_session_state(
+            backend_id=self.backend_id,
+            session_id=session_id,
+            cleanup_metadata={
+                "api_key": str(api_key),
+                "base_url": base_url,
+                "project_id": str(project_id or ""),
+                "request_timeout": str(timeout_seconds),
+            },
+        )
         logger.info("[SUCCESS] Browserbase session created: %s", session_id)
         return BrowserSessionContext(
             backend_id=self.backend_id,
@@ -100,6 +109,7 @@ class BrowserbaseBackend(BrowserBackend):
 
     def close(self, session_context: BrowserSessionContext) -> None:
         session_id = str(session_context.metadata.get("session_id") or "")
+        released = False
         if session_id:
             try:
                 self._release_session(
@@ -109,8 +119,13 @@ class BrowserbaseBackend(BrowserBackend):
                     session_id=session_id,
                     timeout_seconds=int(session_context.metadata.get("request_timeout") or 30),
                 )
+                released = True
             except cloud_utils.CLEANUP_EXCEPTIONS as exc:
                 logger.error("Browserbase session release failed (session_id=%s): %s", session_id, exc)
+        else:
+            released = True
+        if not released:
+            return
         try:
             clear_session_state()
         except (OSError, RuntimeError) as exc:

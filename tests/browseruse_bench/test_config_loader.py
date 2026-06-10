@@ -394,13 +394,17 @@ class TestSkyvernConfigCanonicalization:
             for w in caught
         )
 
-    def test_apply_skyvern_env_uses_temp_postgres_db_by_default(self) -> None:
+    def test_apply_skyvern_env_uses_temp_postgres_db_by_default(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("BUBENCH_SKYVERN_POSTGRES_HOST", "/var/run/postgresql")
         env = {"DATABASE_STRING": "postgresql+psycopg://old/skyvern"}
 
         config_loader_module.apply_skyvern_env({"enable_openai_compatible": True}, env)
 
         assert env["DATABASE_STRING"].startswith("postgresql+psycopg:///bubench_skyvern_")
-        assert env["DATABASE_STRING"].endswith("?host=/tmp")
+        assert env["DATABASE_STRING"].endswith("?host=/var/run/postgresql")
 
     def test_apply_skyvern_env_preserves_explicit_database_string(self) -> None:
         env = {"DATABASE_STRING": "postgresql+psycopg://old/skyvern"}

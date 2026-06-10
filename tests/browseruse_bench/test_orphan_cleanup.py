@@ -83,6 +83,55 @@ def test_cleanup_browserbase_session_state(
     ]
 
 
+def test_cleanup_browserbase_session_uses_state_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls = []
+    state_file = tmp_path / "state.json"
+    state_file.write_text(
+        json.dumps(
+            {
+                "backend_id": "browserbase",
+                "session_id": "bb-session-1",
+                "cleanup_metadata": json.dumps(
+                    {
+                        "api_key": "metadata-key",
+                        "base_url": "https://browserbase.example",
+                        "project_id": "metadata-project",
+                        "request_timeout": "12",
+                    }
+                ),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_post_json(**kwargs):
+        calls.append(kwargs)
+        return {"id": "bb-session-1"}
+
+    monkeypatch.delenv("BROWSERBASE_API_KEY", raising=False)
+    monkeypatch.delenv("BROWSERBASE_PROJECT_ID", raising=False)
+    monkeypatch.setattr(
+        "browseruse_bench.browsers.providers.cloud_utils.post_json",
+        fake_post_json,
+    )
+
+    result = orphan_cleanup_module.cleanup_orphaned_session_state(state_file)
+
+    assert result == 0
+    assert not state_file.exists()
+    assert calls == [
+        {
+            "url": "https://browserbase.example/v1/sessions/bb-session-1",
+            "headers": {"X-BB-API-Key": "metadata-key"},
+            "body": {"status": "REQUEST_RELEASE", "projectId": "metadata-project"},
+            "timeout_seconds": 12,
+        }
+    ]
+
+
 def test_cleanup_steel_session_state(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

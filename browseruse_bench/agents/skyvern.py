@@ -110,7 +110,10 @@ _SKYVERN_IMPORT_ERROR: str | None = None
 
 def _make_temp_database_string() -> str:
     db_name = f"bubench_skyvern_{uuid.uuid4().hex}"
-    return f"postgresql+psycopg:///{db_name}?host=/tmp"
+    socket_host = os.getenv("BUBENCH_SKYVERN_POSTGRES_HOST")
+    if not socket_host:
+        socket_host = "/var/run/postgresql" if Path("/var/run/postgresql").exists() else "/tmp"
+    return f"postgresql+psycopg:///{db_name}?host={urllib.parse.quote(socket_host, safe='/')}"
 
 
 def _parse_temp_postgres_database(database_string: str) -> tuple[str, urllib.parse.SplitResult] | None:
@@ -386,7 +389,7 @@ def _extract_usage_from_response_blob(blob: Any) -> dict[str, int] | None:
     shaped like ``{"prompt_tokens": int, "completion_tokens": int, ...}``
     regardless of where it lives in the JSON tree.
     """
-    if not isinstance(blob, (dict, list)):
+    if not isinstance(blob, dict | list):
         return None
 
     def _safe_int(v: Any) -> int:
@@ -438,11 +441,11 @@ def _extract_usage_from_response_blob(blob: Any) -> dict[str, int] | None:
             if found:
                 return found
             for v in node.values():
-                if isinstance(v, (dict, list)):
+                if isinstance(v, dict | list):
                     stack.append(v)
         elif isinstance(node, list):
             for item in node:
-                if isinstance(item, (dict, list)):
+                if isinstance(item, dict | list):
                     stack.append(item)
     return None
 
@@ -572,7 +575,7 @@ def _normalize_answer_text(value: Any) -> tuple[str, Any | None]:
         return "", None
     if isinstance(value, str):
         return value, None
-    if isinstance(value, (dict, list)):
+    if isinstance(value, dict | list):
         return json.dumps(value, ensure_ascii=False), value
     return str(value), value
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -13,8 +15,12 @@ from browseruse_bench.browsers.providers.steel import SteelBackend
 from browseruse_bench.browsers.registry import get_backend
 
 
-def test_browserbase_backend_open_and_close(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_browserbase_backend_open_and_close(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     calls: list[dict[str, Any]] = []
+    state_file = tmp_path / "session-state.json"
 
     def fake_post_json(**kwargs: Any) -> dict[str, Any]:
         calls.append(kwargs)
@@ -24,6 +30,7 @@ def test_browserbase_backend_open_and_close(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(browserbase_module.cloud_utils, "post_json", fake_post_json)
     monkeypatch.delenv("BROWSERBASE_API_KEY", raising=False)
+    monkeypatch.setenv("BROWSERUSE_BENCH_SESSION_STATE_FILE", str(state_file))
     backend = BrowserbaseBackend("browserbase")
 
     session_context = backend.open(
@@ -48,10 +55,43 @@ def test_browserbase_backend_open_and_close(monkeypatch: pytest.MonkeyPatch) -> 
             "region": "us-east-1",
         },
     }
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    cleanup_metadata = json.loads(state["cleanup_metadata"])
+    assert cleanup_metadata == {
+        "api_key": "bb-key",
+        "base_url": "https://api.browserbase.com",
+        "project_id": "project-1",
+        "request_timeout": "30",
+    }
 
     backend.close(session_context)
     assert calls[1]["url"] == "https://api.browserbase.com/v1/sessions/bb-session-1"
     assert calls[1]["body"] == {"status": "REQUEST_RELEASE", "projectId": "project-1"}
+    assert not state_file.exists()
+
+
+def test_browserbase_backend_keeps_state_when_release_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    state_file = tmp_path / "session-state.json"
+
+    def fake_post_json(**kwargs: Any) -> dict[str, Any]:
+        if kwargs["url"].endswith("/v1/sessions"):
+            return {"id": "bb-session-1", "connectUrl": "wss://browserbase.example/cdp"}
+        raise RuntimeError("release failed")
+
+    monkeypatch.setattr(browserbase_module.cloud_utils, "post_json", fake_post_json)
+    monkeypatch.setenv("BROWSERUSE_BENCH_SESSION_STATE_FILE", str(state_file))
+    backend = BrowserbaseBackend("browserbase")
+
+    session_context = backend.open(
+        agent_name="browser-use",
+        agent_config={"browserbase_api_key": "bb-key"},
+    )
+    backend.close(session_context)
+
+    assert state_file.exists()
 
 
 def test_browserbase_backend_requires_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -106,7 +146,7 @@ def test_browserless_backend_resolves_debugger_url(monkeypatch: pytest.MonkeyPat
     assert session_context.cdp_url == "wss://production-ams.browserless.io/e/session"
     assert calls[0]["url"] == (
         "https://production-ams.browserless.io/json/version"
-        "?token=browserless-token&timeout=600"
+        "?token=browserless-token&timeout=600000"
     )
 
 
@@ -125,7 +165,7 @@ def test_browserless_backend_builds_cdp_url(monkeypatch: pytest.MonkeyPatch) -> 
     assert session_context.transport == "cdp"
     assert session_context.cdp_url == (
         "wss://production-ams.browserless.io"
-        "?token=browserless-token&timeout=600"
+        "?token=browserless-token&timeout=600000"
     )
 
 
