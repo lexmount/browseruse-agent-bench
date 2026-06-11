@@ -14,7 +14,11 @@ from browseruse_bench.utils import (
     REPO_ROOT,
     handle_cli_errors,
     load_config_file,
+    load_data_info,
     load_env_file,
+    normalize_agent_name,
+    normalize_benchmark_name,
+    normalize_split_name,
     resolve_agent_inline_config,
     setup_logger,
 )
@@ -394,21 +398,25 @@ def _resolve_agent_api_key(agent_name: str, agent_cfg: dict[str, Any]) -> str | 
 
 
 
-def _load_submit_agent_config(agent_name: str, config_path: Path | None) -> dict[str, Any]:
+def _resolve_submit_config_path(config_path: Path | None) -> Path | None:
+    """Resolve the root-config file submit reads: explicit path, cwd, then repo root."""
     if config_path is None:
         cwd_root = Path.cwd() / "config.yaml"
         if cwd_root.exists():
-            config_path = cwd_root
-        else:
-            default_root = REPO_ROOT / "config.yaml"
-            if not default_root.exists():
-                return {}
-            config_path = default_root
-    elif not config_path.is_absolute():
+            return cwd_root
+        default_root = REPO_ROOT / "config.yaml"
+        return default_root if default_root.exists() else None
+    if not config_path.is_absolute():
         config_path = Path.cwd() / config_path
-
     if not config_path.exists():
         raise SystemExit(f"[FAILED] --agent-config file not found: {config_path}")
+    return config_path
+
+
+def _load_submit_agent_config(agent_name: str, config_path: Path | None) -> dict[str, Any]:
+    config_path = _resolve_submit_config_path(config_path)
+    if config_path is None:
+        return {}
 
     config = load_config_file(config_path)
     if not isinstance(config, dict):
@@ -648,7 +656,19 @@ def submit_command(args: argparse.Namespace, config: dict[str, Any]) -> int:
     """Entry point for the submit subcommand."""
     del config
     logger.info("Starting submit command")
-    return submit_job(args.agent, args.data, args)
+    # Normalize against the same config file the job payload is built from
+    # (explicit --agent-config, then cwd, then repo root) so custom agents
+    # defined only in a cwd config.yaml still resolve case-insensitively.
+    submit_config_path = _resolve_submit_config_path(getattr(args, "agent_config", None))
+    submit_config = load_config_file(submit_config_path) if submit_config_path else {}
+    if not isinstance(submit_config, dict):
+        submit_config = {}
+    agent_name = normalize_agent_name(args.agent, submit_config)
+    benchmark_name = normalize_benchmark_name(args.data)
+    if args.split:
+        data_info = load_data_info(REPO_ROOT / "browseruse_bench" / "data" / benchmark_name)
+        args.split = normalize_split_name(args.split, data_info)
+    return submit_job(agent_name, benchmark_name, args)
 
 
 @handle_cli_errors

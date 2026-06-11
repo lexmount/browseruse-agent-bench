@@ -27,9 +27,14 @@ from browseruse_bench.utils.config_loader import (
     load_config_file,
     load_data_info,
     load_eval_config,
+    normalize_agent_name,
+    normalize_benchmark_name,
+    normalize_split_name,
     resolve_agent_entry,
     resolve_agent_inline_config,
+    resolve_dir_name_case_insensitive,
     resolve_output_model_id,
+    resolve_split,
 )
 from browseruse_bench.utils.constants import (
     BENCHMARKS_DIR,
