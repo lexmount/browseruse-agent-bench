@@ -11,13 +11,21 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shutil
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from browseruse_bench.agents.cli_agent import CLIAgent
+from browseruse_bench.agents.playwright_mcp import (
+    DEFAULT_BROWSER_RULES,
+    SELF_LAUNCH_BROWSER_IDS,
+    STEP_ITEM_TYPES,
+    build_playwright_mcp_args,
+    collect_screenshots,
+    extract_actions,
+    write_api_logs,
+)
 from browseruse_bench.agents.registry import register_agent
 from browseruse_bench.browsers import open_browser_session
 from browseruse_bench.browsers.providers.local import warn_if_local_proxy_unsupported
@@ -25,31 +33,6 @@ from browseruse_bench.schemas import AgentMetrics, AgentResult, AgentUsage
 from browseruse_bench.utils import IS_WINDOWS
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_RULES = (
-    "You are a browser automation agent. "
-    "You MUST use ONLY the Playwright MCP tools (server 'playwright') for ALL browser "
-    "interactions. Do NOT run shell commands, do NOT read or write files, and do NOT "
-    "use skills or any non-Playwright tools."
-    "\n\nTask completion rules:\n"
-    "- If you can see enough information to answer the task from the current page (e.g., "
-    "ratings, names, prices visible in search results), provide your answer IMMEDIATELY "
-    "without clicking into individual items to get more detail.\n"
-    "- If you encounter a CAPTCHA, verification page, login wall, or access restriction: "
-    "close that tab, return to the previous page, and use the data already collected to answer.\n"
-    "- Do NOT get stuck retrying the same blocked action. One retry max, then fall back.\n"
-    "\n\nScreenshot rules:\n"
-    "- When taking screenshots, do NOT specify a filename parameter.\n"
-    "- Take a screenshot with browser_take_screenshot after navigating to the main page "
-    "and after finding the answer."
-)
-
-# JSONL item types that represent an agent step (tool usage).
-_STEP_ITEM_TYPES = {"mcp_tool_call", "command_execution"}
-
-# Browser ids where Playwright MCP launches its own local browser instead of
-# connecting to a managed backend session over CDP.
-_SELF_LAUNCH_BROWSER_IDS = {"", "local", "Chrome-Local"}
 
 
 def _parse_events(stdout_lines: list[str]) -> tuple[str, list[dict[str, Any]], dict[str, int], str | None]:
@@ -110,119 +93,6 @@ def _extract_error_message(obj: dict[str, Any]) -> str | None:
     return None
 
 
-def _describe_item(item: dict[str, Any]) -> str | None:
-    """Map a completed step item to a short action description."""
-    item_type = item.get("type")
-    if item_type == "command_execution":
-        return f"Shell: {str(item.get('command', ''))[:80]}"
-    if item_type != "mcp_tool_call":
-        return None
-    tool = str(item.get("tool", ""))
-    arguments = item.get("arguments")
-    if not isinstance(arguments, dict):
-        arguments = {}
-    if "navigate" in tool:
-        return f"Navigate to {arguments.get('url', '')}"
-    if "click" in tool:
-        return f"Click: {arguments.get('element', arguments.get('ref', ''))}"
-    if "type" in tool or "fill" in tool:
-        return f"Type: {str(arguments.get('text', arguments.get('value', '')))[:60]}"
-    if "screenshot" in tool:
-        return "Take screenshot"
-    if "snapshot" in tool:
-        return "Take snapshot"
-    if "press" in tool:
-        return f"Press key: {arguments.get('key', '')}"
-    return tool or None
-
-
-def _extract_actions(items: list[dict[str, Any]]) -> list[str]:
-    actions: list[str] = []
-    for item in items:
-        description = _describe_item(item)
-        if description:
-            actions.append(description)
-    return actions
-
-
-def _collect_screenshots(task_workspace: Path, trajectory_dir: Path) -> list[str]:
-    """Copy Playwright MCP screenshots into trajectory/.
-
-    Screenshots land in .playwright-mcp/ by default, or in the workspace root
-    when the model passes an explicit filename despite the rules.
-    """
-    candidates: list[Path] = []
-    for parent in (task_workspace / ".playwright-mcp", task_workspace):
-        if parent.is_dir():
-            candidates += [
-                p for p in parent.iterdir() if p.suffix.lower() in (".png", ".jpeg", ".jpg")
-            ]
-    images = sorted(candidates, key=lambda p: p.stat().st_mtime)
-    saved: list[str] = []
-    for index, image in enumerate(images, 1):
-        fname = f"screenshot-{index}{image.suffix.lower()}"
-        try:
-            trajectory_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(image, trajectory_dir / fname)
-            saved.append(fname)
-        except OSError as exc:
-            logger.warning("Failed to copy screenshot %s: %s", image.name, exc)
-    return saved
-
-
-def _write_api_logs(
-    task_id: str,
-    model_id: str,
-    rules: str,
-    items: list[dict[str, Any]],
-    api_logs_dir: Path,
-) -> None:
-    """Write api_logs/step_NNN.json + system_prompt.txt for step items."""
-    api_logs_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        (api_logs_dir / "system_prompt.txt").write_text(rules, encoding="utf-8")
-    except OSError as exc:
-        logger.warning("Failed to write system_prompt.txt: %s", exc)
-
-    step_items = [item for item in items if item.get("type") in _STEP_ITEM_TYPES]
-    for step_number, item in enumerate(step_items, 1):
-        step_data = {
-            "metadata": {
-                "task_id": task_id,
-                "step_number": step_number,
-                "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
-                "model_id": model_id,
-            },
-            "output": {"actions": [{"tool": item.get("tool") or item.get("command"), "input": item.get("arguments")}]},
-            "action_results": [_item_result_summary(item)],
-        }
-        try:
-            (api_logs_dir / f"step_{step_number:03d}.json").write_text(
-                json.dumps(step_data, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-        except (OSError, TypeError) as exc:
-            logger.warning("Failed to write step %d log: %s", step_number, exc)
-
-
-def _item_result_summary(item: dict[str, Any]) -> dict[str, Any]:
-    summary: dict[str, Any] = {"status": item.get("status")}
-    result = item.get("result")
-    if isinstance(result, dict):
-        texts = [
-            block.get("text", "")
-            for block in result.get("content", [])
-            if isinstance(block, dict) and block.get("type") == "text"
-        ]
-        if texts:
-            summary["extracted_content"] = "\n".join(texts)
-    error = item.get("error")
-    if isinstance(error, dict) and error.get("message"):
-        summary["error"] = error["message"]
-    if item.get("aggregated_output"):
-        summary["extracted_content"] = str(item["aggregated_output"])[:2000]
-    return summary
-
-
 def _toml_value(value: Any) -> str:
     """Render a -c override value as TOML (JSON syntax is TOML-compatible here)."""
     return json.dumps(value, ensure_ascii=False)
@@ -255,7 +125,7 @@ class CodexAgent(CLIAgent):
         Playwright MCP, so login contexts/proxies injected by cli/run.py apply.
         """
         browser_id = str(agent_config.get("browser_id") or "")
-        if browser_id in _SELF_LAUNCH_BROWSER_IDS:
+        if browser_id in SELF_LAUNCH_BROWSER_IDS:
             warn_if_local_proxy_unsupported(agent_config, self.name)
             return self._execute(task_info, agent_config, task_workspace, cdp_url=None)
         with open_browser_session(
@@ -296,7 +166,7 @@ class CodexAgent(CLIAgent):
     ) -> AgentResult:
         task_id = task_info["task_id"]
         prompt = task_info.get("prompt") or self.build_task_prompt(task_info)
-        rules = agent_config.get("system_prompt") or _DEFAULT_RULES
+        rules = agent_config.get("system_prompt") or DEFAULT_BROWSER_RULES
         model = agent_config.get("model_id") or agent_config.get("model", "gpt-5.5")
         timeout = self._resolve_timeout(task_id, agent_config)
 
@@ -378,12 +248,7 @@ class CodexAgent(CLIAgent):
     ) -> list[str]:
         sandbox = agent_config.get("sandbox_mode", "read-only")
         mcp_command = agent_config.get("playwright_mcp_command", "npx")
-        mcp_args = list(agent_config.get("playwright_mcp_args", ["@playwright/mcp@latest"]))
-        # --timeout-action 30000: raise from the 5000ms default (screenshots time
-        # out on pages with slow external font CDNs).
-        mcp_args += ["--timeout-action", "30000"]
-        if cdp_url:
-            mcp_args += ["--cdp-endpoint", cdp_url]
+        mcp_args = build_playwright_mcp_args(agent_config, cdp_url)
         mcp_startup_timeout = int(agent_config.get("mcp_startup_timeout", 120))
         mcp_tool_timeout = int(agent_config.get("mcp_tool_timeout", 120))
 
@@ -436,11 +301,11 @@ class CodexAgent(CLIAgent):
         if env_status == "failed" and not answer:
             answer = f"[Task Failed: {execution_error or error_message or 'No output from Codex'}]"
 
-        saved_screenshots = _collect_screenshots(task_workspace, trajectory_dir)
-        steps = sum(1 for item in items if item.get("type") in _STEP_ITEM_TYPES)
+        saved_screenshots = collect_screenshots(task_workspace, trajectory_dir)
+        steps = sum(1 for item in items if item.get("type") in STEP_ITEM_TYPES)
         if items:
             try:
-                _write_api_logs(task_id, model, rules, items, task_workspace / "api_logs")
+                write_api_logs(task_id, model, rules, items, task_workspace / "api_logs")
             except (OSError, TypeError, ValueError) as exc:
                 logger.warning("Failed to generate api_logs for task %s: %s", task_id, exc)
 
@@ -459,7 +324,7 @@ class CodexAgent(CLIAgent):
             agent_done=agent_done,  # type: ignore[arg-type]
             answer=answer,
             error=(execution_error or error_message) if env_status == "failed" else None,
-            action_history=_extract_actions(items),
+            action_history=extract_actions(items),
             screenshots=saved_screenshots,
             model_id=model,
             metrics=AgentMetrics(end_to_end_ms=duration_ms, steps=steps, usage=usage),

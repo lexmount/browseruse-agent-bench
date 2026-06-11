@@ -160,6 +160,13 @@ models:
     model_type: OPENAI
     model_id: gpt-5.5
     api_key: $OPENAI_API_KEY
+  # Cursor CLI model. Only supported by the cursor agent; model calls are
+  # routed through Cursor's backend, so auth is `cursor-agent login` or
+  # CURSOR_API_KEY (a Cursor key, not an OpenAI key).
+  cursor:
+    model_type: OPENAI
+    model_id: gpt-5.2
+    api_key: $CURSOR_API_KEY
 browsers:
   lexmount:
     browser_id: lexmount
@@ -234,6 +241,9 @@ agents:
     active_model: codex
     timeout: 600
     sandbox_mode: read-only
+  cursor:
+    active_model: cursor
+    timeout: 600
   deepbrowse:
     use_vision: auto
     max_steps: 50

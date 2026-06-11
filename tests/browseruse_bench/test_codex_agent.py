@@ -8,11 +8,12 @@ from typing import Any
 
 import pytest
 
-from browseruse_bench.agents.codex import (
-    CodexAgent,
-    _collect_screenshots,
-    _extract_actions,
-    _parse_events,
+from browseruse_bench.agents.codex import CodexAgent, _parse_events
+from browseruse_bench.agents.playwright_mcp import (
+    collect_screenshots as _collect_screenshots,
+)
+from browseruse_bench.agents.playwright_mcp import (
+    extract_actions as _extract_actions,
 )
 from browseruse_bench.schemas import AgentResult
 

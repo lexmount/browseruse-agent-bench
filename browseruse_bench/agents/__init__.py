@@ -34,6 +34,11 @@ except ImportError as exc:
     logger.warning("Skipping optional agent module browseruse_bench.agents.codex: %s", exc)
 
 try:
+    from browseruse_bench.agents import cursor  # noqa: F401
+except ImportError as exc:
+    logger.warning("Skipping optional agent module browseruse_bench.agents.cursor: %s", exc)
+
+try:
     from browseruse_bench.agents import browser_use  # noqa: F401
 except ImportError as exc:
     logger.warning("Skipping optional agent module browseruse_bench.agents.browser_use: %s", exc)
