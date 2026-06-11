@@ -162,6 +162,10 @@ class _OutputForParserTest(BaseModel):
     action: list[dict[str, Any]]
 
 
+class _OutputForValidationKwargsTest(BaseModel):
+    count: int
+
+
 def test_patch_output_model_json_parser_accepts_markdown_fence() -> None:
     browser_use_module._patch_output_model_json_parser(_OutputForParserTest)
 
@@ -209,6 +213,31 @@ def test_patch_output_model_json_parser_still_rejects_schema_mismatch() -> None:
 
     with pytest.raises(ValidationError):
         _OutputForParserTest.model_validate_json('{"memory": "missing action"}')
+
+
+def test_patch_output_model_json_parser_preserves_validation_kwargs() -> None:
+    browser_use_module._patch_output_model_json_parser(_OutputForValidationKwargsTest)
+
+    with pytest.raises(ValidationError):
+        _OutputForValidationKwargsTest.model_validate_json('prefix {"count": "1"}', strict=True)
+
+    parsed = _OutputForValidationKwargsTest.model_validate_json('prefix {"count": "1"}')
+    assert parsed.count == 1
+
+
+def test_patch_output_model_json_parser_preserves_validation_kwargs_for_wrapped_json() -> None:
+    browser_use_module._patch_output_model_json_parser(_OutputForValidationKwargsTest)
+
+    with pytest.raises(ValidationError):
+        _OutputForValidationKwargsTest.model_validate_json(
+            '{"arguments": "{\\"count\\": \\"1\\"}"}',
+            strict=True,
+        )
+
+    parsed = _OutputForValidationKwargsTest.model_validate_json(
+        '{"arguments": "{\\"count\\": \\"1\\"}"}'
+    )
+    assert parsed.count == 1
 
 
 def test_create_browser_instance_rejects_cloud_transport_for_unknown_backend() -> None:

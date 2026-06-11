@@ -88,11 +88,21 @@ def _raw_decode_json_candidate(text: str) -> Any | None:
     return next(_iter_json_candidates(text), None)
 
 
-def _validate_json_candidates(output_model: type[Any], candidates: Iterator[Any]) -> Any:
+def _validate_json_candidates(
+    output_model: type[Any],
+    candidates: Iterator[Any],
+    *validation_args: Any,
+    **validation_kwargs: Any,
+) -> Any:
     validation_error: Exception | None = None
     for candidate in candidates:
         try:
-            return _validate_extracted_json(output_model, candidate)
+            return _validate_extracted_json(
+                output_model,
+                candidate,
+                *validation_args,
+                **validation_kwargs,
+            )
         except Exception as exc:
             validation_error = exc
             continue
@@ -101,9 +111,14 @@ def _validate_json_candidates(output_model: type[Any], candidates: Iterator[Any]
     return None
 
 
-def _validate_extracted_json(output_model: type[Any], parsed: Any) -> Any:
+def _validate_extracted_json(
+    output_model: type[Any],
+    parsed: Any,
+    *validation_args: Any,
+    **validation_kwargs: Any,
+) -> Any:
     try:
-        return output_model.model_validate(parsed)
+        return output_model.model_validate(parsed, *validation_args, **validation_kwargs)
     except Exception:
         if isinstance(parsed, dict):
             for key in ("AgentOutput", "agent_output", "arguments", "input"):
@@ -112,7 +127,11 @@ def _validate_extracted_json(output_model: type[Any], parsed: Any) -> Any:
                     value = _raw_decode_json_candidate(value)
                 if isinstance(value, dict):
                     try:
-                        return output_model.model_validate(value)
+                        return output_model.model_validate(
+                            value,
+                            *validation_args,
+                            **validation_kwargs,
+                        )
                     except Exception:
                         continue
         raise
@@ -131,7 +150,12 @@ def _patch_output_model_json_parser(output_model: type[Any] | None) -> None:
         except Exception:
             if not isinstance(json_data, str):
                 raise
-            parsed = _validate_json_candidates(cls, _iter_json_candidates(json_data))
+            parsed = _validate_json_candidates(
+                cls,
+                _iter_json_candidates(json_data),
+                *args,
+                **kwargs,
+            )
             if parsed is None:
                 raise
             return parsed
