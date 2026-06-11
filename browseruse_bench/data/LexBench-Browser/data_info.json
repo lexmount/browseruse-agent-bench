@@ -2,6 +2,7 @@
   "default_split": "All",
   "split": {
     "All": "task.jsonl",
+    "task_all": "task_all.jsonl",
     "lexmount": "task_lexmount.jsonl",
     "global": "task_global.jsonl",
     "sample50": "task_sample50.jsonl"
