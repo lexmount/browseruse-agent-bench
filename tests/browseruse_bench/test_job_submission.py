@@ -255,6 +255,52 @@ agents:
     assert agent_cfg["api_key"] == "cwd-openai-key"
 
 
+def test_resolve_submit_config_path_prefers_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "config.yaml").write_text("default: {}", encoding="utf-8")
+    assert submit_cli._resolve_submit_config_path(None) == tmp_path / "config.yaml"
+    explicit = tmp_path / "alt.yaml"
+    explicit.write_text("default: {}", encoding="utf-8")
+    assert submit_cli._resolve_submit_config_path(Path("alt.yaml")) == explicit
+
+
+def test_submit_command_normalizes_custom_agent_against_cwd_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Custom agents defined only in the cwd config.yaml resolve case-insensitively."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "config.yaml").write_text(
+        """
+agents:
+  My-Agent:
+    active_model: gpt
+    models:
+      gpt:
+        model_id: gpt-4.1
+""".strip(),
+        encoding="utf-8",
+    )
+    captured: dict[str, str] = {}
+
+    def fake_submit_job(agent_name: str, benchmark_name: str, args: argparse.Namespace) -> int:
+        captured["agent"] = agent_name
+        captured["benchmark"] = benchmark_name
+        return 0
+
+    monkeypatch.setattr(submit_cli, "submit_job", fake_submit_job)
+    args = _make_args()
+    args.agent = "my-agent"
+    args.data = "lexbench-browser"
+
+    assert submit_cli.submit_command(args, {}) == 0
+    assert captured["agent"] == "My-Agent"
+    assert captured["benchmark"] == "LexBench-Browser"
+
+
 def test_load_submit_env_prefers_cwd_env(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

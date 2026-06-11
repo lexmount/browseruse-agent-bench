@@ -939,12 +939,22 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
     return 0 if failed_count == 0 else 1
 
 
+def _canonicalize_cli_browser_id(browser_id: str | None, source_cfg: dict[str, Any]) -> str | None:
+    """Canonicalize --browser-id to the registered backend id.
+
+    An exact key of the config's browsers section wins — even one shadowing a
+    backend id with different casing — so the inline-config exact-match
+    preference is never bypassed.
+    """
+    if not browser_id or browser_id in (source_cfg.get("browsers") or {}):
+        return browser_id
+    return canonical_browser_id(browser_id)
+
+
 def run_command(args: argparse.Namespace, config: dict[str, Any]) -> int:
     """Entry point for the run subcommand."""
     logger.info("Starting run command")
     args.agent = normalize_agent_name(args.agent, config)
-    if args.browser_id:
-        args.browser_id = canonical_browser_id(args.browser_id)
     source_cfg = config
     source_label = "root config.yaml"
     if args.agent_config is not None:
@@ -955,6 +965,8 @@ def run_command(args: argparse.Namespace, config: dict[str, Any]) -> int:
             raise SystemExit(f"[FAILED] --agent-config file not found: {cfg_path}")
         source_cfg = load_config_file(cfg_path)
         source_label = str(cfg_path)
+
+    args.browser_id = _canonicalize_cli_browser_id(args.browser_id, source_cfg)
 
     # --agent-config only overrides the inline runtime config (models/browsers/agents defaults).
     # Benchmark definitions and the agent registry keep coming from the root config,

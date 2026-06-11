@@ -7,7 +7,10 @@ from pathlib import Path
 import pytest
 
 from browseruse_bench.browsers import login_contexts as lc
-from browseruse_bench.cli.run import resolve_lexmount_routing_for_task
+from browseruse_bench.cli.run import (
+    _canonicalize_cli_browser_id,
+    resolve_lexmount_routing_for_task,
+)
 
 
 @pytest.fixture
@@ -129,3 +132,17 @@ def test_routing_matches_profile_case_insensitively(tmp_index: Path) -> None:
         cfg, {"task_id": "2", "website_region": "EN", "login_required": False}
     )
     assert profile == "en"
+
+
+def test_canonicalize_cli_browser_id_prefers_exact_config_key() -> None:
+    """An exact config browsers key wins over registered backend id casing."""
+    cfg = {"browsers": {"LEXMOUNT": {"browser_id": "lexmount"}, "lexmount": {}}}
+    assert _canonicalize_cli_browser_id("LEXMOUNT", cfg) == "LEXMOUNT"
+    assert _canonicalize_cli_browser_id("lexmount", cfg) == "lexmount"
+
+
+def test_canonicalize_cli_browser_id_falls_back_to_backend_registry() -> None:
+    assert _canonicalize_cli_browser_id("LEXMOUNT", {}) == "lexmount"
+    assert _canonicalize_cli_browser_id("LEXMOUNT", {"browsers": None}) == "lexmount"
+    assert _canonicalize_cli_browser_id(None, {}) is None
+    assert _canonicalize_cli_browser_id("no-such-backend", {}) == "no-such-backend"
