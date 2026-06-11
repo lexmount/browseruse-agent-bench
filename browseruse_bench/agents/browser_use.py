@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import tempfile
 import time
 from collections.abc import Callable, Iterator
@@ -27,6 +28,7 @@ from browser_use import ChatGoogle as BrowserUseSDKChatGoogle
 from browser_use import ChatOpenAI as BrowserUseSDKChatOpenAI
 from browser_use.browser import session as browser_use_session_module
 from browser_use.browser.profile import ProxySettings as BrowserUseProxySettings
+from pydantic import BaseModel as _PydanticBaseModel
 
 from browseruse_bench.agents.base import BaseAgent
 from browseruse_bench.agents.registry import register_agent
@@ -49,6 +51,108 @@ _BROWSER_USE_CDP_CONNECT_TIMEOUT_LABEL = f"{BROWSER_USE_CDP_CONNECT_TIMEOUT_SECO
 
 
 _MAX_STEPS_ERROR = "Failed to complete task in maximum steps"
+_JSON_FENCE_RE = re.compile(r"```(?:json|JSON)?\s*(.*?)```", re.DOTALL)
+_PATCHED_MODEL_VALIDATE_JSON_ATTR = "_browseruse_bench_robust_json_patched"
+
+
+def _iter_json_candidates(text: str) -> Iterator[Any]:
+    decoder = json.JSONDecoder()
+    stripped = text.strip()
+    if not stripped:
+        return
+
+    try:
+        yield json.loads(stripped)
+        return
+    except json.JSONDecodeError:
+        pass
+
+    for match in _JSON_FENCE_RE.finditer(stripped):
+        fenced = match.group(1).strip()
+        try:
+            yield json.loads(fenced)
+        except json.JSONDecodeError:
+            yield from _iter_json_candidates(fenced)
+
+    for index, char in enumerate(stripped):
+        if char not in "{[":
+            continue
+        try:
+            candidate, _ = decoder.raw_decode(stripped[index:])
+            yield candidate
+        except json.JSONDecodeError:
+            continue
+
+
+def _raw_decode_json_candidate(text: str) -> Any | None:
+    return next(_iter_json_candidates(text), None)
+
+
+def _validate_json_candidates(output_model: type[Any], candidates: Iterator[Any]) -> Any:
+    validation_error: Exception | None = None
+    for candidate in candidates:
+        try:
+            return _validate_extracted_json(output_model, candidate)
+        except Exception as exc:
+            validation_error = exc
+            continue
+    if validation_error is not None:
+        raise validation_error
+    return None
+
+
+def _validate_extracted_json(output_model: type[Any], parsed: Any) -> Any:
+    try:
+        return output_model.model_validate(parsed)
+    except Exception:
+        if isinstance(parsed, dict):
+            for key in ("AgentOutput", "agent_output", "arguments", "input"):
+                value = parsed.get(key)
+                if isinstance(value, str):
+                    value = _raw_decode_json_candidate(value)
+                if isinstance(value, dict):
+                    try:
+                        return output_model.model_validate(value)
+                    except Exception:
+                        continue
+        raise
+
+
+def _patch_output_model_json_parser(output_model: type[Any] | None) -> None:
+    if output_model is None or _PATCHED_MODEL_VALIDATE_JSON_ATTR in output_model.__dict__:
+        return
+
+    original_validate_json = output_model.model_validate_json.__func__
+
+    @classmethod
+    def robust_model_validate_json(cls: type[Any], json_data: Any, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return original_validate_json(cls, json_data, *args, **kwargs)
+        except Exception:
+            if not isinstance(json_data, str):
+                raise
+            parsed = _validate_json_candidates(cls, _iter_json_candidates(json_data))
+            if parsed is None:
+                raise
+            return parsed
+
+    output_model.model_validate_json = robust_model_validate_json  # type: ignore[method-assign]
+    setattr(output_model, _PATCHED_MODEL_VALIDATE_JSON_ATTR, True)
+
+
+def _iter_output_model_bases(model: type[Any] | None) -> Iterator[type[Any]]:
+    if model is None:
+        return
+    for klass in getattr(model, "__mro__", ()):
+        if klass is _PydanticBaseModel or klass is object:
+            break
+        yield klass
+
+
+def _patch_agent_output_json_parsers(agent: Any) -> None:
+    for attr in ("AgentOutput", "DoneAgentOutput"):
+        for model in _iter_output_model_bases(getattr(agent, attr, None)):
+            _patch_output_model_json_parser(model)
 
 
 def _get_config_value(agent_config: dict[str, Any], *keys: str, default: Any = None) -> Any:
@@ -294,6 +398,7 @@ class BrowserUseAgent(BaseAgent):
                 use_vision=use_vision,
                 use_judge=_get_config_value(agent_config, "use_judge", "USE_JUDGE", default=False),
             )
+            _patch_agent_output_json_parsers(agent)
 
             history = await asyncio.wait_for(agent.run(max_steps=max_steps), timeout=timeout)
         except TimeoutError:

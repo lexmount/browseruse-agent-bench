@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import BaseModel, ValidationError
 
 from browseruse_bench.agents import browser_use as browser_use_module
 from browseruse_bench.agents.browser_use import BrowserUseAgent
@@ -154,6 +155,60 @@ def test_browser_use_browser_rewrites_sdk_cdp_timeout_message(
 
     with pytest.raises(RuntimeError, match="timed out after 30s"):
         asyncio.run(browser.start())
+
+
+class _OutputForParserTest(BaseModel):
+    memory: str
+    action: list[dict[str, Any]]
+
+
+def test_patch_output_model_json_parser_accepts_markdown_fence() -> None:
+    browser_use_module._patch_output_model_json_parser(_OutputForParserTest)
+
+    parsed = _OutputForParserTest.model_validate_json(
+        '```json\n{"memory": "ok", "action": [{"wait": {"seconds": 5}}]}\n```'
+    )
+
+    assert parsed.memory == "ok"
+    assert parsed.action == [{"wait": {"seconds": 5}}]
+
+
+def test_patch_output_model_json_parser_accepts_natural_language_prefix() -> None:
+    browser_use_module._patch_output_model_json_parser(_OutputForParserTest)
+
+    parsed = _OutputForParserTest.model_validate_json(
+        'The page is still loading.\n{"memory": "loaded", "action": [{"wait": {"seconds": 3}}]}'
+    )
+
+    assert parsed.memory == "loaded"
+
+
+def test_patch_output_model_json_parser_accepts_trailing_text() -> None:
+    browser_use_module._patch_output_model_json_parser(_OutputForParserTest)
+
+    parsed = _OutputForParserTest.model_validate_json(
+        '{"memory": "done", "action": [{"done": {"text": "ok"}}]}\nExtra explanation.'
+    )
+
+    assert parsed.action == [{"done": {"text": "ok"}}]
+
+
+def test_patch_output_model_json_parser_skips_non_matching_json_candidate() -> None:
+    browser_use_module._patch_output_model_json_parser(_OutputForParserTest)
+
+    parsed = _OutputForParserTest.model_validate_json(
+        'I observed {"not": "agent output"} before deciding.\n'
+        '{"memory": "chosen", "action": [{"wait": {"seconds": 1}}]}'
+    )
+
+    assert parsed.memory == "chosen"
+
+
+def test_patch_output_model_json_parser_still_rejects_schema_mismatch() -> None:
+    browser_use_module._patch_output_model_json_parser(_OutputForParserTest)
+
+    with pytest.raises(ValidationError):
+        _OutputForParserTest.model_validate_json('{"memory": "missing action"}')
 
 
 def test_create_browser_instance_rejects_cloud_transport_for_unknown_backend() -> None:
