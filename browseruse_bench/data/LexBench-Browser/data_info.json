@@ -33,12 +33,15 @@
           "deep_analysis"
         ],
         "domain": [
-          "tools_education",
-          "social_lifestyle",
-          "ecommerce",
-          "video_platform",
-          "finance_gaming",
-          "general"
+          "commerce",
+          "education_research",
+          "finance",
+          "gaming",
+          "local_lifestyle",
+          "media_entertainment",
+          "productivity_tools",
+          "safety",
+          "social_community"
         ],
         "difficulty": ["easy", "medium", "hard"],
         "language": ["zh", "en"],
