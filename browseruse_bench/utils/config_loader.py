@@ -141,6 +141,27 @@ def get_default_version(data_info: dict[str, Any]) -> str | None:
     return None
 
 
+def normalize_benchmark_name(benchmark_name: str) -> str:
+    """Normalize benchmark name to match actual directory in case-insensitive manner.
+
+    Args:
+        benchmark_name: Benchmark name (case-insensitive).
+
+    Returns:
+        str: Canonical benchmark directory name, or original input if not found.
+    """
+    data_dir = REPO_ROOT / "browseruse_bench" / "data"
+    if not data_dir.exists():
+        return benchmark_name
+
+    benchmark_lower = benchmark_name.lower()
+    for entry in data_dir.iterdir():
+        if entry.is_dir() and entry.name.lower() == benchmark_lower:
+            return entry.name
+
+    return benchmark_name
+
+
 def get_default_split(data_info: dict[str, Any]) -> str | None:
     """Get default split.
 

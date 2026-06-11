@@ -48,6 +48,7 @@ from browseruse_bench.utils import (
     load_dataset_file,
     load_env_file,
     load_tasks_with_benchmark_support,
+    normalize_benchmark_name,
     resolve_agent_entry,
     resolve_agent_inline_config,
     resolve_agent_venv_path,
@@ -965,7 +966,8 @@ def run_command(args: argparse.Namespace, config: dict[str, Any]) -> int:
             f"Hint: Configure {model_hint} in that file."
         )
     args._inline_agent_config = inline
-    return run_agent(args.agent, args.data, config, args)
+    benchmark_name = normalize_benchmark_name(args.data)
+    return run_agent(args.agent, benchmark_name, config, args)
 
 
 @handle_cli_errors

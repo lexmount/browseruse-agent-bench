@@ -15,6 +15,7 @@ from browseruse_bench.utils import (
     handle_cli_errors,
     load_config_file,
     load_env_file,
+    normalize_benchmark_name,
     resolve_agent_inline_config,
     setup_logger,
 )
@@ -648,7 +649,8 @@ def submit_command(args: argparse.Namespace, config: dict[str, Any]) -> int:
     """Entry point for the submit subcommand."""
     del config
     logger.info("Starting submit command")
-    return submit_job(args.agent, args.data, args)
+    benchmark_name = normalize_benchmark_name(args.data)
+    return submit_job(args.agent, benchmark_name, args)
 
 
 @handle_cli_errors

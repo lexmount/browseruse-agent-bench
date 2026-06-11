@@ -24,6 +24,7 @@ from browseruse_bench.utils import (
     load_data_info,
     load_env_file,
     load_evaluation_model,
+    normalize_benchmark_name,
     normalized_results_file,
     resolve_agent_inline_config,
     resolve_output_model_id,
@@ -395,7 +396,8 @@ def configure_eval_parser(parser: argparse.ArgumentParser, config: Dict[str, Any
 def eval_command(args: argparse.Namespace, config: Dict[str, Any]) -> int:
     """Entry point for the eval subcommand."""
     extra_args = getattr(args, "extra_args", [])
-    return run_evaluation(args.agent, args.data, config, args, extra_args)
+    benchmark_name = normalize_benchmark_name(args.data)
+    return run_evaluation(args.agent, benchmark_name, config, args, extra_args)
 
 
 @handle_cli_errors
