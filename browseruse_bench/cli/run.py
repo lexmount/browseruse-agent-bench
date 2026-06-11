@@ -25,6 +25,7 @@ from browseruse_bench.browsers.providers.lexmount import (
     LOGIN_CONTEXT_ID_ENV_KEY,
     normalize_profile_keys,
 )
+from browseruse_bench.browsers.registry import canonical_browser_id
 from browseruse_bench.browsers.session_state import SESSION_STATE_ENV_KEY
 from browseruse_bench.utils import (
     IS_WINDOWS,
@@ -48,10 +49,12 @@ from browseruse_bench.utils import (
     load_dataset_file,
     load_env_file,
     load_tasks_with_benchmark_support,
+    normalize_agent_name,
     normalize_benchmark_name,
     resolve_agent_entry,
     resolve_agent_inline_config,
     resolve_agent_venv_path,
+    resolve_split,
     setup_logger,
 )
 
@@ -568,8 +571,7 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
     benchmark_path = REPO_ROOT / "browseruse_bench" / "data" / benchmark_name
     data_info = load_data_info(benchmark_path)
 
-    if not args.split:
-        args.split = get_default_split(data_info) or "All"
+    args.split = resolve_split(args.split, data_info)
 
     # Resolve data file
     data_file = resolve_data_file(benchmark_path, args.split)
@@ -940,6 +942,9 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
 def run_command(args: argparse.Namespace, config: dict[str, Any]) -> int:
     """Entry point for the run subcommand."""
     logger.info("Starting run command")
+    args.agent = normalize_agent_name(args.agent, config)
+    if args.browser_id:
+        args.browser_id = canonical_browser_id(args.browser_id)
     source_cfg = config
     source_label = "root config.yaml"
     if args.agent_config is not None:

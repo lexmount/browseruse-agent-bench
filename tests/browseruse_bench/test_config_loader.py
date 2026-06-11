@@ -13,10 +13,18 @@ from browseruse_bench.utils import (
     get_default_version,
     load_config_file,
     load_data_info,
+    normalize_agent_name,
+    normalize_benchmark_name,
+    normalize_split_name,
     resolve_agent_entry,
     resolve_agent_inline_config,
+    resolve_dir_name_case_insensitive,
+    resolve_split,
 )
-from browseruse_bench.utils.config_loader import load_eval_config
+from browseruse_bench.utils.config_loader import (
+    load_eval_config,
+    resolve_key_case_insensitive,
+)
 
 
 class TestLoadConfigFile:
@@ -265,6 +273,120 @@ def test_resolve_agent_inline_config_legacy_browser_override() -> None:
     assert inline["browser_id"] == "browserbase"
     assert inline["lexmount_api_key"] == "$LEXMOUNT_API_KEY"
     assert inline["model_id"] == "gpt-5.4"
+
+
+class TestCaseInsensitiveNormalization:
+    """Tests for case-insensitive CLI parameter normalization."""
+
+    def test_normalize_benchmark_name_matches_directory(self) -> None:
+        assert normalize_benchmark_name("lexbench-browser") == "LexBench-Browser"
+        assert normalize_benchmark_name("ONLINE-MIND2WEB") == "Online-Mind2Web"
+        assert normalize_benchmark_name("LexBench-Browser") == "LexBench-Browser"
+
+    def test_normalize_benchmark_name_unknown_passthrough(self) -> None:
+        assert normalize_benchmark_name("no-such-benchmark") == "no-such-benchmark"
+
+    def test_resolve_key_case_insensitive_prefers_exact_match(self) -> None:
+        assert resolve_key_case_insensitive("gpt", {"GPT": 1, "gpt": 2}) == "gpt"
+        assert resolve_key_case_insensitive("GPT", {"GPT": 1, "gpt": 2}) == "GPT"
+
+    def test_resolve_key_case_insensitive_non_string_passthrough(self) -> None:
+        # YAML can parse unquoted keys/values as float or bool; never crash on them.
+        assert resolve_key_case_insensitive(4.1, {4.1: {}}) == 4.1
+        assert resolve_key_case_insensitive(True, {"gpt": {}}) is True
+
+    def test_resolve_dir_name_case_insensitive(self, tmp_path: Path) -> None:
+        (tmp_path / "GPT-5.4").mkdir()
+        assert resolve_dir_name_case_insensitive("gpt-5.4", tmp_path) == "GPT-5.4"
+        assert resolve_dir_name_case_insensitive("GPT-5.4", tmp_path) == "GPT-5.4"
+        assert resolve_dir_name_case_insensitive("missing", tmp_path) == "missing"
+        assert resolve_dir_name_case_insensitive("x", tmp_path / "absent") == "x"
+
+    def test_normalize_agent_name_prefers_registry_canonical_casing(self) -> None:
+        # The checked-in agent registry defines the canonical names; a config
+        # key with divergent casing must not override them (the subprocess
+        # registry lookup is exact-match on the code-registered names).
+        assert normalize_agent_name("skyvern", {"agents": {"Skyvern": {}}}) == "skyvern"
+        assert normalize_agent_name("AGENT-TARS", {}) == "Agent-TARS"
+        assert normalize_agent_name("BROWSER-USE", {"agents": {}}) == "browser-use"
+
+    def test_normalize_agent_name_falls_back_to_config_for_custom_agents(self) -> None:
+        config = {"agents": {"My-Agent": {}}}
+        assert normalize_agent_name("my-agent", config) == "My-Agent"
+
+    def test_normalize_agent_name_unknown_passthrough(self) -> None:
+        assert normalize_agent_name("no-such-agent", {"agents": {}}) == "no-such-agent"
+        assert normalize_agent_name("no-such-agent", {}) == "no-such-agent"
+
+    def test_normalize_split_name_matches_split_key(self) -> None:
+        data_info = {"split": {"All": "tasks.json", "L1": "l1.json"}}
+        assert normalize_split_name("all", data_info) == "All"
+        assert normalize_split_name("l1", data_info) == "L1"
+        assert normalize_split_name("All", data_info) == "All"
+
+    def test_normalize_split_name_legacy_version_split(self) -> None:
+        data_info = {
+            "default_version": "20251230",
+            "version_split": {"20251230": {"All": "tasks.json"}},
+        }
+        assert normalize_split_name("ALL", data_info) == "All"
+
+    def test_normalize_split_name_unknown_passthrough(self) -> None:
+        assert normalize_split_name("nope", {"split": {"All": "tasks.json"}}) == "nope"
+        assert normalize_split_name("All", {}) == "All"
+
+    def test_resolve_split_normalizes_or_defaults(self) -> None:
+        data_info = {"default_split": "L1", "split": {"All": "t.json", "L1": "l1.json"}}
+        assert resolve_split("all", data_info) == "All"
+        assert resolve_split(None, data_info) == "L1"
+        assert resolve_split(None, {}) == "All"
+
+    def test_resolve_agent_inline_config_tolerates_non_string_model_keys(self) -> None:
+        config = {
+            "default": {"model": 4.1, "browser": "local"},
+            "models": {4.1: {"model_id": "gpt-4.1"}},
+            "browsers": {"local": {"browser_id": "local"}},
+            "agents": {"browser-use": {}},
+        }
+
+        inline = resolve_agent_inline_config("browser-use", config)
+
+        assert inline is not None
+        assert inline["model_id"] == "gpt-4.1"
+
+    def test_resolve_agent_inline_config_case_insensitive_model_and_browser(self) -> None:
+        config = {
+            "default": {"model": "gpt", "browser": "lexmount"},
+            "models": {"GPT": {"model_id": "gpt-5.4"}},
+            "browsers": {"Lexmount": {"browser_id": "lexmount"}},
+            "agents": {"browser-use": {"timeout": 600}},
+        }
+
+        inline = resolve_agent_inline_config(
+            "BROWSER-USE", config, model_name="gpt", browser_id="LEXMOUNT"
+        )
+
+        assert inline == {
+            "timeout": 600,
+            "model_id": "gpt-5.4",
+            "browser_id": "lexmount",
+        }
+
+    def test_resolve_agent_inline_config_case_insensitive_legacy_model(self) -> None:
+        config = {
+            "agents": {
+                "browser-use": {
+                    "active_model": "gpt",
+                    "browser": {"browser_id": "lexmount"},
+                    "models": {"GPT": {"model_id": "gpt-5.4"}},
+                },
+            },
+        }
+
+        inline = resolve_agent_inline_config("browser-use", config, model_name="Gpt")
+
+        assert inline is not None
+        assert inline["model_id"] == "gpt-5.4"
 
 
 def test_resolve_agent_entry_uses_registry_venvs_for_builtin_agents(tmp_path: Path) -> None:

@@ -20,6 +20,7 @@ from browseruse_bench.utils.repo_root import REPO_ROOT
 
 logger = logging.getLogger(__name__)
 _EVAL_STRUCTURAL_KEYS = {"api_key", "base_url"}
+_AGENT_REGISTRY_PATH = REPO_ROOT / "configs" / "agent_registry.yaml"
 
 
 def _skyvern_temp_database_string() -> str:
@@ -141,8 +142,26 @@ def get_default_version(data_info: dict[str, Any]) -> str | None:
     return None
 
 
+def resolve_dir_name_case_insensitive(name: str, parent: Path) -> str:
+    """Return the actual child directory name matching *name* case-insensitively.
+
+    Prefers an exact name match over a case-insensitive one; falls back to the
+    original *name* when *parent* is missing or no directory matches.
+    """
+    if not parent.is_dir():
+        return name
+    entries = [entry.name for entry in parent.iterdir() if entry.is_dir()]
+    if name in entries:
+        return name
+    name_lower = name.lower()
+    for entry_name in entries:
+        if entry_name.lower() == name_lower:
+            return entry_name
+    return name
+
+
 def normalize_benchmark_name(benchmark_name: str) -> str:
-    """Normalize benchmark name to match actual directory in case-insensitive manner.
+    """Normalize benchmark name to the actual dataset directory, case-insensitively.
 
     Args:
         benchmark_name: Benchmark name (case-insensitive).
@@ -150,16 +169,79 @@ def normalize_benchmark_name(benchmark_name: str) -> str:
     Returns:
         str: Canonical benchmark directory name, or original input if not found.
     """
-    data_dir = REPO_ROOT / "browseruse_bench" / "data"
-    if not data_dir.exists():
-        return benchmark_name
+    return resolve_dir_name_case_insensitive(
+        benchmark_name, REPO_ROOT / "browseruse_bench" / "data"
+    )
 
-    benchmark_lower = benchmark_name.lower()
-    for entry in data_dir.iterdir():
-        if entry.is_dir() and entry.name.lower() == benchmark_lower:
-            return entry.name
 
-    return benchmark_name
+def resolve_key_case_insensitive(name: Any, mapping: dict[str, Any]) -> Any:
+    """Return the canonical mapping key matching *name* case-insensitively.
+
+    Prefers an exact key match over a case-insensitive one. Non-string names
+    pass through unchanged (YAML keys can parse as float/bool); falls back to
+    the original *name* when no match is found.
+    """
+    if not isinstance(name, str) or name in mapping:
+        return name
+    name_lower = name.lower()
+    for key in mapping:
+        if isinstance(key, str) and key.lower() == name_lower:
+            return key
+    return name
+
+
+def _select_canonical(name: Any, mapping: Any) -> Any:
+    """Canonicalize a selected config key, tolerating absent selection/mapping."""
+    if not name or not isinstance(mapping, dict):
+        return name
+    return resolve_key_case_insensitive(name, mapping)
+
+
+def normalize_agent_name(agent: str, root_config: dict[str, Any]) -> str:
+    """Normalize agent name to the canonical registry key, case-insensitively.
+
+    The checked-in agent registry defines the canonical casing (it matches the
+    code-registered agent names used by the runner subprocess); the root config
+    ``agents`` keys are the fallback for custom agents.
+
+    Args:
+        agent: Agent name (case-insensitive).
+        root_config: Root configuration dictionary with an ``agents`` section.
+
+    Returns:
+        str: Canonical agent name, or original input if not found.
+    """
+    registry = load_config_file(_AGENT_REGISTRY_PATH)
+    canonical = resolve_key_case_insensitive(agent, registry)
+    if canonical in registry:
+        return canonical
+    return resolve_key_case_insensitive(agent, root_config.get("agents", {}) or {})
+
+
+def normalize_split_name(split: str, data_info: dict[str, Any]) -> str:
+    """Normalize split name to the canonical data_info key, case-insensitively.
+
+    Args:
+        split: Split name (case-insensitive).
+        data_info: Content of data_info.json.
+
+    Returns:
+        str: Canonical split key, or original input if not found.
+    """
+    splits = data_info.get("split")
+    if not isinstance(splits, dict) and "version_split" in data_info:
+        version = get_default_version(data_info)
+        splits = data_info.get("version_split", {}).get(version, {}) if version else {}
+    if not isinstance(splits, dict):
+        return split
+    return resolve_key_case_insensitive(split, splits)
+
+
+def resolve_split(split: str | None, data_info: dict[str, Any]) -> str:
+    """Resolve a user-provided split case-insensitively or fall back to the default."""
+    if split:
+        return normalize_split_name(split, data_info)
+    return get_default_split(data_info) or "All"
 
 
 def get_default_split(data_info: dict[str, Any]) -> str | None:
@@ -212,8 +294,7 @@ def load_agent_registry(agent: str) -> dict[str, Any]:
     Returns:
         Dict[str, Any]: Registry info (venv, path, entrypoint, supported_benchmarks).
     """
-    registry_path = REPO_ROOT / "configs" / "agent_registry.yaml"
-    all_registries = load_config_file(registry_path)
+    all_registries = load_config_file(_AGENT_REGISTRY_PATH)
     return all_registries.get(agent, {})
 
 
@@ -222,11 +303,7 @@ def _resolve_agent_key(agent: str, agents: dict[str, Any]) -> str:
 
     Falls back to the original *agent* string when no match is found.
     """
-    agent_lower = agent.lower()
-    for key in agents:
-        if key.lower() == agent_lower:
-            return key
-    return agent
+    return resolve_key_case_insensitive(agent, agents)
 
 
 def resolve_agent_entry(agent: str, root_config: dict[str, Any]) -> dict[str, Any]:
@@ -294,12 +371,16 @@ def resolve_agent_inline_config(
     shared_models = root_config.get("models", {})
     shared_browsers = root_config.get("browsers", {})
     if isinstance(shared_models, dict) and isinstance(shared_browsers, dict) and shared_models:
-        active_model = model_name or agent_entry.get("active_model") or root_config.get("default", {}).get("model")
-        active_browser = (
+        active_model = _select_canonical(
+            model_name or agent_entry.get("active_model") or root_config.get("default", {}).get("model"),
+            shared_models,
+        )
+        active_browser = _select_canonical(
             browser_id
             or agent_entry.get("active_browser")
             or root_config.get("default", {}).get("browser")
-            or root_config.get("default", {}).get("browser_id")
+            or root_config.get("default", {}).get("browser_id"),
+            shared_browsers,
         )
         if not (active_model and active_model in shared_models):
             return None
@@ -309,8 +390,8 @@ def resolve_agent_inline_config(
             browser_cfg = {"browser_id": active_browser}
         return {**defaults, **model_cfg, **browser_cfg}
 
-    active_model = model_name or agent_entry.get("active_model")
     models = agent_entry.get("models", {})
+    active_model = _select_canonical(model_name or agent_entry.get("active_model"), models)
     if not (active_model and models and active_model in models):
         return None
     browser = agent_entry.get("browser", {})

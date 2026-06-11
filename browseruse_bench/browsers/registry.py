@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from browseruse_bench.browsers.base import BrowserBackend
+from browseruse_bench.utils.config_loader import resolve_key_case_insensitive
 
 _BACKEND_FACTORIES: dict[str, Callable[[], BrowserBackend]] = {}
 _DEFAULTS_REGISTERED = False
@@ -80,9 +81,18 @@ def _register_default_backends() -> None:
     _DEFAULTS_REGISTERED = True
 
 
+def canonical_browser_id(browser_id: str) -> str:
+    """Return the registered backend id matching *browser_id* case-insensitively.
+
+    Falls back to the original *browser_id* when no backend matches.
+    """
+    _register_default_backends()
+    return resolve_key_case_insensitive(browser_id, _BACKEND_FACTORIES)
+
+
 def get_backend(browser_id: str) -> BrowserBackend:
     _register_default_backends()
-    factory = _BACKEND_FACTORIES.get(browser_id)
+    factory = _BACKEND_FACTORIES.get(canonical_browser_id(browser_id))
     if factory is None:
         available = ", ".join(sorted(_BACKEND_FACTORIES.keys()))
         raise ValueError(f"Unknown browser backend: '{browser_id}'. Available: {available}")

@@ -17,17 +17,19 @@ from browseruse_bench.utils import (
     add_eval_args,
     classify_failures_batch,
     find_latest_tasks_dir,
-    get_default_split,
     get_env_var,
     handle_cli_errors,
     load_config_file,
     load_data_info,
     load_env_file,
     load_evaluation_model,
+    normalize_agent_name,
     normalize_benchmark_name,
     normalized_results_file,
     resolve_agent_inline_config,
+    resolve_dir_name_case_insensitive,
     resolve_output_model_id,
+    resolve_split,
     setup_logger,
 )
 
@@ -195,8 +197,7 @@ def run_evaluation(
     # Resolve split (use default if not specified)
     benchmark_path = _benchmark_data_dir(benchmark_name)
     data_info = load_data_info(benchmark_path)
-    if not args.split:
-        args.split = get_default_split(data_info) or "All"
+    args.split = resolve_split(args.split, data_info)
 
     if not args.model_id:
         inline_cfg = resolve_agent_inline_config(agent_name, config)
@@ -212,6 +213,7 @@ def run_evaluation(
 
     # Path structure: experiments/{benchmark}/{split}/{agent}/{model_id}
     output_base = _experiments_root(benchmark_name) / args.split
+    args.model_id = resolve_dir_name_case_insensitive(args.model_id, output_base / agent_name)
     agent_output_dir = output_base / agent_name / args.model_id
 
     if args.timestamp:
@@ -396,8 +398,9 @@ def configure_eval_parser(parser: argparse.ArgumentParser, config: Dict[str, Any
 def eval_command(args: argparse.Namespace, config: Dict[str, Any]) -> int:
     """Entry point for the eval subcommand."""
     extra_args = getattr(args, "extra_args", [])
+    agent_name = normalize_agent_name(args.agent, config)
     benchmark_name = normalize_benchmark_name(args.data)
-    return run_evaluation(args.agent, benchmark_name, config, args, extra_args)
+    return run_evaluation(agent_name, benchmark_name, config, args, extra_args)
 
 
 @handle_cli_errors

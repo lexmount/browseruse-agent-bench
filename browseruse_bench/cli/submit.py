@@ -14,8 +14,11 @@ from browseruse_bench.utils import (
     REPO_ROOT,
     handle_cli_errors,
     load_config_file,
+    load_data_info,
     load_env_file,
+    normalize_agent_name,
     normalize_benchmark_name,
+    normalize_split_name,
     resolve_agent_inline_config,
     setup_logger,
 )
@@ -647,10 +650,13 @@ def submit_job(
 
 def submit_command(args: argparse.Namespace, config: dict[str, Any]) -> int:
     """Entry point for the submit subcommand."""
-    del config
     logger.info("Starting submit command")
+    agent_name = normalize_agent_name(args.agent, config)
     benchmark_name = normalize_benchmark_name(args.data)
-    return submit_job(args.agent, benchmark_name, args)
+    if args.split:
+        data_info = load_data_info(REPO_ROOT / "browseruse_bench" / "data" / benchmark_name)
+        args.split = normalize_split_name(args.split, data_info)
+    return submit_job(agent_name, benchmark_name, args)
 
 
 @handle_cli_errors
