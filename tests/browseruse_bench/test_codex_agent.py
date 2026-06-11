@@ -298,3 +298,30 @@ class TestCodexAgentRunTask:
         assert "--cdp-endpoint" in joined
         assert "ws://cdp.example/1" in joined
         assert result.env_status == "success"
+
+    def test_non_cdp_backend_fails_fast(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Cloud-native sessions expose no CDP endpoint; the run must fail
+        # loudly instead of silently self-launching a local browser.
+        import contextlib
+
+        from browseruse_bench.agents import codex as codex_module
+        from browseruse_bench.browsers.types import BrowserSessionContext
+
+        @contextlib.contextmanager
+        def fake_session(browser_id: str, agent_name: str, agent_config: dict[str, Any]):
+            yield BrowserSessionContext(backend_id=browser_id, transport="cloud_native")
+
+        monkeypatch.setattr(codex_module, "open_browser_session", fake_session)
+        agent = CodexAgent()
+        monkeypatch.setattr(
+            agent, "_run_subprocess",
+            lambda *a, **kw: pytest.fail("subprocess must not be launched"),
+        )
+        config = {**AGENT_CONFIG, "browser_id": "browser-use-cloud"}
+        result = agent.run_task(TASK_INFO, config, tmp_path)
+        assert result.env_status == "failed"
+        assert result.agent_done == "error"
+        assert "browser-use-cloud" in (result.error or "")
+        assert "cloud_native" in (result.error or "")

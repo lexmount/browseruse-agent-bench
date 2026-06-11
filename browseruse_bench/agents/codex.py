@@ -264,7 +264,28 @@ class CodexAgent(CLIAgent):
             agent_config=agent_config,
         ) as session_context:
             cdp_url = session_context.cdp_url if session_context.transport == "cdp" else None
+            if not cdp_url:
+                return self._unsupported_backend_result(
+                    task_info["task_id"], browser_id, session_context.transport
+                )
             return self._execute(task_info, agent_config, task_workspace, cdp_url=cdp_url)
+
+    def _unsupported_backend_result(
+        self, task_id: str, browser_id: str, transport: str
+    ) -> AgentResult:
+        """Fail fast instead of silently self-launching a local browser."""
+        return AgentResult(
+            task_id=task_id,
+            timestamp=datetime.now(UTC),
+            env_status="failed",  # type: ignore[arg-type]
+            agent_done="error",  # type: ignore[arg-type]
+            error=(
+                f"Browser backend '{browser_id}' (transport={transport}) provides no CDP "
+                "endpoint, so the codex agent cannot attach Playwright MCP to it. "
+                "Use a CDP-capable backend (e.g. lexmount, cdp) or browser_id=local."
+            ),
+            metrics=AgentMetrics(end_to_end_ms=0, steps=0),
+        )
 
     def _execute(
         self,
