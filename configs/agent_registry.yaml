@@ -42,6 +42,17 @@ claude-code:
     - WebVoyager
     - Odysseys
 
+codex:
+  path: browseruse_bench/agents
+  entrypoint: browseruse_bench/runner/agent_runner.py
+  venv: .venv
+  supported_benchmarks:
+    - Online-Mind2Web
+    - BrowseComp
+    - LexBench-Browser
+    - WebVoyager
+    - Odysseys
+
 deepbrowse:
   path: browseruse_bench/agents
   entrypoint: browseruse_bench/runner/agent_runner.py

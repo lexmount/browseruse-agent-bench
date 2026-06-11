@@ -154,6 +154,12 @@ models:
     model_id: openai/gpt-5.4
     api_key: $OPENROUTER_API_KEY
     base_url: https://openrouter.ai/api/v1/chat/completions
+  # Codex CLI model. Only supported by the codex agent; auth comes from
+  # `codex login` (ChatGPT account) or OPENAI_API_KEY.
+  codex:
+    model_type: OPENAI
+    model_id: gpt-5.5
+    api_key: $OPENAI_API_KEY
 browsers:
   lexmount:
     browser_id: lexmount
@@ -224,6 +230,10 @@ agents:
     max_turns: 50
     timeout: 300
     allowed_tools: mcp__playwright*
+  codex:
+    active_model: codex
+    timeout: 600
+    sandbox_mode: read-only
   deepbrowse:
     use_vision: auto
     max_steps: 50

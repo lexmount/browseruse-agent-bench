@@ -33,7 +33,7 @@ Agent SDKs ship as **mutually exclusive extras** (declared in `pyproject.toml` u
 
 ## High-level architecture
 
-The repo orchestrates browser agents (`browser-use`, `skyvern`, `agent-tars`, `claude-code`, `openai-cua`, `deepbrowse`) against benchmarks (`LexBench-Browser`, `Online-Mind2Web`, `BrowseComp`) on browser backends (`Chrome-Local`, `lexmount`, `browser-use-cloud`, `agentbay`, `cdp`).
+The repo orchestrates browser agents (`browser-use`, `skyvern`, `agent-tars`, `claude-code`, `codex`, `openai-cua`, `deepbrowse`) against benchmarks (`LexBench-Browser`, `Online-Mind2Web`, `BrowseComp`) on browser backends (`Chrome-Local`, `lexmount`, `browser-use-cloud`, `agentbay`, `cdp`).
 
 - **CLI** ([browseruse_bench/cli/](browseruse_bench/cli/)) — argparse subcommands (`run`, `eval`, `submit`, `leaderboard`, `server`, `service`, `skills`, `viz`, `login`). [__init__.py](browseruse_bench/cli/__init__.py) preloads `.env` from `REPO_ROOT` and reads `config.yaml`. The top-level `scripts/*.py` files are thin shims — edit the CLI module, not the script.
 - **Agents** ([browseruse_bench/agents/](browseruse_bench/agents/)) — [base.py](browseruse_bench/agents/base.py) (`BaseAgent` ABC), one file per agent, plus [registry.py](browseruse_bench/agents/registry.py). Agents self-register via `@register_agent` on a unique `name`. Do not import agent SDKs at registry level.
