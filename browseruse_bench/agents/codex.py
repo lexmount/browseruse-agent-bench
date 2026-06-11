@@ -19,6 +19,7 @@ from typing import Any
 
 from browseruse_bench.agents.cli_agent import CLIAgent
 from browseruse_bench.agents.registry import register_agent
+from browseruse_bench.browsers import open_browser_session
 from browseruse_bench.browsers.providers.local import warn_if_local_proxy_unsupported
 from browseruse_bench.schemas import AgentMetrics, AgentResult, AgentUsage
 from browseruse_bench.utils import IS_WINDOWS
@@ -46,6 +47,10 @@ _DEFAULT_RULES = (
 # JSONL item types that represent an agent step (tool usage).
 _STEP_ITEM_TYPES = {"mcp_tool_call", "command_execution"}
 
+# Browser ids where Playwright MCP launches its own local browser instead of
+# connecting to a managed backend session over CDP.
+_SELF_LAUNCH_BROWSER_IDS = {"", "local", "Chrome-Local"}
+
 
 def _parse_events(stdout_lines: list[str]) -> tuple[str, list[dict[str, Any]], dict[str, int], str | None]:
     """Parse `codex exec --json` JSONL output.
@@ -54,7 +59,9 @@ def _parse_events(stdout_lines: list[str]) -> tuple[str, list[dict[str, Any]], d
     - *answer*: text of the last completed ``agent_message`` item.
     - *items*: all completed items (agent_message / mcp_tool_call / ...).
     - *usage_totals*: token usage accumulated across ``turn.completed`` events.
-    - *error_message*: message from the last ``error`` / ``turn.failed`` event.
+    - *error_message*: message from an ``error`` / ``turn.failed`` event that was
+      not followed by a ``turn.completed`` (a later completed turn means the
+      error was transient and the run recovered).
     """
     answer = ""
     items: list[dict[str, Any]] = []
@@ -78,6 +85,7 @@ def _parse_events(stdout_lines: list[str]) -> tuple[str, list[dict[str, Any]], d
                     answer = str(item["text"])
         elif event_type == "turn.completed":
             _accumulate_usage(usage_totals, obj.get("usage"))
+            error_message = None
         elif event_type in ("turn.failed", "error"):
             error_message = _extract_error_message(obj) or error_message
 
@@ -240,8 +248,31 @@ class CodexAgent(CLIAgent):
         agent_config: dict[str, Any],
         task_workspace: Path,
     ) -> AgentResult | dict[str, Any]:
-        """Execute a browser automation task using Codex CLI."""
-        warn_if_local_proxy_unsupported(agent_config, self.name)
+        """Execute a browser automation task using Codex CLI.
+
+        With a managed browser backend configured (e.g. lexmount, cdp), the
+        backend session is opened first and its CDP endpoint is handed to
+        Playwright MCP, so login contexts/proxies injected by cli/run.py apply.
+        """
+        browser_id = str(agent_config.get("browser_id") or "")
+        if browser_id in _SELF_LAUNCH_BROWSER_IDS:
+            warn_if_local_proxy_unsupported(agent_config, self.name)
+            return self._execute(task_info, agent_config, task_workspace, cdp_url=None)
+        with open_browser_session(
+            browser_id=browser_id,
+            agent_name=self.name,
+            agent_config=agent_config,
+        ) as session_context:
+            cdp_url = session_context.cdp_url if session_context.transport == "cdp" else None
+            return self._execute(task_info, agent_config, task_workspace, cdp_url=cdp_url)
+
+    def _execute(
+        self,
+        task_info: dict[str, Any],
+        agent_config: dict[str, Any],
+        task_workspace: Path,
+        cdp_url: str | None,
+    ) -> AgentResult:
         task_id = task_info["task_id"]
         prompt = task_info.get("prompt") or self.build_task_prompt(task_info)
         rules = agent_config.get("system_prompt") or _DEFAULT_RULES
@@ -257,6 +288,7 @@ class CodexAgent(CLIAgent):
             agent_config=agent_config,
             task_workspace=task_workspace,
             last_message_file=last_message_file,
+            cdp_url=cdp_url,
         )
 
         env = {**os.environ}
@@ -321,6 +353,7 @@ class CodexAgent(CLIAgent):
         agent_config: dict[str, Any],
         task_workspace: Path,
         last_message_file: Path,
+        cdp_url: str | None = None,
     ) -> list[str]:
         sandbox = agent_config.get("sandbox_mode", "read-only")
         mcp_command = agent_config.get("playwright_mcp_command", "npx")
@@ -328,6 +361,8 @@ class CodexAgent(CLIAgent):
         # --timeout-action 30000: raise from the 5000ms default (screenshots time
         # out on pages with slow external font CDNs).
         mcp_args += ["--timeout-action", "30000"]
+        if cdp_url:
+            mcp_args += ["--cdp-endpoint", cdp_url]
         mcp_startup_timeout = int(agent_config.get("mcp_startup_timeout", 120))
         mcp_tool_timeout = int(agent_config.get("mcp_tool_timeout", 120))
 
@@ -373,7 +408,9 @@ class CodexAgent(CLIAgent):
         env_status, agent_done = self._map_exit_status(
             returncode, execution_error, has_result=bool(answer)
         )
-        if env_status == "success" and agent_done == "done" and error_message and not answer:
+        # An unrecovered error/turn.failed event marks the run failed even when
+        # an earlier partial agent_message produced answer text.
+        if agent_done != "timeout" and error_message:
             env_status, agent_done = "failed", "error"
         if env_status == "failed" and not answer:
             answer = f"[Task Failed: {execution_error or error_message or 'No output from Codex'}]"

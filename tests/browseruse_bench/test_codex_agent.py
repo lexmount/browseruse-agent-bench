@@ -79,6 +79,14 @@ class TestParseEvents:
         _, _, _, error = _parse_events(lines)
         assert error == "turn exploded"
 
+    def test_transient_error_cleared_by_completed_turn(self) -> None:
+        lines = [
+            _line({"type": "error", "message": "stream disconnected, retrying"}),
+            _line({"type": "turn.completed", "usage": {"input_tokens": 1, "cached_input_tokens": 0, "output_tokens": 1}}),
+        ]
+        _, _, _, error = _parse_events(lines)
+        assert error is None
+
     def test_invalid_and_non_json_lines_skipped(self) -> None:
         lines = ["not json\n", "{broken\n", _line({"type": "item.completed", "item": {"type": "agent_message", "text": "ok"}})]
         answer, _, _, _ = _parse_events(lines)
@@ -187,6 +195,22 @@ class TestCodexAgentRunTask:
         assert result.agent_done == "error"
         assert "model not supported" in (result.error or "")
 
+    def test_turn_failed_after_partial_message_is_error(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # A partial narration before the failure must not mask the error.
+        stream = [
+            _line({"type": "item.completed", "item": {"type": "agent_message", "text": "I will navigate now"}}),
+            _line({"type": "turn.failed", "error": {"message": "tool crashed"}}),
+        ]
+        agent = CodexAgent()
+        monkeypatch.setattr(agent, "_run_subprocess", lambda *a, **kw: (0, stream, None))
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        assert result.env_status == "failed"
+        assert result.agent_done == "error"
+        assert "tool crashed" in (result.error or "")
+        assert result.answer == "I will navigate now"
+
     def test_answer_falls_back_to_last_message_file(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
@@ -226,3 +250,51 @@ class TestCodexAgentRunTask:
         assert 'mcp_servers.playwright.default_tools_approval_mode="approve"' in joined
         assert 'mcp_servers.playwright.command="npx"' in joined
         assert "@playwright/mcp@latest" in joined
+        assert "--cdp-endpoint" not in joined
+
+    def test_command_includes_cdp_endpoint_when_session_provided(self, tmp_path: Path) -> None:
+        cmd = CodexAgent._build_command(
+            full_prompt="do it",
+            model="gpt-test",
+            agent_config={},
+            task_workspace=tmp_path,
+            last_message_file=tmp_path / "last_message.txt",
+            cdp_url="ws://127.0.0.1:9222/devtools/browser/abc",
+        )
+        joined = " ".join(cmd)
+        assert "--cdp-endpoint" in joined
+        assert "ws://127.0.0.1:9222/devtools/browser/abc" in joined
+
+    def test_managed_browser_opens_backend_session(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import contextlib
+
+        from browseruse_bench.agents import codex as codex_module
+        from browseruse_bench.browsers.types import BrowserSessionContext
+
+        opened: dict[str, str] = {}
+
+        @contextlib.contextmanager
+        def fake_session(browser_id: str, agent_name: str, agent_config: dict[str, Any]):
+            opened["browser_id"] = browser_id
+            yield BrowserSessionContext(
+                backend_id=browser_id, transport="cdp", cdp_url="ws://cdp.example/1"
+            )
+
+        monkeypatch.setattr(codex_module, "open_browser_session", fake_session)
+        captured_cmd: list[str] = []
+
+        def fake_run(cmd: list[str], **kw: Any) -> tuple[int, list[str], None]:
+            captured_cmd.extend(cmd)
+            return 0, self._stream(), None
+
+        agent = CodexAgent()
+        monkeypatch.setattr(agent, "_run_subprocess", fake_run)
+        config = {**AGENT_CONFIG, "browser_id": "lexmount"}
+        result = agent.run_task(TASK_INFO, config, tmp_path)
+        joined = " ".join(captured_cmd)
+        assert opened["browser_id"] == "lexmount"
+        assert "--cdp-endpoint" in joined
+        assert "ws://cdp.example/1" in joined
+        assert result.env_status == "success"
