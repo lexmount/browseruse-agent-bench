@@ -170,7 +170,9 @@ class TestCursorAgentRunTask:
 
         permissions = json.loads((tmp_path / ".cursor" / "cli.json").read_text())
         assert permissions["permissions"]["allow"] == ["Mcp(playwright)"]
-        assert permissions["permissions"]["deny"] == ["Shell(**)"]
+        assert permissions["permissions"]["deny"] == [
+            "Shell(**)", "WebFetch(**)", "Read(**)", "Write(**)",
+        ]
 
     def test_command_flags(self, tmp_path: Path) -> None:
         cmd = CursorAgent._build_command("do it", "gpt-test", tmp_path)
@@ -204,6 +206,37 @@ class TestCursorAgentRunTask:
         assert result.env_status == "success"
         assert result.agent_done == "timeout"
         assert "4.5 stars" in result.answer
+
+    def test_missing_result_event_is_error_despite_partial_text(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # A crash after a preamble (e.g. MCP startup failure) must not be
+        # recorded as success just because some assistant text was emitted.
+        stream = [_assistant("I'll navigate to the page now")]
+        agent = CursorAgent()
+        monkeypatch.setattr(agent, "_run_subprocess", lambda *a, **kw: (1, stream, None))
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        assert result.env_status == "failed"
+        assert result.agent_done == "error"
+        assert "terminal result" in (result.error or "")
+
+    def test_isolates_user_config_dir_by_default(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        captured_env: dict[str, str] = {}
+
+        def fake_run(cmd: list[str], **kw: Any) -> tuple[int, list[str], None]:
+            captured_env.update(kw.get("env") or {})
+            return 0, self._stream(), None
+
+        agent = CursorAgent()
+        monkeypatch.setattr(agent, "_run_subprocess", fake_run)
+        agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        assert captured_env["CURSOR_CONFIG_DIR"] == str(tmp_path / ".cursor-config")
+
+        captured_env.clear()
+        agent.run_task(TASK_INFO, {**AGENT_CONFIG, "isolate_user_config": False}, tmp_path)
+        assert str(tmp_path / ".cursor-config") != captured_env.get("CURSOR_CONFIG_DIR", "")
 
     def test_executable_not_found_returns_error_result(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

@@ -241,6 +241,14 @@ class CursorAgent(CLIAgent):
         env = {**os.environ}
         if agent_config.get("api_key"):
             env["CURSOR_API_KEY"] = str(agent_config["api_key"])
+        # Isolate from the operator's global ~/.cursor (MCP servers, rules):
+        # only the workspace-injected Playwright MCP server may be loaded.
+        # Requires API-key auth; set isolate_user_config: false to keep the
+        # global config dir (and OAuth login state) instead.
+        if agent_config.get("isolate_user_config", True):
+            config_dir = task_workspace / ".cursor-config"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            env["CURSOR_CONFIG_DIR"] = str(config_dir)
 
         logger.info("Executing Cursor for task %s (model=%s, timeout=%ds)", task_id, model, timeout)
         t_start = time.monotonic()
@@ -310,12 +318,13 @@ class CursorAgent(CLIAgent):
         (cursor_dir / "mcp.json").write_text(
             json.dumps(mcp_config, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        # --force auto-approves tool calls unless explicitly denied, so deny all
-        # shell here; browsing happens exclusively through the MCP server.
+        # --force auto-approves tool calls unless explicitly denied, so deny
+        # shell, web-fetch, and file tools here; browsing happens exclusively
+        # through the MCP server.
         permissions = {
             "permissions": {
                 "allow": ["Mcp(playwright)"],
-                "deny": ["Shell(**)"],
+                "deny": ["Shell(**)", "WebFetch(**)", "Read(**)", "Write(**)"],
             }
         }
         (cursor_dir / "cli.json").write_text(
@@ -367,6 +376,11 @@ class CursorAgent(CLIAgent):
             returncode, execution_error, has_result=bool(answer)
         )
         error_message = self._result_error(result_obj)
+        # A normal run always ends with a terminal result event; exiting
+        # without one (e.g. MCP startup failure after a partial preamble)
+        # is a failure even when some assistant text was emitted.
+        if not result_obj and not error_message:
+            error_message = "Cursor exited without a terminal result event"
         if agent_done != "timeout" and error_message:
             env_status, agent_done = "failed", "error"
         if env_status == "failed" and not answer:
