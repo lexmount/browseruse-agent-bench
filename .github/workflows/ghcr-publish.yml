@@ -84,9 +84,17 @@ jobs:
           fi
           echo "Warmup target tag: ${docker_image_tag}"
 
-          curl -fsS --max-time 10 --retry 1 --retry-delay 2 -X POST \
+          # -o /dev/null: never print the response body - the platform echoes
+          # execution trigger details that can contain internal credentials,
+          # and these logs are public.
+          http_code=$(curl -sS -o /dev/null -w "%{http_code}" \
+            --max-time 10 --retry 1 --retry-delay 2 -X POST \
             "https://bench.lexmount.com/api/webhooks/image-warmup" \
             -H "Authorization: Bearer ${IMAGE_WARMUP_WEBHOOK_SECRET}" \
             -H "Content-Type: application/json" \
-            -d "{\"docker_image_tag\": \"${docker_image_tag}\"}"
-          echo "Warmup webhook triggered successfully."
+            -d "{\"docker_image_tag\": \"${docker_image_tag}\"}")
+          if [ "${http_code}" != "200" ]; then
+            echo "Warmup webhook failed: HTTP ${http_code}"
+            exit 1
+          fi
+          echo "Warmup webhook triggered successfully (HTTP ${http_code})."
