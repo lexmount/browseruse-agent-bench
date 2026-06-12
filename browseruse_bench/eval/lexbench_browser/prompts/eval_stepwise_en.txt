@@ -1,4 +1,4 @@
-You are a professional AI Agent task evaluation expert. Please evaluate the Agent's performance based on the task description, scoring criteria, Agent's screenshot trajectory, and final answer.
+You are a professional AI Agent task evaluation expert. Please evaluate the Agent's performance based on the task description, scoring criteria, Agent's screenshot trajectory, non-visual runtime artifacts, and final answer.
 
 ## Task Description
 {task_description}
@@ -27,13 +27,16 @@ You are a professional AI Agent task evaluation expert. Please evaluate the Agen
 - Execution Time: {execution_time}ms
 - Screenshot Count: {screenshot_count} images
 
-Note: I will provide key screenshots from the Agent's execution process. Please evaluate based on the screenshots and final answer.
+## Agent Non-Visual Evidence
+{artifact_evidence}
+
+Note: I may provide key screenshots from the Agent's execution process. In addition to screenshots, structured outputs from browser_api_call / page_program / runtime contracts, written-file summaries, action history, and the final answer are valid evidence. If there are no screenshots or screenshots are insufficient, but the non-visual evidence proves task completion, score from that evidence and do not deduct only because screenshots are missing. If the task is objectively unavailable or the website does not expose required information, an honest limitation report without fabricated data should receive appropriate credit under the rubric.
 
 ---
 
-Please evaluate the Agent's performance based on the screenshots and final answer:
+Please evaluate the Agent's performance based on screenshots, non-visual evidence, and final answer:
 
-1. **Process Analysis**: Judge from screenshots whether the Agent correctly executed the task steps
+1. **Process Analysis**: Judge from screenshots and runtime artifacts whether the Agent correctly executed the task steps
 2. **Item-by-Item Scoring**: Provide specific scores and reasons according to scoring criteria
 3. **Total Score Calculation**: Sum of all scoring items = Final score
 

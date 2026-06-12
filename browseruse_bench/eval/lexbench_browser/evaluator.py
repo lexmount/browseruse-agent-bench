@@ -1,4 +1,5 @@
 """LexBenchBrowserEvaluator: per-task threshold scoring with stepwise screenshots."""
+
 from __future__ import annotations
 
 import json
@@ -6,7 +7,7 @@ import logging
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar, Dict, List, Set
+from typing import Any, ClassVar
 
 from browseruse_bench.eval.base import BaseEvaluator
 from browseruse_bench.eval.lexbench_browser.lexmount_eval import evaluate_task
@@ -36,6 +37,14 @@ _SCREENSHOT_SUFFIXES = {".png", ".jpg", ".jpeg"}
 _NOT_EVALUATED_FAILURE_CATEGORY = "not_evaluated"
 _SYNTHETIC_FAILURE_REASONING = "Task was not evaluated and is counted as failed by policy."
 _NOT_EVALUATED_MISSING_REASON = "not_evaluated"
+_ARTIFACT_EVIDENCE_KEY = "_artifact_evidence"
+_ARTIFACT_EVIDENCE_META_KEY = "_artifact_evidence_meta"
+_MAX_ARTIFACT_EVIDENCE_CHARS = 14_000
+_MAX_ACTION_HISTORY_ITEMS = 40
+_MAX_ACTION_HISTORY_CHARS = 7_000
+_MAX_API_SUMMARY_CHARS = 7_000
+_MAX_API_STEP_FILES = 6
+_MAX_API_STEP_CHARS = 1_200
 
 
 def _normalize_task_id(raw_task_id: Any) -> str | None:
@@ -45,12 +54,10 @@ def _normalize_task_id(raw_task_id: Any) -> str | None:
     return task_id or None
 
 
-def _is_synthetic_not_evaluated_record(record: Dict[str, Any]) -> bool:
+def _is_synthetic_not_evaluated_record(record: dict[str, Any]) -> bool:
     if record.get("failure_category") != _NOT_EVALUATED_FAILURE_CATEGORY:
         return False
-    if record.get("predicted_label") != 0:
-        return False
-    return True
+    return record.get("predicted_label") == 0
 
 
 def _extract_number(filename: str) -> int:
@@ -58,17 +65,149 @@ def _extract_number(filename: str) -> int:
     return int(match.group()) if match else 0
 
 
-def _find_screenshots(trajectory_dir: Path) -> List[Path]:
+def _find_screenshots(trajectory_dir: Path) -> list[Path]:
     if not trajectory_dir.exists():
         return []
-    screenshots: List[Path] = []
+    screenshots: list[Path] = []
     for file in sorted(trajectory_dir.iterdir(), key=lambda x: _extract_number(x.name)):
         if file.suffix.lower() in _SCREENSHOT_SUFFIXES:
             screenshots.append(file)
     return screenshots
 
 
-def _resolve_split_entry(splits: Dict[str, Any], split: str) -> str:
+def _truncate_text(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars]}\n...[truncated {len(text) - max_chars} chars]"
+
+
+def _safe_read_text(path: Path, max_chars: int) -> str | None:
+    try:
+        return _truncate_text(path.read_text(encoding="utf-8", errors="replace"), max_chars)
+    except OSError as exc:
+        logger.warning("Failed to read artifact evidence %s: %s", path, exc)
+        return None
+
+
+def _compact_json_file(path: Path, max_chars: int) -> str | None:
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.debug("Could not parse JSON artifact %s: %s", path, exc)
+        return _safe_read_text(path, max_chars)
+    text = json.dumps(payload, ensure_ascii=False, default=str, separators=(",", ":"))
+    return _truncate_text(text, max_chars)
+
+
+def _compact_api_summary(text: str) -> str:
+    # The summary starts with a full system-prompt <details> block. Keep the
+    # task/action evidence and omit prompt boilerplate so the judge sees signal.
+    text = re.sub(
+        r"<details>\s*<summary>Click to expand system prompt</summary>.*?</details>",
+        "<details>system prompt omitted</details>",
+        text,
+        flags=re.DOTALL,
+    )
+    return text.strip()
+
+
+def _summarize_action_history(action_history: Any) -> str:
+    if not isinstance(action_history, list) or not action_history:
+        return ""
+
+    if len(action_history) <= _MAX_ACTION_HISTORY_ITEMS:
+        selected = list(enumerate(action_history, start=1))
+    else:
+        head_count = _MAX_ACTION_HISTORY_ITEMS // 2
+        tail_count = _MAX_ACTION_HISTORY_ITEMS - head_count
+        head = list(enumerate(action_history[:head_count], start=1))
+        tail_start = len(action_history) - tail_count + 1
+        tail = list(enumerate(action_history[-tail_count:], start=tail_start))
+        selected = (
+            head
+            + [(-1, f"... {len(action_history) - _MAX_ACTION_HISTORY_ITEMS} actions omitted ...")]
+            + tail
+        )
+
+    lines: list[str] = []
+    for index, item in selected:
+        if index == -1:
+            lines.append(str(item))
+            continue
+        if isinstance(item, str):
+            rendered = item
+        else:
+            rendered = json.dumps(item, ensure_ascii=False, default=str)
+        lines.append(f"{index}. {_truncate_text(rendered, 1_500)}")
+    return _truncate_text("\n".join(lines), _MAX_ACTION_HISTORY_CHARS)
+
+
+def _collect_artifact_evidence(
+    task_dir: Path, agent_result: dict[str, Any]
+) -> tuple[str, dict[str, Any]]:
+    """Collect non-visual evidence that can prove a browser task completed.
+
+    Runtime-assisted agents often finish through API calls, page programs, or
+    generated output files. Those can be stronger evidence than screenshots, so
+    the evaluator should present them to the judge instead of failing early.
+    """
+    sections: list[str] = []
+    meta: dict[str, Any] = {
+        "has_agent_answer": bool(agent_result.get("answer") or agent_result.get("response")),
+        "has_action_history": False,
+        "api_summary_included": False,
+        "api_step_files_included": 0,
+        "char_count": 0,
+    }
+
+    action_summary = _summarize_action_history(agent_result.get("action_history"))
+    if action_summary:
+        meta["has_action_history"] = True
+        sections.append("### Agent action history\n" + action_summary)
+
+    api_logs_dir = task_dir / "api_logs"
+    summary_path = api_logs_dir / "summary.md"
+    if summary_path.exists():
+        summary_text = _safe_read_text(summary_path, _MAX_API_SUMMARY_CHARS * 2)
+        if summary_text:
+            meta["api_summary_included"] = True
+            sections.append(
+                "### API/runtime call log summary\n"
+                + _truncate_text(_compact_api_summary(summary_text), _MAX_API_SUMMARY_CHARS)
+            )
+
+    if api_logs_dir.exists():
+        step_previews: list[str] = []
+        for step_file in sorted(
+            api_logs_dir.glob("step_*.json"), key=lambda p: _extract_number(p.name)
+        )[:_MAX_API_STEP_FILES]:
+            preview = _compact_json_file(step_file, _MAX_API_STEP_CHARS)
+            if preview:
+                step_previews.append(f"- {step_file.name}: {preview}")
+        if step_previews:
+            meta["api_step_files_included"] = len(step_previews)
+            sections.append("### API/runtime step JSON previews\n" + "\n".join(step_previews))
+
+    evidence = "\n\n".join(sections).strip()
+    if evidence:
+        evidence = _truncate_text(evidence, _MAX_ARTIFACT_EVIDENCE_CHARS)
+    else:
+        evidence = "No non-visual artifact evidence was found."
+    meta["char_count"] = len(evidence)
+    return evidence, meta
+
+
+def _has_evaluable_artifact_evidence(agent_result: dict[str, Any], meta: dict[str, Any]) -> bool:
+    return bool(
+        meta.get("has_agent_answer")
+        or meta.get("has_action_history")
+        or meta.get("api_summary_included")
+        or meta.get("api_step_files_included")
+    )
+
+
+def _resolve_split_entry(splits: dict[str, Any], split: str) -> str:
     if split not in splits:
         available = ", ".join(sorted(splits.keys()))
         raise ValueError(f"Unknown split '{split}'. Available: {available}")
@@ -134,7 +273,7 @@ class LexBenchBrowserEvaluator(BaseEvaluator):
         super().__init__(args, model)
         self._tasks_json: Path | None = None
         self._dataset_name: str | None = None
-        self._expected_task_ids: List[str] = []
+        self._expected_task_ids: list[str] = []
 
     @property
     def eval_strategy(self) -> str:
@@ -147,7 +286,8 @@ class LexBenchBrowserEvaluator(BaseEvaluator):
     def results_filename(self) -> str:
         if not self._dataset_name:
             self._tasks_json = _resolve_tasks_file_from_split(
-                self.args.split, self.args.data_source,
+                self.args.split,
+                self.args.data_source,
                 self.args.extra.get("force_download", False),
             )
             self._dataset_name = self._tasks_json.stem
@@ -164,11 +304,12 @@ class LexBenchBrowserEvaluator(BaseEvaluator):
             f"{self.eval_strategy}_summary.json"
         )
 
-    def load_tasks(self) -> Dict[str, Dict[str, Any]]:
+    def load_tasks(self) -> dict[str, dict[str, Any]]:
         if not self.args.split:
             raise ValueError("--split must be specified for LexBench-Browser")
         self._tasks_json = _resolve_tasks_file_from_split(
-            self.args.split, self.args.data_source,
+            self.args.split,
+            self.args.data_source,
             self.args.extra.get("force_download", False),
         )
         self._dataset_name = self._tasks_json.stem
@@ -179,7 +320,7 @@ class LexBenchBrowserEvaluator(BaseEvaluator):
         logger.info("Split '%s' -> %s", self.args.split, display)
 
         tasks_list = load_tasks(str(self._tasks_json))
-        tasks_data: Dict[str, Dict[str, Any]] = {}
+        tasks_data: dict[str, dict[str, Any]] = {}
         for task in tasks_list:
             task_id = _normalize_task_id(task.get("task_id"))
             if not task_id:
@@ -194,23 +335,22 @@ class LexBenchBrowserEvaluator(BaseEvaluator):
             raise ValueError(f"No valid task_id found in {self._tasks_json}")
         return tasks_data
 
-    def _resume_skip_set(self) -> Set[str]:
+    def _resume_skip_set(self) -> set[str]:
         # Skip records that exist but are NOT synthetic-failure placeholders
         # (so a previously-synthetic task gets re-judged when its trajectory
         # is finally available on resume).
         return {
             r["task_id"]
             for r in self._load_all_records()
-            if isinstance(r.get("task_id"), str)
-            and not _is_synthetic_not_evaluated_record(r)
+            if isinstance(r.get("task_id"), str) and not _is_synthetic_not_evaluated_record(r)
         }
 
     def _write_no_screenshot_result(
         self,
         task_id: str,
-        task_data: Dict[str, Any],
+        task_data: dict[str, Any],
         task_dir: Path,
-        agent_result: Dict[str, Any],
+        agent_result: dict[str, Any],
         reason: str,
     ) -> EvalResult:
         task_description = task_data.get("query", "Unknown task")
@@ -255,33 +395,65 @@ class LexBenchBrowserEvaluator(BaseEvaluator):
 
     def evaluate_one(self, task_id, task_data, agent_result, trajectory_dir):
         task_description = task_data.get("query", "Unknown task")
+        artifact_evidence, artifact_meta = _collect_artifact_evidence(trajectory_dir, agent_result)
+        agent_result_for_eval = dict(agent_result)
+        agent_result_for_eval[_ARTIFACT_EVIDENCE_KEY] = artifact_evidence
+        agent_result_for_eval[_ARTIFACT_EVIDENCE_META_KEY] = artifact_meta
+        has_artifact_evidence = _has_evaluable_artifact_evidence(agent_result, artifact_meta)
+
         screenshots = _find_screenshots(trajectory_dir / "trajectory")
         if not screenshots:
-            logger.info("   No screenshots, recording as failed")
-            return self._write_no_screenshot_result(
-                task_id, task_data, trajectory_dir, agent_result, "no_screenshots",
+            clean_stats = {
+                "blank_removed": 0,
+                "duplicate_removed": 0,
+                "final_count": 0,
+                "original_count": 0,
+            }
+            if has_artifact_evidence:
+                logger.info("   No screenshots; evaluating with artifact evidence")
+            else:
+                logger.info("   No screenshots or artifact evidence, recording as failed")
+                return self._write_no_screenshot_result(
+                    task_id,
+                    task_data,
+                    trajectory_dir,
+                    agent_result,
+                    "no_screenshots",
+                )
+        else:
+            screenshots, clean_stats = clean_screenshots(
+                screenshots,
+                remove_blank=True,
+                remove_duplicates=True,
             )
-        screenshots, clean_stats = clean_screenshots(
-            screenshots, remove_blank=True, remove_duplicates=True,
-        )
-        if clean_stats["blank_removed"] > 0 or clean_stats["duplicate_removed"] > 0:
-            logger.info(
-                "   Cleaned screenshots: removed %d blank, %d duplicates (kept %d/%d)",
-                clean_stats["blank_removed"],
-                clean_stats["duplicate_removed"],
-                clean_stats["final_count"],
-                clean_stats["original_count"],
-            )
+            if clean_stats["blank_removed"] > 0 or clean_stats["duplicate_removed"] > 0:
+                logger.info(
+                    "   Cleaned screenshots: removed %d blank, %d duplicates (kept %d/%d)",
+                    clean_stats["blank_removed"],
+                    clean_stats["duplicate_removed"],
+                    clean_stats["final_count"],
+                    clean_stats["original_count"],
+                )
         if not screenshots:
-            logger.info("   No valid screenshots after cleaning, recording as failed")
-            return self._write_no_screenshot_result(
-                task_id, task_data, trajectory_dir, agent_result,
-                "no_valid_screenshots_after_cleaning",
-            )
+            if has_artifact_evidence:
+                logger.info(
+                    "   No valid screenshots after cleaning; evaluating with artifact evidence"
+                )
+            else:
+                logger.info(
+                    "   No valid screenshots after cleaning and no artifact evidence, recording as failed"
+                )
+                return self._write_no_screenshot_result(
+                    task_id,
+                    task_data,
+                    trajectory_dir,
+                    agent_result,
+                    "no_valid_screenshots_after_cleaning",
+                )
 
         eval_result = evaluate_task(
             task_data=task_data,
-            agent_result=agent_result,
+            agent_result=agent_result_for_eval,
             screenshot_paths=screenshots,
             model=self.model,
             image_scale_factor=self.image_scale_factor,
@@ -297,7 +469,9 @@ class LexBenchBrowserEvaluator(BaseEvaluator):
         if threshold is None:
             raise KeyError(f"Missing required per-task score_threshold for task_id={task_id}")
         if not isinstance(threshold, int):
-            raise ValueError(f"Invalid score_threshold type for task_id={task_id}: {type(threshold).__name__}")
+            raise ValueError(
+                f"Invalid score_threshold type for task_id={task_id}: {type(threshold).__name__}"
+            )
         if threshold < 0 or threshold > 100:
             raise ValueError(f"Invalid score_threshold range for task_id={task_id}: {threshold}")
         is_success = calculate_success(score, threshold)
@@ -336,9 +510,18 @@ class LexBenchBrowserEvaluator(BaseEvaluator):
                 "score_threshold": threshold,
                 "screenshot_count": eval_result.get("screenshot_count", 0),
                 "original_screenshot_count": eval_result.get("original_screenshot_count", 0),
-                "image_scale_factor": eval_result.get("image_scale_factor", self.image_scale_factor),
+                "image_scale_factor": eval_result.get(
+                    "image_scale_factor", self.image_scale_factor
+                ),
                 "max_screenshots_config": self.args.extra.get("max_screenshots"),
                 "eval_strategy": eval_result.get("eval_strategy", "stepwise"),
+                "artifact_evidence": artifact_meta,
+                "image_content_policy_fallback": eval_result.get(
+                    "image_content_policy_fallback", False
+                ),
+                "cyber_safety_prompt_fallback": eval_result.get(
+                    "cyber_safety_prompt_fallback", False
+                ),
             },
         )
 
@@ -358,7 +541,11 @@ class LexBenchBrowserEvaluator(BaseEvaluator):
         screenshot_total = eval_result.get("original_screenshot_count", 0)
         logger.info(
             "   %s Score: %d/100 | Screenshots: %d/%d | Scale: %s",
-            status, score, screenshot_used, screenshot_total, self.image_scale_factor,
+            status,
+            score,
+            screenshot_used,
+            screenshot_total,
+            self.image_scale_factor,
         )
 
         return EvalResult(
@@ -373,16 +560,13 @@ class LexBenchBrowserEvaluator(BaseEvaluator):
             task_type=task_data.get("task_type") or None,
         )
 
-    def post_eval_hook(self, records: List[Dict[str, Any]]) -> None:
+    def post_eval_hook(self, records: list[dict[str, Any]]) -> None:
         # Backfill synthetic failures for tasks that were attempted but not evaluated.
         # Scope to task IDs that actually have a trajectory directory — tasks that were
         # never run are not counted as failures in partial-subset runs.
         if not self._expected_task_ids:
             return
-        attempted_ids = {
-            d.name for d in self.args.trajectories_dir.iterdir()
-            if d.is_dir()
-        }
+        attempted_ids = {d.name for d in self.args.trajectories_dir.iterdir() if d.is_dir()}
         expected = [tid for tid in self._expected_task_ids if tid in attempted_ids]
         if not expected:
             return
@@ -402,7 +586,7 @@ class LexBenchBrowserEvaluator(BaseEvaluator):
                 fh.write(json.dumps(record, ensure_ascii=False) + "\n")
         logger.info("Backfilled %d synthetic failure records", len(missing))
 
-    def _build_synthetic_failure(self, task_id: str, task_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_synthetic_failure(self, task_id: str, task_data: dict[str, Any]) -> dict[str, Any]:
         task_description = task_data.get("task_text") or task_data.get("query", "Unknown task")
         now = datetime.now(UTC)
         eval_details = EvalDetails(
@@ -430,7 +614,7 @@ class LexBenchBrowserEvaluator(BaseEvaluator):
         )
         return record.model_dump(mode="json")
 
-    def _generate_summary(self, all_records: List[Dict[str, Any]]) -> None:
+    def _generate_summary(self, all_records: list[dict[str, Any]]) -> None:
         total = len(all_records)
         success = sum(1 for r in all_records if r.get("predicted_label") == 1)
         success_rate = (success / total * 100) if total > 0 else 0
@@ -458,18 +642,20 @@ class LexBenchBrowserEvaluator(BaseEvaluator):
                 "median": sorted(scores)[len(scores) // 2],
             }
 
-        task_types: Dict[str, Dict[str, Any]] = {}
+        task_types: dict[str, dict[str, Any]] = {}
         for r in all_records:
             t = r.get("task_type", "Unknown")
             bucket = task_types.setdefault(t, {"total": 0, "success": 0})
             bucket["total"] += 1
             if r.get("predicted_label") == 1:
                 bucket["success"] += 1
-        for tt, stats in task_types.items():
-            stats["success_rate"] = (stats["success"] / stats["total"] * 100) if stats["total"] > 0 else 0
+        for stats in task_types.values():
+            stats["success_rate"] = (
+                (stats["success"] / stats["total"] * 100) if stats["total"] > 0 else 0
+            )
         summary["task_type_breakdown"] = task_types
 
-        usage_list: List[Any] = []
+        usage_list: list[Any] = []
         for r in all_records:
             usage = (r.get("evaluation_details") or {}).get("eval_usage")
             if usage is not None:
@@ -481,6 +667,8 @@ class LexBenchBrowserEvaluator(BaseEvaluator):
         with open(self.summary_path(), "w", encoding="utf-8") as fh:
             json.dump(summary, fh, ensure_ascii=False, indent=2)
         logger.info(
-            "SUCCESS: %d/%d (%.2f%%)", success, total, success_rate,
+            "SUCCESS: %d/%d (%.2f%%)",
+            success,
+            total,
+            success_rate,
         )
-

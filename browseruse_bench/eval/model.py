@@ -1,4 +1,5 @@
 """Evaluation model client + image encoding helper."""
+
 from __future__ import annotations
 
 import base64
@@ -6,7 +7,7 @@ import contextvars
 import io
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 try:
     import backoff
@@ -36,6 +37,20 @@ current_task_id: contextvars.ContextVar[str] = contextvars.ContextVar(
 )
 
 
+def default_temperature_for_model(model: str) -> float:
+    """Return a safe default eval temperature for models with strict schemas."""
+    if model.lower().startswith("gpt-5"):
+        return 1.0
+    return 0.3
+
+
+def default_max_tokens_for_model(model: str, fallback: int = 2048) -> int:
+    """Return a safe default eval output budget."""
+    if model.lower().startswith("gpt-5"):
+        return 8192
+    return fallback
+
+
 class TaskIdLogFilter(logging.Filter):
     """Logging filter that injects the current task_id into every record."""
 
@@ -44,11 +59,16 @@ class TaskIdLogFilter(logging.Filter):
         return True
 
 
-def _log_backoff(details: Dict[str, Any]) -> None:
+def _log_backoff(details: dict[str, Any]) -> None:
     """Log retry details for backoff callbacks."""
     wait = float(details.get("wait", 0.0))
     exception = details.get("exception")
     logger.warning("[WARNING] Retrying in %.1fs due to %s", wait, exception)
+
+
+def _is_non_retryable_api_error(exc: Exception) -> bool:
+    """Return True for request errors that another retry will not fix."""
+    return getattr(exc, "status_code", None) == 400
 
 
 def encode_image(image, scale_factor: float = 1.0) -> str:
@@ -76,27 +96,33 @@ def encode_image(image, scale_factor: float = 1.0) -> str:
 
     buffered = io.BytesIO()
     image.save(buffered, format="JPEG", quality=85)
-    return base64.b64encode(buffered.getvalue()).decode('utf-8')
+    return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
 
 if OpenAI and backoff:
+
     class EvaluationModel:
         """OpenAI model wrapper for evaluation"""
 
-        def __init__(self, model: str = "gpt-4.1", api_key: str = None, base_url: str = None,
-                     temperature: Optional[float] = None):
+        def __init__(
+            self,
+            model: str = "gpt-4.1",
+            api_key: str = None,
+            base_url: str = None,
+            temperature: float | None = None,
+        ):
             kwargs = {}
             if api_key:
-                kwargs['api_key'] = api_key
+                kwargs["api_key"] = api_key
             else:
-                kwargs['api_key'] = os.getenv("OPENAI_API_KEY")
+                kwargs["api_key"] = os.getenv("OPENAI_API_KEY")
 
             if base_url:
-                kwargs['base_url'] = base_url
+                kwargs["base_url"] = base_url
             elif os.getenv("OPENAI_BASE_URL"):
-                kwargs['base_url'] = os.getenv("OPENAI_BASE_URL")
+                kwargs["base_url"] = os.getenv("OPENAI_BASE_URL")
 
-            if not kwargs.get('api_key'):
+            if not kwargs.get("api_key"):
                 raise ValueError("API key required: set OPENAI_API_KEY or pass api_key parameter")
 
             self.client = OpenAI(**kwargs)
@@ -108,12 +134,23 @@ if OpenAI and backoff:
             backoff.expo,
             (APIError, RateLimitError, APIConnectionError),
             max_tries=5,
-            on_backoff=_log_backoff
+            giveup=_is_non_retryable_api_error,
+            on_backoff=_log_backoff,
         )
-        def generate(self, messages: List[Dict], max_tokens: int = 2048, temperature: Optional[float] = None, **kwargs) -> str:
+        def generate(
+            self,
+            messages: list[dict],
+            max_tokens: int = 2048,
+            temperature: float | None = None,
+            **kwargs,
+        ) -> str:
             """Generate response from OpenAI API with retry"""
             if temperature is None:
-                temperature = self.temperature if self.temperature is not None else 0.3
+                temperature = (
+                    self.temperature
+                    if self.temperature is not None
+                    else default_temperature_for_model(self.model)
+                )
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
@@ -139,15 +176,18 @@ else:
     # Fallback when dependencies are not installed
     class EvaluationModel:
         """OpenAI model wrapper for evaluation (stub)"""
+
         def __init__(self, *args, **kwargs):
-            raise ImportError("openai and backoff are required. Install with: pip install openai backoff")
+            raise ImportError(
+                "openai and backoff are required. Install with: pip install openai backoff"
+            )
 
 
 def load_evaluation_model(
-    model: Optional[str] = None,
-    api_key: Optional[str] = None,
-    base_url: Optional[str] = None,
-    temperature: Optional[float] = None,
+    model: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    temperature: float | None = None,
 ) -> EvaluationModel:
     """Load evaluation model with environment variable fallback
 
@@ -167,6 +207,8 @@ def load_evaluation_model(
         raise ValueError("API key required: set EVAL_MODEL_API_KEY or OPENAI_API_KEY")
 
     # Debug info
-    logger.info(f"   [CONFIG] Eval config: model={model}, base_url={base_url[:50] + '...' if base_url and len(base_url) > 50 else base_url}")
+    logger.info(
+        f"   [CONFIG] Eval config: model={model}, base_url={base_url[:50] + '...' if base_url and len(base_url) > 50 else base_url}"
+    )
 
     return EvaluationModel(model, api_key, base_url, temperature=temperature)

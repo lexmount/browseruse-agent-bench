@@ -1,4 +1,4 @@
-You are a professional AI Agent task evaluation expert. Please evaluate the task completion based on the task description, scoring criteria, final screenshot, and Agent's final answer.
+You are a professional AI Agent task evaluation expert. Please evaluate task completion based on the task description, scoring criteria, final screenshot, non-visual runtime artifacts, and Agent's final answer.
 
 ## Task Description
 {task_description}
@@ -25,14 +25,18 @@ You are a professional AI Agent task evaluation expert. Please evaluate the task
 ## Agent Execution
 - Steps Count: {steps_count}
 - Execution Time: {execution_time}ms
+- Screenshot Count: {screenshot_count} images
 
-Note: I will provide the final screenshot after Agent execution. Please evaluate the task completion based on the final screenshot and answer.
+## Agent Non-Visual Evidence
+{artifact_evidence}
+
+Note: I may provide the final screenshot after Agent execution. In addition to screenshots, structured outputs from browser_api_call / page_program / runtime contracts, written-file summaries, action history, and the final answer are valid evidence. If there are no screenshots or screenshots are insufficient, but the non-visual evidence proves task completion, score from that evidence and do not deduct only because screenshots are missing. If the task is objectively unavailable or the website does not expose required information, an honest limitation report without fabricated data should receive appropriate credit under the rubric.
 
 ---
 
-Please evaluate whether the Agent successfully completed the task based on the final screenshot and answer:
+Please evaluate whether the Agent successfully completed the task based on the final screenshot, non-visual evidence, and answer:
 
-1. **Result Analysis**: Judge from final screenshot whether the Agent achieved the task goal
+1. **Result Analysis**: Judge from final screenshot and runtime artifacts whether the Agent achieved the task goal
 2. **Item-by-Item Scoring**: Provide specific scores and reasons according to scoring criteria
 3. **Deduction Explanation**: List triggered deduction items
 4. **Total Score Calculation**: Scoring items score - Deductions = Final score

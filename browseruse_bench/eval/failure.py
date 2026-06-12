@@ -2,6 +2,7 @@
 
 Utility functions related to failure case classification.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +10,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from browseruse_bench.utils.config_loader import load_config_file
 from browseruse_bench.utils.repo_root import REPO_ROOT
@@ -29,18 +30,15 @@ try:
 except ImportError:
     Image = None
 
-from browseruse_bench.eval.model import EvaluationModel, encode_image
+from browseruse_bench.eval.model import EvaluationModel, default_temperature_for_model, encode_image
 
 logger = logging.getLogger(__name__)
 
-MODEL_GENERATE_EXCEPTIONS: tuple[type[BaseException], ...] = (
-    tuple(
-        exc
-        for exc in (APIError, APIConnectionError, RateLimitError)
-        if isinstance(exc, type) and issubclass(exc, BaseException)
-    )
-    + (OSError, RuntimeError, TypeError, ValueError, ImportError)
-)
+MODEL_GENERATE_EXCEPTIONS: tuple[type[BaseException], ...] = tuple(
+    exc
+    for exc in (APIError, APIConnectionError, RateLimitError)
+    if isinstance(exc, type) and issubclass(exc, BaseException)
+) + (OSError, RuntimeError, TypeError, ValueError, ImportError)
 
 # ============================================================================
 # Failure Classification Constants
@@ -108,15 +106,12 @@ FAILURE_CLASSIFICATION_RESPONSE_FORMAT = {
             "type": "object",
             "properties": {
                 "reasoning": {"type": "string"},
-                "category": {
-                    "type": "string",
-                    "enum": ["A1", "A2", "B1", "B2", "C1", "C2"]
-                }
+                "category": {"type": "string", "enum": ["A1", "A2", "B1", "B2", "C1", "C2"]},
             },
             "required": ["reasoning", "category"],
-            "additionalProperties": False
-        }
-    }
+            "additionalProperties": False,
+        },
+    },
 }
 
 
@@ -124,7 +119,8 @@ FAILURE_CLASSIFICATION_RESPONSE_FORMAT = {
 # Failure Classification Functions
 # ============================================================================
 
-def _collect_task_screenshots(trajectories_dir: Path, task_id: str) -> List[str]:
+
+def _collect_task_screenshots(trajectories_dir: Path, task_id: str) -> list[str]:
     """Collect list of screenshot file paths for a task.
 
     Args:
@@ -139,12 +135,13 @@ def _collect_task_screenshots(trajectories_dir: Path, task_id: str) -> List[str]
         return []
 
     def sort_key(path: Path):
-        nums = re.findall(r'\d+', path.name)
+        nums = re.findall(r"\d+", path.name)
         return int(nums[0]) if nums else path.name
 
     screenshot_files = [
-        f for f in trajectory_dir.iterdir()
-        if f.is_file() and f.suffix.lower() in ['.png', '.jpg', '.jpeg', '.webp', '.gif']
+        f
+        for f in trajectory_dir.iterdir()
+        if f.is_file() and f.suffix.lower() in [".png", ".jpg", ".jpeg", ".webp", ".gif"]
     ]
     screenshot_files.sort(key=sort_key)
     return [str(f) for f in screenshot_files]
@@ -152,13 +149,13 @@ def _collect_task_screenshots(trajectories_dir: Path, task_id: str) -> List[str]
 
 def classify_single_failure(
     task_description: str,
-    screenshots: List[str],  # List of file paths
-    action_history: List[str],
+    screenshots: list[str],  # List of file paths
+    action_history: list[str],
     agent_response: str,
     evaluator_response: str,
     model: EvaluationModel,
-    max_screenshots: int = 3
-) -> Dict[str, Any]:
+    max_screenshots: int = 3,
+) -> dict[str, Any]:
     """Classify a single failure case.
 
     Args:
@@ -179,7 +176,9 @@ def classify_single_failure(
         }
     """
     if Image is None:
-        raise ImportError("PIL is required for failure classification. Install with: pip install Pillow")
+        raise ImportError(
+            "PIL is required for failure classification. Install with: pip install Pillow"
+        )
 
     # Prepare action history text
     if isinstance(action_history, list):
@@ -194,7 +193,7 @@ def classify_single_failure(
         task_description=task_description,
         action_history=action_text if action_text else "No action history",
         agent_response=agent_response if agent_response else "No response",
-        evaluator_response=evaluator_response if evaluator_response else "No evaluation feedback"
+        evaluator_response=evaluator_response if evaluator_response else "No evaluation feedback",
     )
 
     # Prepare message content (text + image)
@@ -202,7 +201,9 @@ def classify_single_failure(
 
     # Add screenshots (take last max_screenshots)
     if screenshots:
-        last_screenshots = screenshots[-max_screenshots:] if len(screenshots) > max_screenshots else screenshots
+        last_screenshots = (
+            screenshots[-max_screenshots:] if len(screenshots) > max_screenshots else screenshots
+        )
         for screenshot_path in last_screenshots:
             try:
                 screenshot_path = Path(screenshot_path)
@@ -210,13 +211,15 @@ def classify_single_failure(
                     # Read and encode screenshot
                     img = Image.open(screenshot_path)
                     base64_img = encode_image(img, scale_factor=0.8)  # Compress to save tokens
-                    content.append({
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64_img}",
-                            "detail": "high"
+                    content.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_img}",
+                                "detail": "high",
+                            },
                         }
-                    })
+                    )
             except (OSError, RuntimeError, TypeError, ValueError) as exc:
                 logger.warning(
                     "   [WARNING] Failed to load screenshot %s: %s", screenshot_path, exc
@@ -226,23 +229,27 @@ def classify_single_failure(
     # Construct messages
     messages = [
         {"role": "system", "content": FAILURE_CLASSIFICATION_SYSTEM_PROMPT},
-        {"role": "user", "content": content}
+        {"role": "user", "content": content},
     ]
 
     # Call model
     try:
+        temperature = _FAILURE_TEMPERATURE
+        if getattr(model, "model", "").lower().startswith("gpt-5"):
+            temperature = default_temperature_for_model(model.model)
+
         response = model.generate(
             messages,
             max_tokens=768,
-            temperature=_FAILURE_TEMPERATURE,
-            response_format=FAILURE_CLASSIFICATION_RESPONSE_FORMAT
+            temperature=temperature,
+            response_format=FAILURE_CLASSIFICATION_RESPONSE_FORMAT,
         )
     except MODEL_GENERATE_EXCEPTIONS as exc:
         logger.error("   [FAILED] Classification failed: %s", exc)
         return {
             "category": "A1",  # Default category
             "reasoning": f"Classification error: {exc}",
-            "raw_response": ""
+            "raw_response": "",
         }
 
     # Parse response
@@ -259,12 +266,14 @@ def classify_single_failure(
         reasoning = parsed.get("reasoning", "") or ""
 
     if not category:
-        category_match = re.search(r'Category[：:]\s*([ABC][123]?)', response, re.IGNORECASE)
+        category_match = re.search(r"Category[：:]\s*([ABC][123]?)", response, re.IGNORECASE)
         if category_match:
             category = category_match.group(1).upper()
 
     if not reasoning:
-        reasoning_match = re.search(r'Reasoning[：:]\s*(.+?)(?=Category[：:]|$)', response, re.IGNORECASE | re.DOTALL)
+        reasoning_match = re.search(
+            r"Reasoning[：:]\s*(.+?)(?=Category[：:]|$)", response, re.IGNORECASE | re.DOTALL
+        )
         if reasoning_match:
             reasoning = reasoning_match.group(1).strip()
 
@@ -274,20 +283,16 @@ def classify_single_failure(
         logger.warning(f"   [WARNING] Invalid category: {category}, defaulting to U")
         category = "U"
 
-    return {
-        "category": category,
-        "reasoning": reasoning,
-        "raw_response": response
-    }
+    return {"category": category, "reasoning": reasoning, "raw_response": response}
 
 
 def classify_failure_case(
-    result: Dict[str, Any],
+    result: dict[str, Any],
     trajectories_dir: Path,
     model: EvaluationModel,
     *,
-    max_screenshots: int = 3
-) -> Dict[str, Any]:
+    max_screenshots: int = 3,
+) -> dict[str, Any]:
     """Classify a single failure case (extracting info from result dict).
 
     Args:
@@ -316,7 +321,7 @@ def classify_failure_case(
         agent_response=agent_response,
         evaluator_response=evaluator_response,
         model=model,
-        max_screenshots=max_screenshots
+        max_screenshots=max_screenshots,
     )
 
     result["failure_category"] = classification["category"]
@@ -327,7 +332,7 @@ def classify_failure_case(
     details["failure_classification"] = {
         "category": classification["category"],
         "reasoning": classification["reasoning"],
-        "raw_response": classification["raw_response"]
+        "raw_response": classification["raw_response"],
     }
 
     logger.info(f"      Classification result: {classification['category']}")
@@ -335,13 +340,13 @@ def classify_failure_case(
 
 
 def classify_failures_batch(
-    eval_results: List[Dict[str, Any]],
+    eval_results: list[dict[str, Any]],
     trajectories_dir: Path,
     model: EvaluationModel,
     skip_existing: bool = True,
-    max_samples: Optional[int] = None,
-    num_workers: int = 4
-) -> List[Dict[str, Any]]:
+    max_samples: int | None = None,
+    num_workers: int = 4,
+) -> list[dict[str, Any]]:
     """Batch classify failure cases.
 
     Args:
@@ -360,7 +365,7 @@ def classify_failures_batch(
     failure_count = 0
     classified_count = 0
 
-    pending: List[Dict[str, Any]] = []
+    pending: list[dict[str, Any]] = []
 
     for result in eval_results:
         # Only process failed cases
@@ -382,16 +387,14 @@ def classify_failures_batch(
         pending = pending[:max_samples]
 
     if pending:
+
         async def _run():
             sem = asyncio.Semaphore(max(1, num_workers))
 
-            async def _classify(res: Dict[str, Any]):
+            async def _classify(res: dict[str, Any]):
                 async with sem:
                     return await asyncio.to_thread(
-                        classify_failure_case,
-                        res,
-                        trajectories_dir,
-                        model
+                        classify_failure_case, res, trajectories_dir, model
                     )
 
             await asyncio.gather(*(_classify(res) for res in pending))
@@ -401,6 +404,8 @@ def classify_failures_batch(
     else:
         classified_count = 0
 
-    logger.info(f"\n   [STATS] Classification Stats: Total {failure_count} failed cases, classified {classified_count} this time")
+    logger.info(
+        f"\n   [STATS] Classification Stats: Total {failure_count} failed cases, classified {classified_count} this time"
+    )
 
     return updated_results
