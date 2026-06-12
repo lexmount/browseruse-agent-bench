@@ -15,7 +15,7 @@ upgrading.
 | Requirement | Why |
 |---|---|
 | Python >= 3.11 + `uv sync` | bench runtime (all CLI agents use the root `.venv`) |
-| Node.js >= 18 + npm | installs the CLIs; `npx` launches Playwright MCP for codex/cursor |
+| Node.js >= 18 + npm (claude-code, codex) / **>= 22.19 (openclaw)** | installs the CLIs; `npx` launches Playwright MCP for codex/cursor. openclaw declares `engines: >=22.19.0` — install Node 22+ when openclaw is in the fleet |
 | Outbound HTTPS | model APIs, Cursor backend, lexmount CDP (wss) |
 | `LEXMOUNT_API_KEY` in `.env` | recommended browser path on servers (see below) |
 
@@ -23,7 +23,10 @@ upgrading.
 
 - **Recommended on servers: `lexmount`** (default via `agents.<agent>.active_browser`).
   The browser runs in the cloud; the server only needs outbound network. No
-  local Chrome required for codex/cursor/openclaw in this mode.
+  local Chrome required for the CDP-capable agents (codex/cursor/openclaw) in
+  this mode. **claude-code is the exception**: it has no managed-backend
+  support and always launches a local browser via Playwright MCP, so a
+  deployment that includes claude-code still needs Chrome/Chromium.
 - **`browser_id=local`**: requires a local Chrome/Chromium plus headless-Linux
   dependencies. For codex/cursor, Playwright MCP downloads its own browser on
   first run — pre-warm with `npx -y @playwright/mcp@latest --version` during
@@ -108,8 +111,9 @@ CLIs nor Chrome** — CLI agents cannot run in that image as-is. To support them
 in a container, the image needs at minimum:
 
 ```dockerfile
-# Node.js 18+ and the agent CLIs
-RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
+# Node.js 22+ (openclaw requires >= 22.19; distro nodejs is usually too old)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && npm install -g @anthropic-ai/claude-code @openai/codex openclaw \
     && npx -y @playwright/mcp@latest --version   # pre-warm MCP download
 # cursor-agent installs outside npm:
@@ -118,9 +122,11 @@ RUN curl https://cursor.com/install -fsS | bash && ln -s /root/.local/bin/cursor
 
 plus auth material at runtime (env vars above; `~/.codex/auth.json` for
 ChatGPT-login codex). With the lexmount browser path no Chrome is needed in
-the image. This Dockerfile change is intentionally **not** applied yet —
-it grows the image and affects CI; apply it when server-side runs of these
-agents are actually scheduled.
+the image for codex/cursor/openclaw; **include Chrome/Chromium (and headless
+deps) if claude-code or `browser_id=local` runs are planned**. This
+Dockerfile change is intentionally **not** applied yet — it grows the image
+and affects CI; apply it when server-side runs of these agents are actually
+scheduled.
 
 ## Smoke verification (per agent, after deploy)
 
