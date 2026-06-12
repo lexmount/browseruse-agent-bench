@@ -167,6 +167,14 @@ models:
     model_type: OPENAI
     model_id: gpt-5.2
     api_key: $CURSOR_API_KEY
+  # OpenClaw CLI model. Only supported by the openclaw agent; the agent writes
+  # a per-task OpenClaw provider config from these values (OpenAI-compatible
+  # endpoints work, e.g. a LiteLLM proxy).
+  openclaw:
+    model_type: OPENAI
+    model_id: gpt-5.4
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
 browsers:
   lexmount:
     browser_id: lexmount
@@ -243,6 +251,9 @@ agents:
     sandbox_mode: read-only
   cursor:
     active_model: cursor
+    timeout: 600
+  openclaw:
+    active_model: openclaw
     timeout: 600
   deepbrowse:
     use_vision: auto
