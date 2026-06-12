@@ -15,7 +15,7 @@ upgrading.
 | Requirement | Why |
 |---|---|
 | Python >= 3.11 + `uv sync` | bench runtime (all CLI agents use the root `.venv`) |
-| Node.js >= 18 + npm (claude-code, codex) / **>= 22.19 (openclaw)** | installs the CLIs; `npx` launches Playwright MCP for codex/cursor. openclaw declares `engines: >=22.19.0` — install Node 22+ when openclaw is in the fleet |
+| Node.js >= 18 + npm (claude-code, codex, **cursor**) / **>= 22.19 (openclaw)** | installs the npm CLIs, and `npx` launches Playwright MCP at runtime for codex **and cursor** (cursor's own binary installs via curl but still needs `npx`). openclaw declares `engines: >=22.19.0` — install Node 22+ when openclaw is in the fleet |
 | Outbound HTTPS | model APIs, Cursor backend, lexmount CDP (wss) |
 | `LEXMOUNT_API_KEY` in `.env` | recommended browser path on servers (see below) |
 
@@ -32,8 +32,10 @@ upgrading.
   first run — pre-warm with `npx -y @playwright/mcp@latest --version` during
   image build to avoid first-task latency.
 - Cloud-native backends (`browser-use-cloud`, `skyvern-cloud`) are **not
-  supported** by CLI agents (no CDP endpoint); the run fails fast with a clear
-  error.
+  supported** by CLI agents (no CDP endpoint). codex/cursor/openclaw fail fast
+  with a clear error; **claude-code does not inspect `browser_id` at all** and
+  silently uses its local Playwright MCP browser regardless of the selected
+  backend — do not point claude-code at a managed backend and expect an error.
 
 ## Per-agent install and auth
 
@@ -116,8 +118,14 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && npm install -g @anthropic-ai/claude-code @openai/codex openclaw \
     && npx -y @playwright/mcp@latest --version   # pre-warm MCP download
-# cursor-agent installs outside npm:
-RUN curl https://cursor.com/install -fsS | bash && ln -s /root/.local/bin/cursor-agent /usr/local/bin/
+# cursor-agent installs outside npm, into the installing user's home.
+# The repo image runs as uid 1000, and /root is not traversable by non-root
+# users — install as the runtime user (after USER 1000), or relocate the
+# install out of /root and point agents.cursor.cursor_agent_command at it:
+RUN curl https://cursor.com/install -fsS | bash \
+    && mv /root/.local/share/cursor-agent /opt/cursor-agent \
+    && chmod -R a+rX /opt/cursor-agent
+# then set agents.cursor.cursor_agent_command: /opt/cursor-agent/versions/<version>/cursor-agent
 ```
 
 plus auth material at runtime (env vars above; `~/.codex/auth.json` for

@@ -103,7 +103,7 @@ source .venv/bin/activate          # macOS / Linux
 .venv\Scripts\Activate.ps1         # Windows PowerShell
 ```
 
-**CLI agents: claude-code / codex / cursor / openclaw** (requires Node.js 18+)
+**CLI agents: claude-code / codex / cursor / openclaw** (requires Node.js 18+; **openclaw requires Node.js 22.19+**)
 
 These agents share the main venv (`uv sync`, no extra) and drive an external
 CLI installed separately:
