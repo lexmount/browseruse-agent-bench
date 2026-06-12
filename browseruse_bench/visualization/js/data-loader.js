@@ -75,8 +75,45 @@ class DataLoader {
             path: run.path,
             outputLogs: run.output_logs || [],
             evalMode: run.eval_data?.summary?.evaluation_config?.mode || null,
+            browser: this.getRunBrowserInfo(run),
             displayName: this.getRunDisplayName(run)
         }));
+    }
+
+    /**
+     * Browser identity for a run. Reads run.browser / browser_label /
+     * browser_id_raw / browser_mixed / browser_breakdown produced by
+     * generate_index.py, and falls back to "unknown" for older indexes
+     * that pre-date these fields.
+     */
+    getRunBrowserInfo(run) {
+        const kind = run?.browser || 'unknown';
+        const label = run?.browser_label
+            || (kind === 'lexmount' ? 'Lexmount'
+                : kind === 'local' ? 'Local'
+                : 'Unknown');
+        return {
+            kind,
+            label,
+            raw: run?.browser_id_raw || '',
+            mixed: !!run?.browser_mixed,
+            breakdown: run?.browser_breakdown || {},
+        };
+    }
+
+    /**
+     * Per-task browser kind. Used by populateTasksList to mark each task
+     * with the browser that ran it (only meaningful when the run is mixed).
+     * Returns one of {lexmount, local, unknown}.
+     */
+    getTaskBrowserKind(uuid, taskId) {
+        const meta = this.getTaskMeta(uuid, taskId);
+        return meta?.browser || 'unknown';
+    }
+
+    getTaskBrowserRaw(uuid, taskId) {
+        const meta = this.getTaskMeta(uuid, taskId);
+        return meta?.browser_id_raw || '';
     }
 
     getRunDisplayName(run) {
@@ -116,7 +153,11 @@ class DataLoader {
             const model = agent.modelMap.get(modelName);
 
             const stats = this.getRunStats(run, judgeMode);
-            model.runs.push({ uuid: run.uuid, stats });
+            model.runs.push({
+                uuid: run.uuid,
+                stats,
+                browser: this.getRunBrowserInfo(run),
+            });
         }
 
         // Compute aggregated stats and flatten Maps to arrays
@@ -379,6 +420,7 @@ class DataLoader {
             modelId: run.model_id,
             agent: run.agent,
             benchmark: run.benchmark,
+            browser: this.getRunBrowserInfo(run),
             displayName: this.getRunDisplayName(run)
         };
 
@@ -537,6 +579,7 @@ class DataLoader {
             benchmark: run.benchmark,
             displayName: this.getRunDisplayName(run),
             split: run.split,
+            browser: this.getRunBrowserInfo(run),
             ...this.getRunStats(run, judgeMode),
             avgSteps: run.stats.avg_steps || 0,
             avgCost: run.stats.avg_cost || 0

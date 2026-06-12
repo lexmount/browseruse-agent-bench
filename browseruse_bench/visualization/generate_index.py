@@ -29,8 +29,9 @@ import json
 import re
 import statistics
 import sys
+from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def find_repo_root() -> Path:
@@ -263,6 +264,83 @@ def _collect_run_output_logs(timestamp_dir: Path) -> List[Dict[str, str]]:
     return logs
 
 
+# Normalized browser kinds exposed to the frontend. Per-task `browser_id`
+# values seen in real result.json files: "lexmount" (lex cloud browser),
+# "Chrome-Local" / "local" (local Chrome), "" or missing (older runs / agents
+# that don't record this field, e.g. early Agent-TARS / skyvern reconstructed).
+_BROWSER_LABEL = {
+    "lexmount": "Lexmount",
+    "local": "Local",
+    "unknown": "Unknown",
+}
+
+
+def _normalize_browser_id(raw: Optional[str]) -> str:
+    """Map a raw browser_id to one of {lexmount, local, unknown}."""
+    if not raw:
+        return "unknown"
+    s = str(raw).strip().lower()
+    if not s:
+        return "unknown"
+    if "lexmount" in s:
+        return "lexmount"
+    if "local" in s:  # matches "local" and "Chrome-Local"
+        return "local"
+    return "unknown"
+
+
+def _summarize_browsers(
+    raw_values: List[str],
+) -> Tuple[str, str, str, bool, Dict[str, int]]:
+    """Aggregate per-task browser_id values into run-level summary fields.
+
+    Returns a 5-tuple: (browser_kind, browser_label, browser_id_raw, is_mixed,
+    breakdown).
+
+    - `browser_kind`: dominant normalized kind across the run.
+    - `browser_label`: display label for the dominant kind.
+    - `browser_id_raw`: most-common original string (for tooltip / debugging).
+    - `is_mixed`: True when more than one *known* normalized kind appears
+       (unknown plus a single known kind is treated as the known kind, not
+       mixed — unknown is data noise, not a real browser switch).
+    - `breakdown`: ordered mapping `{kind: count}` over all tasks (including
+       unknown), used by the frontend to render distributions like
+       "Mixed (47 lexmount + 2 local)".
+    """
+    if not raw_values:
+        return "unknown", _BROWSER_LABEL["unknown"], "", False, {}
+
+    kinds = [_normalize_browser_id(v) for v in raw_values]
+    kind_counts = Counter(kinds)
+
+    known_kinds = [k for k in kinds if k != "unknown"]
+    if known_kinds:
+        # Counter preserves insertion order in CPython 3.7+, but we want a
+        # deterministic majority-first order — that's what most_common gives us.
+        dominant_kind = Counter(known_kinds).most_common(1)[0][0]
+        is_mixed = len(set(known_kinds)) > 1
+    else:
+        dominant_kind = "unknown"
+        is_mixed = False
+
+    # Most common non-empty raw string for display (helps distinguish
+    # "Chrome-Local" vs "local" inside the Local kind).
+    raw_counts = Counter(v for v in raw_values if v)
+    raw_dominant = raw_counts.most_common(1)[0][0] if raw_counts else ""
+
+    # breakdown is sorted by count desc so the dominant kind always lands
+    # first when the frontend renders "kind1 + kind2 + ..." inline.
+    breakdown = dict(kind_counts.most_common())
+
+    return (
+        dominant_kind,
+        _BROWSER_LABEL[dominant_kind],
+        raw_dominant,
+        is_mixed,
+        breakdown,
+    )
+
+
 # ------------------------------------------------------------------
 # Per-task scanning
 # ------------------------------------------------------------------
@@ -306,6 +384,7 @@ def scan_task(task_dir: Path, run_path_rel: str) -> Optional[Dict]:
         "task_id": task_id,
         "task": result.get("task", ""),
         "model_id": result.get("model_id", "unknown"),
+        "browser_id": result.get("browser_id", ""),
         "agent_success": result.get("agent_success"),
         "agent_done": result.get("agent_done"),
         "env_status": result.get("env_status"),
@@ -449,6 +528,17 @@ def scan_run(benchmark: str, split: str, agent: str, timestamp_dir: Path, model:
     model_id = first.get("model_id", "unknown")
     config = first.get("config", {})
 
+    # Aggregate browser_id across all tasks. Picking the dominant value
+    # (rather than only first task) is robust to synthetic / reconstructed
+    # placeholder records that may carry an empty browser_id.
+    (
+        browser_kind,
+        browser_label,
+        browser_raw,
+        browser_mixed,
+        browser_breakdown,
+    ) = _summarize_browsers([t.get("browser_id", "") for t in tasks.values()])
+
     # Stats
     total = len(tasks)
     evaluated = len(eval_data["task_results"])
@@ -480,9 +570,12 @@ def scan_run(benchmark: str, split: str, agent: str, timestamp_dir: Path, model:
             "api_logs": td["api_logs"],
             "has_gif": td["has_gif"],
         }
+        td_raw_browser = td.get("browser_id", "")
         task_meta[tid] = {
             "score_threshold": td.get("score_threshold"),
             "agent_success": td.get("agent_success"),
+            "browser": _normalize_browser_id(td_raw_browser),
+            "browser_id_raw": td_raw_browser,
         }
 
     return {
@@ -493,6 +586,11 @@ def scan_run(benchmark: str, split: str, agent: str, timestamp_dir: Path, model:
         "model": model,
         "model_id": model_id,
         "config": config,
+        "browser": browser_kind,
+        "browser_label": browser_label,
+        "browser_id_raw": browser_raw,
+        "browser_mixed": browser_mixed,
+        "browser_breakdown": browser_breakdown,
         "stats": {
             "total_tasks": total,
             "evaluated_tasks": evaluated,

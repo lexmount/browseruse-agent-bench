@@ -171,12 +171,16 @@ class BrowserAgentAnalyzer {
                 const modelsHtml = agent.models.map(model => {
                     const mKey = `${aKey}|||${model.name}`;
                     const isModelExpanded = this.expandedModels.has(mKey);
-                    const runsHtml = model.runs.map(run => `
+                    const runsHtml = model.runs.map(run => {
+                        const browserBadge = this.renderBrowserChip(run.browser, 'tree-run-browser');
+                        return `
                         <div class="tree-run" data-uuid="${this.escapeHtml(run.uuid)}">
                             <span class="tree-run-ts">${this.escapeHtml(run.uuid.replace(/^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})/, '$1-$2-$3 $4:$5'))}</span>
+                            ${browserBadge}
                             <span class="tree-run-stats">${run.stats.successRate.toFixed(1)}% (${run.stats.successCount}/${run.stats.evaluatedTasks})</span>
                         </div>
-                    `).join('');
+                    `;
+                    }).join('');
                     return `
                         <div class="tree-model ${isModelExpanded ? 'expanded' : 'collapsed'}" data-model-key="${this.escapeHtml(mKey)}">
                             <div class="tree-model-header">
@@ -337,10 +341,27 @@ class BrowserAgentAnalyzer {
                 `;
             }).join('');
         } else {
+            // Only show the per-task browser dot when the current run mixes
+            // browsers — otherwise every task would carry a redundant dot of
+            // the same color.
+            const run = this.currentRun ? dataLoader.getRunByUuid(this.currentRun) : null;
+            const showTaskBrowser = !!run?.browser_mixed;
+
             container.innerHTML = taskIds.map(taskId => {
                 const scoreInfo = this.getTaskScoreInfo(taskId);
+                let browserTag = '';
+                if (showTaskBrowser && this.currentRun) {
+                    const kind = dataLoader.getTaskBrowserKind(this.currentRun, taskId);
+                    const raw = dataLoader.getTaskBrowserRaw(this.currentRun, taskId);
+                    const label = kind === 'lexmount' ? 'Lexmount'
+                        : kind === 'local' ? 'Local'
+                        : 'Unknown';
+                    const tooltip = raw ? `browser_id: ${raw}` : 'browser_id missing';
+                    browserTag = `<span class="task-browser-tag browser-${kind}" title="${this.escapeHtml(tooltip)}">${label}</span>`;
+                }
                 return `
                     <div class="filter-item task-item" data-task-id="${taskId}">
+                        ${browserTag}
                         <span class="task-id">Task ${taskId}</span>
                         ${scoreInfo ? `<span class="task-score ${scoreInfo.cls}">${scoreInfo.text}</span>` : ''}
                     </div>
@@ -945,7 +966,7 @@ class BrowserAgentAnalyzer {
         document.getElementById('sidebar-right').classList.remove('hidden');
         this.populateTasksList(document.getElementById('task-search').value);
         const run = dataLoader.getRuns().find(r => r.uuid === uuid);
-        if (run) document.getElementById('current-run-badge').textContent = run.displayName;
+        if (run) this.updateCurrentRunBadge(run);
         this.renderRunOutputLogs(run);
 
         if (this.currentTask) {
@@ -974,13 +995,24 @@ class BrowserAgentAnalyzer {
             if (runs.length > 0) {
                 this.currentRun = runs[0].uuid;
                 document.querySelector('.run-item')?.classList.add('active');
-                document.getElementById('current-run-badge').textContent = runs[0].displayName;
+                this.updateCurrentRunBadge(runs[0]);
                 this.renderRunOutputLogs(runs[0]);
                 document.getElementById('sidebar-right').classList.remove('hidden');
                 this.populateTasksList(document.getElementById('task-search').value);
             }
         }
         await this.loadAndDisplayTask();
+    }
+
+    /**
+     * Render the timestamp + browser badge into #current-run-badge.
+     * Kept in one place so run-mode and auto-select both stay in sync.
+     */
+    updateCurrentRunBadge(run) {
+        const el = document.getElementById('current-run-badge');
+        if (!el) return;
+        const browserBadge = this.renderBrowserChip(run.browser);
+        el.innerHTML = `<span class="run-name-text">${this.escapeHtml(run.displayName)}</span>${browserBadge}`;
     }
 
     // ==================================================================
@@ -1642,6 +1674,7 @@ class BrowserAgentAnalyzer {
             <label class="checkbox-label">
                 <input type="checkbox" class="compare-run-checkbox" data-uuid="${run.uuid}" ${i < 3 ? 'checked' : ''}>
                 ${this.escapeHtml(run.displayName)}
+                ${this.renderBrowserChip(run.browser)}
             </label>
         `).join('');
 
@@ -1680,10 +1713,13 @@ class BrowserAgentAnalyzer {
 
             container.innerHTML = `
                 <div class="compare-grid" style="grid-template-columns: repeat(${valid.length}, 1fr)">
-                    ${valid.map(d => `
+                    ${valid.map(d => {
+                        const cmpBrowserBadge = this.renderBrowserChip(d.runInfo?.browser);
+                        return `
                         <div class="compare-column">
                             <div class="compare-column-header">
                                 <span class="model-name">${this.escapeHtml(d.runInfo.displayName)}</span>
+                                ${cmpBrowserBadge}
                                 <span class="score-badge ${this.getTaskJudgeClass(d.runInfo.uuid, d.task_id)}">
                                     ${this.escapeHtml(this.getTaskJudgeLabel(d.runInfo.uuid, d.task_id))}
                                 </span>
@@ -1705,7 +1741,8 @@ class BrowserAgentAnalyzer {
                                     : ''}
                             </div>
                         </div>
-                    `).join('')}
+                    `;
+                    }).join('')}
                 </div>
             `;
         } catch (err) {
@@ -2067,6 +2104,40 @@ class BrowserAgentAnalyzer {
     truncate(str, maxLen) {
         if (!str) return '';
         return str.length > maxLen ? str.substring(0, maxLen) + '...' : str;
+    }
+
+    /**
+     * Render a small browser-identity chip.
+     *   - non-mixed run: "Lexmount" / "Local"   (colored chip, kind = lexmount/local)
+     *   - mixed run     : "Mixed (47 lexmount + 2 local)"  (orange chip, kind = mixed)
+     *   - unknown      : empty string (no chip — avoids clutter for skyvern/old runs)
+     *
+     * Extra CSS class can be passed (e.g. "tree-run-browser" inside the run tree).
+     */
+    renderBrowserChip(browser, extraClass = 'run-browser-chip') {
+        const info = browser || { kind: 'unknown' };
+        if (!info.kind || info.kind === 'unknown') return '';
+
+        if (info.mixed) {
+            // Build the inline distribution from the breakdown: only show
+            // known kinds in the chip face (unknown is data noise, not a real
+            // browser switch — it goes in the tooltip instead).
+            const breakdown = info.breakdown || {};
+            const knownParts = Object.entries(breakdown)
+                .filter(([kind]) => kind === 'lexmount' || kind === 'local')
+                .map(([kind, count]) => `${count} ${kind}`);
+            const text = knownParts.length > 0
+                ? `Mixed (${knownParts.join(' + ')})`
+                : 'Mixed';
+            const tooltipParts = Object.entries(breakdown).map(
+                ([kind, count]) => `${count} ${kind}`
+            );
+            const tooltip = `Browser distribution across tasks: ${tooltipParts.join(', ')}`;
+            return `<span class="${extraClass} browser-mixed" title="${this.escapeHtml(tooltip)}">${this.escapeHtml(text)}</span>`;
+        }
+
+        const tooltip = `browser_id: ${info.raw || info.label}`;
+        return `<span class="${extraClass} browser-${info.kind}" title="${this.escapeHtml(tooltip)}">${this.escapeHtml(info.label)}</span>`;
     }
 
     getJudgeModeLabel(mode) {
