@@ -398,6 +398,21 @@ def test_resolve_agent_entry_uses_registry_venvs_for_builtin_agents(tmp_path: Pa
     assert resolve_agent_entry("deepbrowse", config).get("venv") == ".venvs/deepbrowse"
 
 
+def test_resolve_agent_entry_supported_but_not_enabled_hint() -> None:
+    # codex is in the checked-in agent registry but absent from this runtime
+    # config's agents section (the stale-server-config case): the error must
+    # point at the missing config entry, not claim the agent is unknown.
+    config = {"agents": {"browser-use": {}}}
+    with pytest.raises(SystemExit, match="not enabled in the runtime config"):
+        resolve_agent_entry("codex", config)
+
+
+def test_resolve_agent_entry_unknown_agent_lists_options() -> None:
+    config = {"agents": {"browser-use": {}}}
+    with pytest.raises(SystemExit, match="Unknown Agent: no-such-agent"):
+        resolve_agent_entry("no-such-agent", config)
+
+
 class TestSkyvernConfigCanonicalization:
     """Tests for canonicalize_skyvern_model_name + apply_skyvern_env legacy-key handling.
 

@@ -322,6 +322,12 @@ def resolve_agent_entry(agent: str, root_config: dict[str, Any]) -> dict[str, An
     agents = root_config.get("agents", {})
     agent = _resolve_agent_key(agent, agents)
     if agent not in agents:
+        if load_agent_registry(agent):
+            raise SystemExit(
+                f"Agent '{agent}' is supported by this version but not enabled in the "
+                f"runtime config: add an 'agents.{agent}' entry to config.yaml "
+                f"(see config.example.yaml). Enabled agents: {', '.join(sorted(agents))}"
+            )
         raise SystemExit(f"Unknown Agent: {agent}. Options: {', '.join(sorted(agents))}")
     registry = load_agent_registry(agent)
     # Registry fields take precedence for structural info; root config may override
