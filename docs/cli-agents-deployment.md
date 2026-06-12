@@ -146,6 +146,8 @@ claude --version; codex --version; cursor-agent --version; openclaw --version
 bubench run --agent codex   --data LexBench-Browser --mode single
 bubench run --agent cursor  --data LexBench-Browser --mode single
 bubench run --agent openclaw --data LexBench-Browser --mode single
+# claude-code needs local Chrome + headless deps even when others use lexmount:
+bubench run --agent claude-code --data LexBench-Browser --mode single
 ```
 
 Verify by log, not exit code: the run directory's `run.log` should show

@@ -113,6 +113,7 @@ uv sync
 npm install -g @anthropic-ai/claude-code     # claude-code (auth: ANTHROPIC_API_KEY)
 npm install -g @openai/codex                 # codex (auth: codex login or OPENAI_API_KEY)
 curl https://cursor.com/install -fsS | bash  # cursor (auth: CURSOR_API_KEY)
+export PATH="$HOME/.local/bin:$PATH"         # cursor-agent installs to ~/.local/bin
 npm install -g openclaw                      # openclaw (no login; key via config.yaml)
 ```
 
