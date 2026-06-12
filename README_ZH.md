@@ -102,6 +102,21 @@ source .venv/bin/activate          # macOS / Linux
 .venv\Scripts\Activate.ps1         # Windows PowerShell
 ```
 
+**CLI agents: claude-code / codex / cursor / openclaw**（需要 Node.js 18+）
+
+这些 agent 共用主 venv（`uv sync`,无 extra），并依赖单独安装的外部 CLI：
+
+```bash
+uv sync
+npm install -g @anthropic-ai/claude-code     # claude-code（认证：ANTHROPIC_API_KEY）
+npm install -g @openai/codex                 # codex（认证：codex login 或 OPENAI_API_KEY）
+curl https://cursor.com/install -fsS | bash  # cursor（认证：CURSOR_API_KEY）
+npm install -g openclaw                      # openclaw（无需登录；key 通过 config.yaml 注入）
+```
+
+认证细节、服务器/无头部署注意事项（含 Docker 镜像要求）及逐 agent 冒烟验证见
+[docs/cli-agents-deployment.md](docs/cli-agents-deployment.md)。
+
 > 激活 venv 后 `bubench` CLI 就进入了 PATH。若未激活，请在后续步骤的所有 `bubench …` 命令前加上 `uv run`（如 `uv run bubench run …`）。
 
 **3. 配置**
