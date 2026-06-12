@@ -105,40 +105,47 @@ npm install -g openclaw
 | `CURSOR_API_KEY` | cursor | Cursor key, not OpenAI |
 | `LEXMOUNT_API_KEY` / `LEXMOUNT_PROJECT_ID` | lexmount browser backend | recommended on servers |
 
-## Docker image status
+## Docker image
 
-The repo `Dockerfile` (used by self-hosted CI and server deploys) is based on
-`python:3.11-slim` and currently ships **neither Node.js nor any of these
-CLIs nor Chrome** — CLI agents cannot run in that image as-is. To support them
-in a container, the image needs at minimum:
+The repo `Dockerfile` supports the CLI agents behind a build arg (off by
+default, so the CI image is unchanged):
 
-```dockerfile
-# Node.js 22+ (openclaw requires >= 22.19; distro nodejs is usually too old)
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g @anthropic-ai/claude-code @openai/codex openclaw
-# Pre-warm the Playwright MCP download AS THE RUNTIME USER (uid 1000 in this
-# image) — npx caches per-user, so warming root's cache does not help:
-USER 1000
-RUN npx -y @playwright/mcp@latest --version
-USER root
-# cursor-agent installs outside npm, into the installing user's home.
-# The repo image runs as uid 1000, and /root is not traversable by non-root
-# users — install as the runtime user (after USER 1000), or relocate the
-# install out of /root and point agents.cursor.cursor_agent_command at it:
-RUN curl https://cursor.com/install -fsS | bash \
-    && mv /root/.local/share/cursor-agent /opt/cursor-agent \
-    && chmod -R a+rX /opt/cursor-agent
-# then set agents.cursor.cursor_agent_command: /opt/cursor-agent/versions/<version>/cursor-agent
+```bash
+docker build --build-arg INSTALL_CLI_AGENTS=true -t bubench-cli .
 ```
 
-plus auth material at runtime (env vars above; `~/.codex/auth.json` for
-ChatGPT-login codex). With the lexmount browser path no Chrome is needed in
-the image for codex/cursor/openclaw; **include Chrome/Chromium (and headless
-deps) if claude-code or `browser_id=local` runs are planned**. This
-Dockerfile change is intentionally **not** applied yet — it grows the image
-and affects CI; apply it when server-side runs of these agents are actually
-scheduled.
+This installs Node.js 22.x (openclaw requires >= 22.19), the
+claude-code/codex/openclaw CLIs, cursor-agent (relocated to
+`/opt/cursor-agent` and symlinked into `/usr/local/bin` so the uid-1000
+runtime user can execute it), and pre-warms the Playwright MCP download into
+a world-readable npm cache (`NPM_CONFIG_CACHE=/opt/npm-cache`).
+
+At runtime, provide auth material via env (`OPENAI_API_KEY`/`OPENAI_BASE_URL`,
+`CURSOR_API_KEY`, `LEXMOUNT_API_KEY`, ...) — typically by mounting `.env` —
+plus a `config.yaml`. Verified container invocations (image runs as uid 1000,
+whose home is `/home/bench`):
+
+```bash
+# openclaw / cursor — env-only auth:
+docker run --rm --user 1000 -v "$PWD/.env:/app/.env:ro" bubench-cli \
+  uv run scripts/run.py --agent openclaw --data LexBench-Browser --mode single
+
+# codex with ChatGPT login — do NOT bind-mount auth.json directly into
+# ~/.codex (docker creates the parent dir root-owned and codex cannot write
+# its session files); stage it and copy:
+docker run --rm --user 1000 -v "$PWD/.env:/app/.env:ro" \
+  -v "$HOME/.codex/auth.json:/auth/auth.json:ro" --entrypoint bash bubench-cli \
+  -c 'mkdir -p ~/.codex && cp /auth/auth.json ~/.codex/ \
+      && exec /app/scripts/docker-entrypoint.sh uv run scripts/run.py \
+         --agent codex --data LexBench-Browser --mode single'
+```
+
+With API-key codex auth instead, set `models.codex.base_url` when using a
+proxy endpoint (the key alone routes to api.openai.com).
+
+With the lexmount browser path no Chrome is needed in the image for
+codex/cursor/openclaw; **include Chrome/Chromium (and headless deps)
+separately if claude-code or `browser_id=local` runs are planned**.
 
 ## Smoke verification (per agent, after deploy)
 
