@@ -116,8 +116,12 @@ in a container, the image needs at minimum:
 # Node.js 22+ (openclaw requires >= 22.19; distro nodejs is usually too old)
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g @anthropic-ai/claude-code @openai/codex openclaw \
-    && npx -y @playwright/mcp@latest --version   # pre-warm MCP download
+    && npm install -g @anthropic-ai/claude-code @openai/codex openclaw
+# Pre-warm the Playwright MCP download AS THE RUNTIME USER (uid 1000 in this
+# image) — npx caches per-user, so warming root's cache does not help:
+USER 1000
+RUN npx -y @playwright/mcp@latest --version
+USER root
 # cursor-agent installs outside npm, into the installing user's home.
 # The repo image runs as uid 1000, and /root is not traversable by non-root
 # users — install as the runtime user (after USER 1000), or relocate the
@@ -146,10 +150,17 @@ claude --version; codex --version; cursor-agent --version; openclaw --version
 bubench run --agent codex   --data LexBench-Browser --mode single
 bubench run --agent cursor  --data LexBench-Browser --mode single
 bubench run --agent openclaw --data LexBench-Browser --mode single
-# claude-code needs local Chrome + headless deps even when others use lexmount:
-bubench run --agent claude-code --data LexBench-Browser --mode single
+# claude-code needs local Chrome + headless deps even when others use lexmount,
+# and an Anthropic model selected (config.example.yaml has no
+# agents.claude-code.active_model, so without an override it inherits
+# default.model and the wrong api key):
+bubench run --agent claude-code --data LexBench-Browser --mode single --model sonnet
 ```
 
-Verify by log, not exit code: the run directory's `run.log` should show
-`Lexmount session created: wss://...` (managed path) and the agent's
-model-call lines; `result.json` should record steps > 0 for browsing tasks.
+Verify by log, not exit code:
+
+- codex/cursor/openclaw on a managed backend: `run.log` shows
+  `Lexmount session created: wss://...` plus the agent's model-call lines.
+- claude-code (and any `browser_id=local` run): no Lexmount line is expected —
+  look for the Playwright MCP browser starting and the agent's tool calls.
+- In all cases `result.json` should record steps > 0 for browsing tasks.
