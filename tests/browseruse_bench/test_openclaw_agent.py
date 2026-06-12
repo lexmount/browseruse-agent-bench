@@ -224,6 +224,36 @@ class TestOpenClawAgentRunTask:
         result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
         assert result.env_status == "failed"
         assert result.agent_done == "error"
+        assert "FailoverError: 401" in (result.error or "")
+
+    def test_api_key_scrubbed_even_when_executable_missing(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        agent = OpenClawAgent()
+
+        def _raise(*a: Any, **kw: Any) -> None:
+            raise FileNotFoundError("openclaw not found")
+
+        monkeypatch.setattr(agent, "_run_subprocess", _raise)
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        assert result.env_status == "failed"
+        cfg = json.loads((tmp_path / ".openclaw-state" / "openclaw.json").read_text())
+        assert cfg["models"]["providers"]["bench"]["apiKey"] == "***"
+
+    def test_image_block_screenshot_preserved(self, tmp_path: Path) -> None:
+        (tmp_path / "img.png").write_bytes(b"png")
+        session = tmp_path / "session.jsonl"
+        lines = [
+            {"type": "message", "message": {"role": "assistant", "content": [
+                {"type": "toolCall", "id": "c1", "name": "browser", "arguments": {"action": "screenshot"}},
+            ]}},
+            {"type": "message", "message": {"role": "toolResult", "toolCallId": "c1", "toolName": "browser",
+                "content": [{"type": "image", "path": str(tmp_path / "img.png")}]}},
+        ]
+        session.write_text("\n".join(json.dumps(line) for line in lines), encoding="utf-8")
+        items = _normalize_session_items(session)
+        saved = _collect_media_screenshots(items, tmp_path / "trajectory")
+        assert saved == ["screenshot-1.png"]
 
     def test_timeout_maps_to_timeout_status(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

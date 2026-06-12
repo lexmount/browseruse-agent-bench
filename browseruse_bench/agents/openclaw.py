@@ -102,13 +102,32 @@ def _fold_message(
     item = by_call_id.get(str(message.get("toolCallId", "")))
     if item is None:
         return
-    texts = [
-        block.get("text", "")
-        for block in message.get("content", [])
-        if isinstance(block, dict) and block.get("type") == "text"
-    ]
+    texts: list[str] = []
+    for block in message.get("content", []):
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "text":
+            texts.append(block.get("text", ""))
+            continue
+        media_path = _image_block_path(block)
+        if media_path:
+            texts.append(f"MEDIA:{media_path}")
     item["status"] = "completed"
     item["result"] = {"content": [{"type": "text", "text": "\n".join(texts)}]}
+
+
+def _image_block_path(block: dict[str, Any]) -> str | None:
+    """Extract a file path from an image/media result block, if present."""
+    if block.get("type") not in ("image", "media"):
+        return None
+    for key in ("path", "url", "mediaUrl", "file"):
+        value = block.get(key)
+        if isinstance(value, str) and value.startswith("/"):
+            return value
+    source = block.get("source")
+    if isinstance(source, dict) and isinstance(source.get("path"), str):
+        return source["path"]
+    return None
 
 
 def _normalize_tool_call(block: dict[str, Any]) -> dict[str, Any]:
@@ -269,6 +288,10 @@ class OpenClawAgent(CLIAgent):
                 ),
                 metrics=AgentMetrics(end_to_end_ms=0, steps=0),
             )
+        finally:
+            # Every exit path must remove the provider apiKey from the
+            # per-task config so secrets never persist in task artifacts.
+            self._scrub_state_secrets(task_workspace)
         duration_ms = int((time.monotonic() - t_start) * 1000)
 
         return self._finalize_result(
@@ -384,13 +407,16 @@ class OpenClawAgent(CLIAgent):
         env_status, agent_done = self._map_exit_status(
             returncode, execution_error, has_result=bool(answer)
         )
+        error_message = execution_error
         if agent_done != "timeout" and not result_obj:
             env_status, agent_done = "failed", "error"
+            error_message = error_message or (
+                "No result JSON from OpenClaw: " + "".join(stdout_lines)[-500:].strip()
+            ).strip(": ")
         if env_status == "failed" and not answer:
-            answer = f"[Task Failed: {execution_error or 'No result JSON from OpenClaw'}]"
+            answer = f"[Task Failed: {error_message or 'No result JSON from OpenClaw'}]"
 
         items = self._session_items(result_obj, task_workspace)
-        self._scrub_state_secrets(task_workspace)
         saved_screenshots = _collect_media_screenshots(items, trajectory_dir)
         steps = sum(1 for item in items if item.get("type") in STEP_ITEM_TYPES)
         if items:
@@ -405,7 +431,7 @@ class OpenClawAgent(CLIAgent):
             env_status=env_status,  # type: ignore[arg-type]
             agent_done=agent_done,  # type: ignore[arg-type]
             answer=answer,
-            error=execution_error if env_status == "failed" else None,
+            error=error_message if env_status == "failed" else None,
             action_history=extract_actions(items),
             screenshots=saved_screenshots,
             model_id=model,
