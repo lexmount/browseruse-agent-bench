@@ -56,26 +56,26 @@ jobs:
           build-args: |
             INSTALL_CLI_AGENTS=true
 
-      - name: Trigger Kestra image warmup webhook (best-effort)
-        # NOTE: Kestra runs on an internal network and is not reachable from GitHub Actions.
-        # This step is best-effort only (continue-on-error: true) and will not block CI.
-        # The primary warmup mechanism is the scheduled trigger inside Kestra's
-        # lex-browser-image-warmup flow, which polls GHCR every 10 minutes for new digests.
-        # If KESTRA_WARMUP_WEBHOOK_URL is configured and reachable, the warmup fires immediately.
+      - name: Trigger Kestra image warmup via bench webhook (best-effort)
+        # The bench platform (bench.lexmount.com) forwards this to Kestra's
+        # lex-browser-image-warmup flow. Auth is a shared Bearer secret
+        # (IMAGE_WARMUP_WEBHOOK_SECRET) configured both in this repo's Actions
+        # secrets and in the platform's deployment env; the platform returns
+        # 401 until both sides share the same value. Best-effort
+        # (continue-on-error): Kestra's 10-minute schedule trigger remains the
+        # fallback warmup mechanism, so a failed webhook never blocks CI.
         continue-on-error: true
         shell: bash
         env:
-          KESTRA_WARMUP_WEBHOOK_URL: ${{ secrets.KESTRA_WARMUP_WEBHOOK_URL || vars.KESTRA_WARMUP_WEBHOOK_URL }}
-          KESTRA_URL: ${{ secrets.KESTRA_URL || vars.KESTRA_URL }}
-          KESTRA_NAMESPACE: ${{ secrets.KESTRA_NAMESPACE || vars.KESTRA_NAMESPACE }}
-          KESTRA_IMAGE_WARMUP_FLOW_ID: ${{ secrets.KESTRA_IMAGE_WARMUP_FLOW_ID || vars.KESTRA_IMAGE_WARMUP_FLOW_ID }}
-          KESTRA_IMAGE_WARMUP_WEBHOOK_KEY: ${{ secrets.KESTRA_IMAGE_WARMUP_WEBHOOK_KEY || vars.KESTRA_IMAGE_WARMUP_WEBHOOK_KEY }}
-          KESTRA_USERNAME: ${{ secrets.KESTRA_USERNAME || vars.KESTRA_USERNAME }}
-          KESTRA_PASSWORD: ${{ secrets.KESTRA_PASSWORD || vars.KESTRA_PASSWORD }}
-          GITHUB_USERNAME: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+          IMAGE_WARMUP_WEBHOOK_SECRET: ${{ secrets.IMAGE_WARMUP_WEBHOOK_SECRET }}
         run: |
           set -euo pipefail
+
+          if [ -z "${IMAGE_WARMUP_WEBHOOK_SECRET:-}" ]; then
+            echo "IMAGE_WARMUP_WEBHOOK_SECRET not configured."
+            echo "Warmup will be handled by Kestra's 10-minute schedule trigger."
+            exit 0
+          fi
 
           if [ "${GITHUB_REF_NAME}" = "main" ]; then
             docker_image_tag="latest"
@@ -84,47 +84,9 @@ jobs:
           fi
           echo "Warmup target tag: ${docker_image_tag}"
 
-          # 如果没有配置任何 Kestra 地址，直接跳过（由 Kestra schedule 自动处理）
-          if [ -z "${KESTRA_WARMUP_WEBHOOK_URL:-}" ] && [ -z "${KESTRA_URL:-}" ]; then
-            echo "No KESTRA_WARMUP_WEBHOOK_URL or KESTRA_URL configured."
-            echo "Warmup will be handled automatically by Kestra's 10-minute schedule trigger."
-            exit 0
-          fi
-
-          # 构建 webhook URL
-          kestra_namespace="${KESTRA_NAMESPACE:-lex}"
-          warmup_flow_id="${KESTRA_IMAGE_WARMUP_FLOW_ID:-lex-browser-image-warmup}"
-          warmup_webhook_key="${KESTRA_IMAGE_WARMUP_WEBHOOK_KEY:-lexbench-image-warmup}"
-
-          if [ -n "${KESTRA_WARMUP_WEBHOOK_URL:-}" ]; then
-            webhook_url="${KESTRA_WARMUP_WEBHOOK_URL}"
-          else
-            base_url="${KESTRA_URL%/}"
-            webhook_url="${base_url}/api/v1/main/executions/webhook/${kestra_namespace}/${warmup_flow_id}/${warmup_webhook_key}"
-          fi
-
-          echo "Trying warmup webhook: ${webhook_url}"
-
-          payload="{\"docker_image_tag\": \"${docker_image_tag}\", \"github_username\": \"${GITHUB_USERNAME}\", \"github_token\": \"${GITHUB_TOKEN}\"}"
-
-          curl_args=(
-            --max-time 10
-            --retry 1
-            --retry-delay 2
-            -fsS
-            -H "Content-Type: application/json"
-            -X POST
-            -d "${payload}"
-          )
-
-          if [ -n "${KESTRA_USERNAME:-}" ] && [ -n "${KESTRA_PASSWORD:-}" ]; then
-            curl_args+=(-u "${KESTRA_USERNAME}:${KESTRA_PASSWORD}")
-          fi
-
-          if curl "${curl_args[@]}" "${webhook_url}"; then
-            echo "Warmup webhook triggered successfully."
-          else
-            echo "Warmup webhook unreachable (expected if Kestra is on internal network)."
-            echo "Kestra will detect the new image via its 10-minute schedule trigger."
-            exit 1
-          fi
+          curl -fsS --max-time 10 --retry 1 --retry-delay 2 -X POST \
+            "https://bench.lexmount.com/api/webhooks/image-warmup" \
+            -H "Authorization: Bearer ${IMAGE_WARMUP_WEBHOOK_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d "{\"docker_image_tag\": \"${docker_image_tag}\"}"
+          echo "Warmup webhook triggered successfully."
