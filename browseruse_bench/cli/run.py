@@ -551,6 +551,12 @@ def configure_run_parser(parser: argparse.ArgumentParser, config: dict[str, Any]
         metavar="N",
         help="Number of tasks to run in parallel (default: 1 = sequential).",
     )
+    parser.add_argument(
+        "--write-output-dir",
+        dest="write_output_dir",
+        default=None,
+        help=argparse.SUPPRESS,  # internal: run-eval reads the exact run dir from here
+    )
 
 
 def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args: argparse.Namespace) -> int:
@@ -610,6 +616,15 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
 
     output_dir.mkdir(parents=True, exist_ok=True)
     add_file_handler(logger, output_dir / "run.log", format_mode="plain")
+
+    # Emit the resolved output dir for run-eval to bind to deterministically
+    # (concurrency-safe: each caller passes its own marker file path).
+    write_output_dir = getattr(args, "write_output_dir", None)
+    if write_output_dir:
+        try:
+            Path(write_output_dir).write_text(str(output_dir), encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Failed to write --write-output-dir marker: %s", exc)
 
     logger.info("Running %s on %s", agent_name, benchmark_name)
     logger.info("   Output: %s", output_dir)

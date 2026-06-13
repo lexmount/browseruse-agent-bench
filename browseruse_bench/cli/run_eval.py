@@ -3,26 +3,25 @@ run-eval orchestration: run a benchmark then evaluate its results in one call.
 
 The platform invokes this with the same flags it would pass to ``run``; it
 forwards them to ``bubench run``, then evaluates the exact run directory the
-run stage produced. The eval stage targets that run via ``--model-id`` and
-``--timestamp`` so the two stages line up even when the model was passed
+run stage produced. The two stages line up even when the model was passed
 through (``--model <id>``) rather than configured, when ``--timestamp`` resumes
 an older run, or when some tasks failed (a completed run with task failures is
 still scored). Eval is skipped only when the run produced no output directory
 (a genuine setup/infra failure) or for ``--dry-run`` / ``--skip-eval``.
 
-Concurrency note: the run dir is identified by which dir under the
-agent/model output base was created or whose tasks/ mtime advanced during
-this invocation. If two run-eval processes for the *same* agent/data/model/
-split overlap in wall-clock time, both dirs look fresh and eval targets the
-newest — a known limitation. A fully concurrency-safe binding needs the run
-stage to emit its own output path (a run.py change); until then, give
-concurrent jobs distinct models/agents/splits, or pass ``--timestamp``.
+Concurrency: the run stage is told to write its resolved output directory to a
+per-invocation marker file (``run --write-output-dir``), so eval binds to the
+exact directory this process produced even when several run-eval jobs for the
+same agent/data/model/split overlap in wall-clock time. The tasks/ mtime
+heuristic is only a fallback for an older run stage that does not emit the
+marker.
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import tempfile
 from pathlib import Path
 
 from browseruse_bench.cli import CONFIG_PATH
@@ -137,6 +136,19 @@ def _run_dir_written_since(base: Path, before: dict[str, float]) -> str | None:
     return max(fresh) if fresh else None
 
 
+def _read_marker(marker: Path) -> Path | None:
+    """Read the run's emitted output dir from its marker file, if written."""
+    try:
+        text = marker.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not text:
+        return None
+    run_dir = Path(text)
+    # Trust it only if it is an actual run dir (has a tasks/ subdir).
+    return run_dir if (run_dir / "tasks").is_dir() else None
+
+
 def _invoke_cli(argv: list[str]) -> int:
     """Run a bubench subcommand, returning its exit code.
 
@@ -178,30 +190,43 @@ def run_and_eval(argv: list[str] | None = None) -> int:
     )
 
     # --skip-eval is ours; eval-only options the run parser rejects are routed
-    # to the eval stage; the rest is forwarded to run verbatim.
+    # to the eval stage; the rest is forwarded to run verbatim. The run stage
+    # writes its resolved output dir to a per-invocation marker file so eval
+    # binds to exactly this run even under concurrency.
     forwardable = [a for a in (raw_args or []) if a != "--skip-eval"]
     run_only, eval_only = _partition_eval_only(forwardable)
-    run_argv = ["run", *run_only]
-    # Snapshot run dirs before the run so the one this invocation created or
-    # updated can be identified by mtime afterwards.
+    marker = Path(tempfile.mkstemp(prefix="run-eval-outdir-")[1])
+    run_argv = ["run", *run_only, "--write-output-dir", str(marker)]
+    # Snapshot run dirs before the run for the mtime fallback (older run stages
+    # that do not honor --write-output-dir).
     pre_mtimes = _run_dir_mtimes(output_base) if output_base else {}
     logger.info("[run-eval] Stage 1/2: run")
-    run_rc = _invoke_cli(run_argv)
+    try:
+        run_rc = _invoke_cli(run_argv)
+        run_dir = _read_marker(marker)
+    finally:
+        marker.unlink(missing_ok=True)
 
     if known.dry_run or known.skip_eval:
         logger.info("[run-eval] %s set; stopping after run.", "--dry-run" if known.dry_run else "--skip-eval")
         return run_rc
-    if not model_id or output_base is None:
-        logger.error("[run-eval] Could not derive model_id for eval (agent=%s); skipping.", canonical_agent)
-        return run_rc or 1
 
-    # Eval the run this invocation produced (or the one --timestamp targeted),
-    # not merely the newest dir: a completed run with task failures still has
-    # output and should be scored; a setup failure that produced nothing is
-    # skipped. run_rc is intentionally not a gate here — non-zero often just
-    # means "some tasks failed", which we still want evaluated.
-    run_ts = known.timestamp or _run_dir_written_since(output_base, pre_mtimes)
-    if not run_ts:
+    # Prefer the exact dir the run emitted (concurrency-safe); model_id and the
+    # timestamp come straight from it. Fall back to deriving model_id + the
+    # mtime heuristic only when no marker was written.
+    if run_dir is not None:
+        eval_model_id: str | None = run_dir.parent.name
+        run_ts: str | None = run_dir.name
+    else:
+        if not model_id or output_base is None:
+            logger.error("[run-eval] Could not derive model_id for eval (agent=%s); skipping.", canonical_agent)
+            return run_rc or 1
+        # A completed run with task failures still has output and should be
+        # scored; a setup failure that produced nothing is skipped. run_rc is
+        # not a gate — non-zero often just means "some tasks failed".
+        eval_model_id = model_id
+        run_ts = known.timestamp or _run_dir_written_since(output_base, pre_mtimes)
+    if not run_ts or not eval_model_id:
         logger.error(
             "[run-eval] Run produced no output directory (exit %d); skipping eval.", run_rc
         )
@@ -209,7 +234,7 @@ def run_and_eval(argv: list[str] | None = None) -> int:
 
     eval_argv = [
         "eval", "--agent", agent, "--data", data,
-        "--model-id", model_id, "--timestamp", run_ts,
+        "--model-id", eval_model_id, "--timestamp", run_ts,
     ]
     if known.split is not None:
         eval_argv += ["--split", known.split]
@@ -220,5 +245,5 @@ def run_and_eval(argv: list[str] | None = None) -> int:
     if known.force_download:
         eval_argv += ["--force-download"]
     eval_argv += eval_only
-    logger.info("[run-eval] Stage 2/2: eval (model_id=%s, timestamp=%s)", model_id, run_ts)
+    logger.info("[run-eval] Stage 2/2: eval (model_id=%s, timestamp=%s)", eval_model_id, run_ts)
     return _invoke_cli(eval_argv)

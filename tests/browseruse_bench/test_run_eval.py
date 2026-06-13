@@ -20,29 +20,44 @@ _ROOT_CONFIG = {
 
 
 class _Harness:
-    """Captures cli stage invocations and simulates the run's output dir."""
+    """Captures cli stage invocations and simulates the run's output dir.
 
-    def __init__(self, base: Path) -> None:
-        self.base = base
+    The fake run writes its output dir to the --write-output-dir marker, like
+    real run.py, so run-eval binds via the marker. Set emit_marker=False to
+    exercise the mtime fallback (older run stage).
+    """
+
+    def __init__(self, exp_root: Path) -> None:
+        self.exp_root = exp_root  # stands in for experiments/{bench}/{split}/{agent}
         self.calls: list[list[str]] = []
         self.run_rc = 0
         self.produce_output = True
+        self.emit_marker = True
         self.run_timestamp = "20260101_000000"
 
-    def add_existing_run(self, name: str, mtime: float = 1000.0) -> None:
+    @staticmethod
+    def _model_dir(argv: list[str]) -> str:
+        for i, a in enumerate(argv):
+            if a in ("--model", "--model-name") and i + 1 < len(argv):
+                return argv[i + 1]
+            if a.startswith("--model="):
+                return a.split("=", 1)[1]
+        return "gpt-5.2"  # config default for the cursor agent
+
+    def add_existing_run(self, name: str, model: str = "gpt-5.2", mtime: float = 1000.0) -> None:
         """A run dir present before run-eval starts, with a fixed (old) mtime."""
-        tasks = self.base / name / "tasks"
+        tasks = self.exp_root / model / name / "tasks"
         tasks.mkdir(parents=True, exist_ok=True)
         os.utime(tasks, (mtime, mtime))
 
     def cli_main(self, argv: list[str]) -> int:
         self.calls.append(list(argv))
         if argv[0] == "run" and self.produce_output:
-            tasks = self.base / self.run_timestamp / "tasks"
-            tasks.mkdir(parents=True, exist_ok=True)
-            # Advance mtime past any pre-existing dir so it reads as fresh
-            # output, including a same-second name reuse.
-            os.utime(tasks, (5000.0, 5000.0))
+            run_dir = self.exp_root / self._model_dir(argv) / self.run_timestamp
+            (run_dir / "tasks").mkdir(parents=True, exist_ok=True)
+            os.utime(run_dir / "tasks", (5000.0, 5000.0))  # fresh vs any prior dir
+            if self.emit_marker and "--write-output-dir" in argv:
+                Path(argv[argv.index("--write-output-dir") + 1]).write_text(str(run_dir))
         # cli.main is wrapped by handle_cli_errors (sys.exit), so the real entry
         # raises SystemExit instead of returning — the fake must too.
         raise SystemExit(self.run_rc if argv[0] == "run" else 0)
@@ -57,10 +72,11 @@ class _Harness:
 
 @pytest.fixture
 def harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Harness:
-    h = _Harness(tmp_path / "out")
+    h = _Harness(tmp_path / "exp")
     monkeypatch.setattr(cli_pkg, "main", h.cli_main)
     monkeypatch.setattr(run_eval_mod, "load_config_file", lambda _: _ROOT_CONFIG)
-    monkeypatch.setattr(run_eval_mod, "_run_output_base", lambda *a: h.base)
+    # Fallback base is per-model: experiments/.../{model_id}
+    monkeypatch.setattr(run_eval_mod, "_run_output_base", lambda agent, data, split, mid: h.exp_root / mid)
     return h
 
 
@@ -68,9 +84,11 @@ def test_chains_run_then_eval_with_model_id_and_timestamp(harness: _Harness) -> 
     rc = run_and_eval(["--agent", "cursor", "--data", "LexBench-Browser", "--mode", "single"])
     assert rc == 0
     assert harness.stages == ["run", "eval"]
-    assert harness.calls[0] == ["run", "--agent", "cursor", "--data", "LexBench-Browser", "--mode", "single"]
+    run_call = harness.calls[0]
+    assert run_call[:6] == ["run", "--agent", "cursor", "--data", "LexBench-Browser", "--mode"]
+    assert "--write-output-dir" in run_call  # marker injected for binding
     ev = harness.eval_call()
-    assert ev[ev.index("--model-id") + 1] == "gpt-5.2"
+    assert ev[ev.index("--model-id") + 1] == "gpt-5.2"  # from the emitted run dir
     assert ev[ev.index("--timestamp") + 1] == "20260101_000000"
     assert ev[ev.index("--agent") + 1] == "cursor"
 
@@ -113,29 +131,42 @@ def test_skip_eval_stops_after_run(harness: _Harness) -> None:
     assert "--skip-eval" not in harness.calls[0]  # ours, not forwarded
 
 
-def test_same_second_dir_reuse_is_still_evaluated(harness: _Harness) -> None:
-    # A run reusing an existing same-named dir (exist_ok) updates its mtime,
-    # so it is recognized as this run's output and evaluated.
-    harness.add_existing_run("20260101_000000")  # pre-existing, same name, old mtime
+def test_marker_binds_to_this_run_under_concurrency(harness: _Harness) -> None:
+    # A concurrent run-eval for the same agent/model creates a NEWER dir while
+    # this run is in flight. The marker pins THIS run's dir, so eval targets it,
+    # not the newest one.
+    harness.add_existing_run("20260102_999999", mtime=9000.0)  # other process, newer
+    rc = run_and_eval(["--agent", "cursor", "--mode", "single"])
+    assert rc == 0
+    ev = harness.eval_call()
+    assert ev[ev.index("--timestamp") + 1] == "20260101_000000"  # this run, from marker
+
+
+def test_fallback_same_second_dir_reuse_is_evaluated(harness: _Harness) -> None:
+    # No marker (older run stage): a reused same-named dir whose mtime advanced
+    # is recognized as this run's output via the mtime fallback.
+    harness.emit_marker = False
+    harness.add_existing_run("20260101_000000")  # same name, old mtime
     rc = run_and_eval(["--agent", "cursor", "--mode", "single"])
     assert harness.stages == ["run", "eval"]
     assert rc == 0
 
 
-def test_same_second_stale_dir_without_new_output_is_not_evaluated(harness: _Harness) -> None:
-    # A prior dir shares this run's wall-clock-second name, but this run fails
-    # before writing anything: its mtime is unchanged, so it is NOT scored.
-    harness.add_existing_run("20260101_000000")  # same name, untouched by this run
+def test_fallback_same_second_stale_dir_not_evaluated(harness: _Harness) -> None:
+    # No marker, this run produces nothing; a same-named prior dir is untouched
+    # (mtime unchanged) so it is NOT scored.
+    harness.emit_marker = False
     harness.produce_output = False
+    harness.add_existing_run("20260101_000000")
     harness.run_rc = 1
     rc = run_and_eval(["--agent", "cursor", "--mode", "single"])
     assert harness.stages == ["run"]
     assert rc == 1
 
 
-def test_stale_prior_run_without_new_output_is_not_evaluated(harness: _Harness) -> None:
-    # This run produces nothing (setup failure); an older prior run dir exists
-    # but must not be evaluated as if it were this run.
+def test_setup_failure_no_marker_no_output_skips_eval(harness: _Harness) -> None:
+    # No marker and no fresh dir: a setup failure that produced nothing.
+    harness.emit_marker = False
     harness.produce_output = False
     harness.add_existing_run("20251231_120000")
     harness.run_rc = 1
@@ -145,8 +176,9 @@ def test_stale_prior_run_without_new_output_is_not_evaluated(harness: _Harness) 
 
 
 def test_timestamp_resume_targets_that_run(harness: _Harness) -> None:
-    # --timestamp resumes an older dir; eval must target it, not the newest.
-    harness.produce_output = False  # nothing new created
+    # --timestamp resumes an older dir; eval must target it. The run reuses the
+    # dir and emits the marker for it.
+    harness.run_timestamp = "20251231_120000"
     harness.add_existing_run("20251231_120000")
     ev_rc = run_and_eval(["--agent", "cursor", "--mode", "by_id", "--timestamp", "20251231_120000"])
     assert ev_rc == 0
@@ -197,15 +229,15 @@ def test_default_agent_falls_back_to_agent_tars_like_run_parser(
 ) -> None:
     # No --agent and no default.agent: must match run/eval's Agent-TARS default,
     # not browser-use, or the stages target different model paths.
-    h = _Harness(tmp_path / "out")
+    h = _Harness(tmp_path / "exp")
     h.run_timestamp = "20260101_000000"
     monkeypatch.setattr(cli_pkg, "main", h.cli_main)
     monkeypatch.setattr(
         run_eval_mod, "load_config_file",
         lambda _: {"default": {"data": "LexBench-Browser"}, "agents": {}},
     )
-    monkeypatch.setattr(run_eval_mod, "_run_output_base", lambda *a: h.base)
-    monkeypatch.setattr(run_eval_mod, "resolve_output_model_id", lambda *a: "m1")
+    monkeypatch.setattr(run_eval_mod, "_run_output_base", lambda agent, data, split, mid: h.exp_root / mid)
+    monkeypatch.setattr(run_eval_mod, "resolve_output_model_id", lambda *a: "gpt-5.2")
     monkeypatch.setattr(run_eval_mod, "normalize_agent_name", lambda a, c: a)
 
     run_and_eval(["--mode", "single"])
