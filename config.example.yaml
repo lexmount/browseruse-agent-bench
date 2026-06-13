@@ -154,12 +154,17 @@ models:
     model_id: openai/gpt-5.4
     api_key: $OPENROUTER_API_KEY
     base_url: https://openrouter.ai/api/v1/chat/completions
-  # Codex CLI model. Only supported by the codex agent; auth comes from
-  # `codex login` (ChatGPT account) or OPENAI_API_KEY.
+  # Codex CLI model. Only supported by the codex agent. Auth, either:
+  #  - ChatGPT login (`codex login`, an auth.json) and no base_url, OR
+  #  - an api_key + base_url pointing at an endpoint that serves the OpenAI
+  #    Responses API (codex ignores OPENAI_BASE_URL, so base_url is wired via a
+  #    model provider with wire_api="responses"; codex >=0.139 dropped "chat",
+  #    so a chat-only proxy will NOT work). The model_id must be deployed there.
   codex:
     model_type: OPENAI
-    model_id: gpt-5.5
+    model_id: gpt-5.4
     api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
   # Cursor CLI models. Only supported by the cursor agent; model calls are
   # routed through Cursor's backend, so auth is `cursor-agent login` or
   # CURSOR_API_KEY (a Cursor key, not an OpenAI key). model_id must be a

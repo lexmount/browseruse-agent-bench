@@ -57,11 +57,21 @@ npm install -g @openai/codex
 ```
 
 - Auth, either:
-  - `OPENAI_API_KEY` via `models.codex.api_key` (works headless), or
-  - ChatGPT login: `codex login` is an interactive browser OAuth — on a
+  - **ChatGPT login** (`codex login`): interactive browser OAuth — on a
     headless server, log in elsewhere and copy `~/.codex/auth.json` into the
-    service user's home. `--ignore-user-config` is always passed, so the
-    operator's `~/.codex/config.toml` is never read, but `auth.json` is.
+    service user's home. Set no `base_url` (uses api.openai.com). `--ignore-user-config`
+    is always passed, so the operator's `~/.codex/config.toml` is never read,
+    but `auth.json` is.
+  - **api_key + base_url proxy**: codex **ignores `OPENAI_BASE_URL`**, so a
+    plain `OPENAI_API_KEY` alone hits api.openai.com (a proxy key → 401). When
+    `models.codex.base_url` is set, the agent registers a codex model provider
+    (`-c model_providers.<name>.base_url` + `wire_api="responses"` + `env_key="OPENAI_API_KEY"`)
+    so codex routes there. The endpoint **must serve the OpenAI Responses API**
+    (codex >=0.139 dropped `wire_api="chat"`, so a chat-only proxy fails), and
+    `model_id` must be a model deployed on it (e.g. a LiteLLM proxy that already
+    serves the model). `model_provider` in the model config names the provider
+    (default `bench`). Verified end-to-end against a LiteLLM proxy serving the
+    Responses API.
 - Browser: Playwright MCP via `npx`; managed CDP backends (lexmount, cdp)
   attach automatically with `--cdp-endpoint`.
 
