@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-from datetime import datetime
 from pathlib import Path
 
 from browseruse_bench.cli import CONFIG_PATH
@@ -70,18 +69,31 @@ def _run_output_base(agent: str, data: str, split: str | None, model_id: str) ->
     return REPO_ROOT / "experiments" / benchmark / resolved_split / agent / model_id
 
 
-def _latest_run_dir(base: Path) -> str | None:
-    """Newest timestamped run dir (with a tasks/ subdir) under *base*, by name."""
+def _run_dir_mtimes(base: Path) -> dict[str, float]:
+    """Map each run dir name to its tasks/ mtime (run dirs have a tasks/ subdir)."""
+    snapshot: dict[str, float] = {}
     if not base.is_dir():
-        return None
-    runs = [p.name for p in base.iterdir() if p.is_dir() and (p / "tasks").is_dir()]
-    # Run dir names are YYYYMMDD_HHMMSS, so lexical max == most recent.
-    return max(runs) if runs else None
+        return snapshot
+    for p in base.iterdir():
+        tasks = p / "tasks"
+        if p.is_dir() and tasks.is_dir():
+            try:
+                snapshot[p.name] = tasks.stat().st_mtime
+            except OSError:
+                continue
+    return snapshot
 
 
-def _now_stamp() -> str:
-    """Current time as a run-dir-comparable YYYYMMDD_HHMMSS stamp."""
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
+def _run_dir_written_since(base: Path, before: dict[str, float]) -> str | None:
+    """Newest run dir that this run created or updated, vs a pre-run snapshot.
+
+    A dir is this run's output if it is new (absent from *before*) or its
+    tasks/ mtime advanced; a stale prior dir whose mtime did not change is
+    ignored, even on a same-wall-clock-second name collision.
+    """
+    fresh = [name for name, mtime in _run_dir_mtimes(base).items()
+             if name not in before or mtime > before[name]]
+    return max(fresh) if fresh else None
 
 
 def _invoke_cli(argv: list[str]) -> int:
@@ -109,7 +121,9 @@ def run_and_eval(argv: list[str] | None = None) -> int:
 
     root_config = load_config_file(CONFIG_PATH)
     defaults = root_config.get("default", {})
-    agent = known.agent or defaults.get("agent", "browser-use")
+    # Mirror configure_run_parser/eval's default agent so an omitted --agent
+    # with no default.agent resolves to the same path both stages use.
+    agent = known.agent or defaults.get("agent", "Agent-TARS")
     data = known.data or defaults.get("data") or defaults.get("benchmark", "Online-Mind2Web")
     canonical_agent = normalize_agent_name(agent, root_config)
     source_cfg = _source_config(root_config, known.agent_config)
@@ -124,12 +138,9 @@ def run_and_eval(argv: list[str] | None = None) -> int:
 
     # --skip-eval is ours; strip it before forwarding the rest to run.
     run_argv = ["run", *[a for a in (raw_args or []) if a != "--skip-eval"]]
-    # Captured before the run: run.py stamps its output dir with the wall-clock
-    # second at launch, which is >= this. A run dir whose name is >= start_stamp
-    # therefore belongs to this run (even on a same-second name collision with a
-    # prior run, which run.py reuses via exist_ok=True); an older name is a
-    # stale prior run we must not evaluate.
-    start_stamp = _now_stamp()
+    # Snapshot run dirs before the run so the one this invocation created or
+    # updated can be identified by mtime afterwards.
+    pre_mtimes = _run_dir_mtimes(output_base) if output_base else {}
     logger.info("[run-eval] Stage 1/2: run")
     run_rc = _invoke_cli(run_argv)
 
@@ -145,10 +156,7 @@ def run_and_eval(argv: list[str] | None = None) -> int:
     # output and should be scored; a setup failure that produced nothing is
     # skipped. run_rc is intentionally not a gate here — non-zero often just
     # means "some tasks failed", which we still want evaluated.
-    run_ts = known.timestamp
-    if not run_ts:
-        post_run = _latest_run_dir(output_base)
-        run_ts = post_run if post_run and post_run >= start_stamp else None
+    run_ts = known.timestamp or _run_dir_written_since(output_base, pre_mtimes)
     if not run_ts:
         logger.error(
             "[run-eval] Run produced no output directory (exit %d); skipping eval.", run_rc

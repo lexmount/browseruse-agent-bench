@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -28,10 +29,20 @@ class _Harness:
         self.produce_output = True
         self.run_timestamp = "20260101_000000"
 
+    def add_existing_run(self, name: str, mtime: float = 1000.0) -> None:
+        """A run dir present before run-eval starts, with a fixed (old) mtime."""
+        tasks = self.base / name / "tasks"
+        tasks.mkdir(parents=True, exist_ok=True)
+        os.utime(tasks, (mtime, mtime))
+
     def cli_main(self, argv: list[str]) -> int:
         self.calls.append(list(argv))
         if argv[0] == "run" and self.produce_output:
-            (self.base / self.run_timestamp / "tasks").mkdir(parents=True, exist_ok=True)
+            tasks = self.base / self.run_timestamp / "tasks"
+            tasks.mkdir(parents=True, exist_ok=True)
+            # Advance mtime past any pre-existing dir so it reads as fresh
+            # output, including a same-second name reuse.
+            os.utime(tasks, (5000.0, 5000.0))
         # cli.main is wrapped by handle_cli_errors (sys.exit), so the real entry
         # raises SystemExit instead of returning — the fake must too.
         raise SystemExit(self.run_rc if argv[0] == "run" else 0)
@@ -50,9 +61,6 @@ def harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Harness:
     monkeypatch.setattr(cli_pkg, "main", h.cli_main)
     monkeypatch.setattr(run_eval_mod, "load_config_file", lambda _: _ROOT_CONFIG)
     monkeypatch.setattr(run_eval_mod, "_run_output_base", lambda *a: h.base)
-    # Pin the run-start stamp; the run dir the harness creates is >= it, so it
-    # is recognized as this run's output (deterministic regardless of clock).
-    monkeypatch.setattr(run_eval_mod, "_now_stamp", lambda: "20260101_000000")
     return h
 
 
@@ -106,19 +114,30 @@ def test_skip_eval_stops_after_run(harness: _Harness) -> None:
 
 
 def test_same_second_dir_reuse_is_still_evaluated(harness: _Harness) -> None:
-    # A run starting the same second as an existing dir reuses it (exist_ok);
-    # the run still produced/updated output, so it must be evaluated.
-    (harness.base / "20260101_000000" / "tasks").mkdir(parents=True)  # pre-existing, same name
+    # A run reusing an existing same-named dir (exist_ok) updates its mtime,
+    # so it is recognized as this run's output and evaluated.
+    harness.add_existing_run("20260101_000000")  # pre-existing, same name, old mtime
     rc = run_and_eval(["--agent", "cursor", "--mode", "single"])
     assert harness.stages == ["run", "eval"]
     assert rc == 0
+
+
+def test_same_second_stale_dir_without_new_output_is_not_evaluated(harness: _Harness) -> None:
+    # A prior dir shares this run's wall-clock-second name, but this run fails
+    # before writing anything: its mtime is unchanged, so it is NOT scored.
+    harness.add_existing_run("20260101_000000")  # same name, untouched by this run
+    harness.produce_output = False
+    harness.run_rc = 1
+    rc = run_and_eval(["--agent", "cursor", "--mode", "single"])
+    assert harness.stages == ["run"]
+    assert rc == 1
 
 
 def test_stale_prior_run_without_new_output_is_not_evaluated(harness: _Harness) -> None:
     # This run produces nothing (setup failure); an older prior run dir exists
     # but must not be evaluated as if it were this run.
     harness.produce_output = False
-    (harness.base / "20251231_120000" / "tasks").mkdir(parents=True)
+    harness.add_existing_run("20251231_120000")
     harness.run_rc = 1
     rc = run_and_eval(["--agent", "cursor", "--mode", "single"])
     assert harness.stages == ["run"]
@@ -128,7 +147,7 @@ def test_stale_prior_run_without_new_output_is_not_evaluated(harness: _Harness) 
 def test_timestamp_resume_targets_that_run(harness: _Harness) -> None:
     # --timestamp resumes an older dir; eval must target it, not the newest.
     harness.produce_output = False  # nothing new created
-    (harness.base / "20251231_120000" / "tasks").mkdir(parents=True)
+    harness.add_existing_run("20251231_120000")
     ev_rc = run_and_eval(["--agent", "cursor", "--mode", "by_id", "--timestamp", "20251231_120000"])
     assert ev_rc == 0
     ev = harness.eval_call()
@@ -153,3 +172,24 @@ def test_defaults_agent_and_data_from_config(harness: _Harness) -> None:
     ev = harness.eval_call()
     assert ev[ev.index("--agent") + 1] == "cursor"
     assert ev[ev.index("--data") + 1] == "LexBench-Browser"
+
+
+def test_default_agent_falls_back_to_agent_tars_like_run_parser(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # No --agent and no default.agent: must match run/eval's Agent-TARS default,
+    # not browser-use, or the stages target different model paths.
+    h = _Harness(tmp_path / "out")
+    h.run_timestamp = "20260101_000000"
+    monkeypatch.setattr(cli_pkg, "main", h.cli_main)
+    monkeypatch.setattr(
+        run_eval_mod, "load_config_file",
+        lambda _: {"default": {"data": "LexBench-Browser"}, "agents": {}},
+    )
+    monkeypatch.setattr(run_eval_mod, "_run_output_base", lambda *a: h.base)
+    monkeypatch.setattr(run_eval_mod, "resolve_output_model_id", lambda *a: "m1")
+    monkeypatch.setattr(run_eval_mod, "normalize_agent_name", lambda a, c: a)
+
+    run_and_eval(["--mode", "single"])
+    ev = h.eval_call()
+    assert ev[ev.index("--agent") + 1] == "Agent-TARS"
