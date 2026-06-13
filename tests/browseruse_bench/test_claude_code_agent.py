@@ -373,6 +373,105 @@ class TestClaudeCodeAgentCmd:
         idx = args.index("--timeout-action")
         assert int(args[idx + 1]) > 5000  # must exceed the 5000ms default
 
+    def test_allowed_tools_default_is_segment_wildcard(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The claude CLI rejects a trailing wildcard ("mcp__playwright*");
+        # the default must be the accepted segment form.
+        cmd = self._capture_cmd(monkeypatch, tmp_path)
+        assert cmd[cmd.index("--allowedTools") + 1] == "mcp__playwright__*"
+
+    def test_self_launch_has_no_cdp_endpoint(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Default config sets no browser_id -> self-launch, no --cdp-endpoint.
+        cmd = self._capture_cmd(monkeypatch, tmp_path)
+        mcp_cfg = json.loads(cmd[cmd.index("--mcp-config") + 1])
+        assert "--cdp-endpoint" not in mcp_cfg["mcpServers"]["playwright"]["args"]
+
+
+# ---------------------------------------------------------------------------
+# Browser backend wiring (open_browser_session) and root sandbox env
+# ---------------------------------------------------------------------------
+
+class TestClaudeCodeAgentBackend:
+    def _stream(self) -> list[str]:
+        return [_line({"type": "result", "result": "ok", "num_turns": 1, "duration_ms": 100})]
+
+    def test_managed_backend_attaches_cdp_endpoint(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import contextlib
+
+        from browseruse_bench.agents import claude_code as cc_module
+        from browseruse_bench.browsers.types import BrowserSessionContext
+
+        opened: dict[str, str] = {}
+
+        @contextlib.contextmanager
+        def fake_session(browser_id: str, agent_name: str, agent_config: dict[str, Any]):
+            opened["browser_id"] = browser_id
+            yield BrowserSessionContext(
+                backend_id=browser_id, transport="cdp", cdp_url="ws://cdp.example/1"
+            )
+
+        monkeypatch.setattr(cc_module, "open_browser_session", fake_session)
+        captured: list[list[str]] = []
+        agent = ClaudeCodeAgent()
+        monkeypatch.setattr(
+            agent, "_run_subprocess",
+            lambda cmd, **kw: (captured.append(cmd), (0, self._stream(), None))[1],
+        )
+        result = agent.run_task(TASK_INFO, {**AGENT_CONFIG, "browser_id": "lexmount"}, tmp_path)
+        mcp_cfg = json.loads(captured[0][captured[0].index("--mcp-config") + 1])
+        args = mcp_cfg["mcpServers"]["playwright"]["args"]
+        assert opened["browser_id"] == "lexmount"
+        assert "--cdp-endpoint" in args
+        assert args[args.index("--cdp-endpoint") + 1] == "ws://cdp.example/1"
+        assert result.env_status == "success"
+
+    def test_non_cdp_backend_fails_fast(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import contextlib
+
+        from browseruse_bench.agents import claude_code as cc_module
+        from browseruse_bench.browsers.types import BrowserSessionContext
+
+        @contextlib.contextmanager
+        def fake_session(browser_id: str, agent_name: str, agent_config: dict[str, Any]):
+            yield BrowserSessionContext(backend_id=browser_id, transport="cloud_native")
+
+        monkeypatch.setattr(cc_module, "open_browser_session", fake_session)
+        agent = ClaudeCodeAgent()
+        monkeypatch.setattr(
+            agent, "_run_subprocess",
+            lambda *a, **kw: pytest.fail("subprocess must not be launched"),
+        )
+        result = agent.run_task(
+            TASK_INFO, {**AGENT_CONFIG, "browser_id": "browser-use-cloud"}, tmp_path
+        )
+        assert result.env_status == "failed"
+        assert result.agent_done == "error"
+        assert "browser-use-cloud" in (result.error or "")
+        assert "cloud_native" in (result.error or "")
+
+    def test_is_sandbox_env_set_for_root(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # claude refuses --dangerously-skip-permissions under root without
+        # IS_SANDBOX=1; the agent must inject it into the subprocess env.
+        captured_env: dict[str, str] = {}
+        agent = ClaudeCodeAgent()
+
+        def _fake(cmd: list[str], **kw: Any) -> tuple:
+            captured_env.update(kw.get("env") or {})
+            return 0, self._stream(), None
+
+        monkeypatch.setattr(agent, "_run_subprocess", _fake)
+        agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        assert captured_env.get("IS_SANDBOX") == "1"
+
 
 # ---------------------------------------------------------------------------
 # Integration smoke test — requires claude CLI + ANTHROPIC_API_KEY

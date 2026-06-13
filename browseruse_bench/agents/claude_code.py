@@ -18,7 +18,12 @@ from pathlib import Path
 from typing import Any
 
 from browseruse_bench.agents.cli_agent import CLIAgent
+from browseruse_bench.agents.playwright_mcp import (
+    SELF_LAUNCH_BROWSER_IDS,
+    build_playwright_mcp_args,
+)
 from browseruse_bench.agents.registry import register_agent
+from browseruse_bench.browsers import open_browser_session
 from browseruse_bench.browsers.providers.local import warn_if_local_proxy_unsupported
 from browseruse_bench.schemas import AgentMetrics, AgentResult, AgentUsage
 from browseruse_bench.utils import IS_WINDOWS
@@ -413,8 +418,52 @@ class ClaudeCodeAgent(CLIAgent):
         agent_config: dict[str, Any],
         task_workspace: Path,
     ) -> AgentResult | dict[str, Any]:
-        """Execute a browser automation task using Claude Code CLI."""
-        warn_if_local_proxy_unsupported(agent_config, self.name)
+        """Execute a browser automation task using Claude Code CLI.
+
+        With a managed browser backend (lexmount, cdp), the backend session is
+        opened first and its CDP endpoint is handed to Playwright MCP; with
+        local/unset browser_id, MCP launches its own browser.
+        """
+        browser_id = str(agent_config.get("browser_id") or "")
+        if browser_id in SELF_LAUNCH_BROWSER_IDS:
+            warn_if_local_proxy_unsupported(agent_config, self.name)
+            return self._execute(task_info, agent_config, task_workspace, cdp_url=None)
+        with open_browser_session(
+            browser_id=browser_id,
+            agent_name=self.name,
+            agent_config=agent_config,
+        ) as session_context:
+            cdp_url = session_context.cdp_url if session_context.transport == "cdp" else None
+            if not cdp_url:
+                return self._unsupported_backend_result(
+                    task_info["task_id"], browser_id, session_context.transport
+                )
+            return self._execute(task_info, agent_config, task_workspace, cdp_url=cdp_url)
+
+    def _unsupported_backend_result(
+        self, task_id: str, browser_id: str, transport: str
+    ) -> AgentResult:
+        """Fail fast instead of silently self-launching a local browser."""
+        return AgentResult(
+            task_id=task_id,
+            timestamp=datetime.now(UTC),
+            env_status="failed",  # type: ignore[arg-type]
+            agent_done="error",  # type: ignore[arg-type]
+            error=(
+                f"Browser backend '{browser_id}' (transport={transport}) provides no CDP "
+                "endpoint, so claude-code cannot attach Playwright MCP to it. "
+                "Use a CDP-capable backend (e.g. lexmount, cdp) or browser_id=local."
+            ),
+            metrics=AgentMetrics(end_to_end_ms=0, steps=0),
+        )
+
+    def _execute(
+        self,
+        task_info: dict[str, Any],
+        agent_config: dict[str, Any],
+        task_workspace: Path,
+        cdp_url: str | None,
+    ) -> AgentResult | dict[str, Any]:
         task_id = task_info["task_id"]
         # Reuse the prompt already formatted by cli/run.py (it carries the
         # single-site constraint, the same-site region allowance, and the
@@ -432,7 +481,9 @@ class ClaudeCodeAgent(CLIAgent):
             logger.warning("Invalid timeout for task %s (%r): %s", task_id, timeout_val, exc)
             timeout = 300
 
-        allowed_tools = agent_config.get("allowed_tools", "mcp__playwright*")
+        # Current claude CLI rejects a trailing wildcard ("mcp__playwright*") in
+        # allow rules; the segment wildcard "mcp__playwright__*" is accepted.
+        allowed_tools = agent_config.get("allowed_tools", "mcp__playwright__*")
         system_prompt = agent_config.get("system_prompt") or _DEFAULT_SYSTEM_PROMPT
 
         api_key = agent_config.get("api_key")
@@ -440,16 +491,11 @@ class ClaudeCodeAgent(CLIAgent):
 
         # Build a Playwright-only MCP config so the subprocess ignores all other
         # user-scope MCP servers (e.g. chrome-devtools-mcp) that would otherwise
-        # be loaded and cause spurious socket errors.
+        # be loaded and cause spurious socket errors. With a managed backend,
+        # build_playwright_mcp_args appends --cdp-endpoint <cdp_url> so MCP
+        # attaches to the cloud browser instead of launching a local one.
         playwright_mcp_cmd = agent_config.get("playwright_mcp_command", "npx")
-        playwright_mcp_base_args = agent_config.get("playwright_mcp_args", ["@playwright/mcp@latest"])
-        # --timeout-action 30000: increase from the 5000ms default (screenshots
-        #   timeout on pages with slow external font CDNs).
-        # No --output-dir: MCP creates a .playwright-mcp/ subdirectory inside
-        #   its cwd (task_workspace) automatically, keeping the workspace root clean.
-        playwright_mcp_args = playwright_mcp_base_args + [
-            "--timeout-action", "30000",
-        ]
+        playwright_mcp_args = build_playwright_mcp_args(agent_config, cdp_url)
         mcp_config_json = json.dumps({
             "mcpServers": {
                 "playwright": {
@@ -484,6 +530,9 @@ class ClaudeCodeAgent(CLIAgent):
         )
 
         env = {**os.environ}
+        # claude refuses --dangerously-skip-permissions under root/sudo unless
+        # IS_SANDBOX=1 is set; server/container deployments commonly run as root.
+        env["IS_SANDBOX"] = "1"
         if api_key:
             env["ANTHROPIC_API_KEY"] = api_key
         if base_url:

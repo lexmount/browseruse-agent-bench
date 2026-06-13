@@ -258,9 +258,14 @@ agents:
     # Set database_string only when you want a managed/persistent Skyvern database.
     # database_string: postgresql+psycopg://skyvern@localhost/skyvern
   claude-code:
+    # claude-code needs an Anthropic model (api_key=$ANTHROPIC_API_KEY); without
+    # active_model it would inherit default.model (an OpenAI entry) and fail auth.
+    active_model: sonnet
+    active_browser: lexmount
     max_turns: 50
     timeout: 300
-    allowed_tools: mcp__playwright*
+    # Segment wildcard (mcp__playwright__*); a trailing wildcard is rejected.
+    allowed_tools: mcp__playwright__*
   codex:
     active_model: codex
     timeout: 600

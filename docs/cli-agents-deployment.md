@@ -23,19 +23,16 @@ upgrading.
 
 - **Recommended on servers: `lexmount`** (default via `agents.<agent>.active_browser`).
   The browser runs in the cloud; the server only needs outbound network. No
-  local Chrome required for the CDP-capable agents (codex/cursor/openclaw) in
-  this mode. **claude-code is the exception**: it has no managed-backend
-  support and always launches a local browser via Playwright MCP, so a
-  deployment that includes claude-code still needs Chrome/Chromium.
+  local Chrome required for the CDP-capable agents (claude-code/codex/cursor/openclaw)
+  in this mode — claude-code now opens the managed backend session and attaches
+  Playwright MCP to its CDP endpoint (`--cdp-endpoint`), like the others.
 - **`browser_id=local`**: requires a local Chrome/Chromium plus headless-Linux
-  dependencies. For codex/cursor, Playwright MCP downloads its own browser on
-  first run — pre-warm with `npx -y @playwright/mcp@latest --version` during
-  image build to avoid first-task latency.
+  dependencies. For claude-code/codex/cursor, Playwright MCP downloads its own
+  browser on first run — pre-warm with `npx -y @playwright/mcp@latest --version`
+  during image build to avoid first-task latency.
 - Cloud-native backends (`browser-use-cloud`, `skyvern-cloud`) are **not
-  supported** by CLI agents (no CDP endpoint). codex/cursor/openclaw fail fast
-  with a clear error; **claude-code does not inspect `browser_id` at all** and
-  silently uses its local Playwright MCP browser regardless of the selected
-  backend — do not point claude-code at a managed backend and expect an error.
+  supported** by CLI agents (no CDP endpoint). All four (claude-code/codex/cursor/openclaw)
+  fail fast with a clear error rather than silently self-launching a local browser.
 
 ## Per-agent install and auth
 
@@ -46,9 +43,21 @@ npm install -g @anthropic-ai/claude-code
 ```
 
 - Auth: `ANTHROPIC_API_KEY` (+ optional `ANTHROPIC_BASE_URL`) via the model
-  entry (`models.<name>.api_key/base_url`).
-- Browser: Playwright MCP via `npx @playwright/mcp@latest` (local browser only;
-  no managed-backend support yet).
+  entry (`models.<name>.api_key/base_url`). Select an Anthropic model with
+  `agents.claude-code.active_model` (e.g. `sonnet`); without it the agent
+  inherits `default.model` (an OpenAI entry) and auth fails.
+- `base_url` must be the Anthropic API **root** — the claude CLI appends
+  `/v1/messages` itself, so a value ending in `/v1` becomes `/v1/v1/messages`
+  and 404s. (`api.anthropic.com` needs no override; for a LiteLLM proxy use the
+  bare host, not the OpenAI-style `.../v1` URL.) The endpoint must serve the
+  Anthropic Messages API natively, including `thinking`/`context_management` —
+  a proxy that routes Claude through an OpenAI adapter rejects those params with
+  a 400.
+- Browser: Playwright MCP via `npx @playwright/mcp@latest`; managed CDP backends
+  (lexmount, cdp) attach automatically with `--cdp-endpoint`, so no local Chrome
+  is needed in that mode.
+- Runs as root (server/container): claude refuses `--dangerously-skip-permissions`
+  under root unless `IS_SANDBOX=1` — the agent sets it in the subprocess env.
 
 ### codex (verified: codex-cli 0.130.0)
 
@@ -152,9 +161,9 @@ docker run --rm --user 1000 -v "$PWD/.env:/app/.env:ro" \
 With API-key codex auth instead, set `models.codex.base_url` when using a
 proxy endpoint (the key alone routes to api.openai.com).
 
-With the lexmount browser path no Chrome is needed in the image for
-codex/cursor/openclaw; **include Chrome/Chromium (and headless deps)
-separately if claude-code or `browser_id=local` runs are planned**.
+With the lexmount browser path no Chrome is needed in the image for any of the
+CLI agents (claude-code/codex/cursor/openclaw); **include Chrome/Chromium (and
+headless deps) separately only if `browser_id=local` runs are planned**.
 
 ## Smoke verification (per agent, after deploy)
 
@@ -166,17 +175,15 @@ claude --version; codex --version; cursor-agent --version; openclaw --version
 bubench run --agent codex   --data LexBench-Browser --mode single
 bubench run --agent cursor  --data LexBench-Browser --mode single
 bubench run --agent openclaw --data LexBench-Browser --mode single
-# claude-code needs local Chrome + headless deps even when others use lexmount,
-# and an Anthropic model selected (config.example.yaml has no
-# agents.claude-code.active_model, so without an override it inherits
-# default.model and the wrong api key):
-bubench run --agent claude-code --data LexBench-Browser --mode single --model sonnet
+# claude-code on lexmount needs no local Chrome; config.example.yaml pins
+# agents.claude-code.active_model: sonnet (an Anthropic model):
+bubench run --agent claude-code --data LexBench-Browser --mode single
 ```
 
 Verify by log, not exit code:
 
-- codex/cursor/openclaw on a managed backend: `run.log` shows
+- All four CLI agents on a managed backend: `run.log` shows
   `Lexmount session created: wss://...` plus the agent's model-call lines.
-- claude-code (and any `browser_id=local` run): no Lexmount line is expected —
-  look for the Playwright MCP browser starting and the agent's tool calls.
+- Any `browser_id=local` run: no Lexmount line is expected — look for the
+  Playwright MCP browser starting and the agent's tool calls.
 - In all cases `result.json` should record steps > 0 for browsing tasks.
