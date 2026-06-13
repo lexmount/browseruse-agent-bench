@@ -197,16 +197,28 @@ def _select_canonical(name: Any, mapping: Any) -> Any:
     return resolve_key_case_insensitive(name, mapping)
 
 
-def _model_passthrough(model_name: str | None, active_model: Any, shared_models: dict[str, Any]) -> str | None:
+# Agents whose model id is a literal string handed to a CLI (not a key that
+# must match a provider/API config), so an unknown --model can be passed
+# through verbatim. Other agents (browser-use, skyvern, deepbrowse, ...) need
+# the model entry's provider/api_key, so an unknown --model stays an error.
+_RAW_MODEL_PASSTHROUGH_AGENTS = {"cursor", "codex", "openclaw"}
+
+
+def _model_passthrough(
+    agent: str, model_name: str | None, active_model: Any, shared_models: dict[str, Any]
+) -> str | None:
     """Return an explicit --model that is not a configured models entry.
 
-    Lets CLI agents whose model is just a literal id (e.g. cursor) switch
-    models with ``--model <id>`` without adding a ``models.<id>`` entry: the
-    base runtime config still comes from the agent's active/default model
-    entry, only ``model_id`` is overridden. Returns None when ``model_name``
-    is absent or already resolves to a configured entry.
+    Lets the CLI agents in :data:`_RAW_MODEL_PASSTHROUGH_AGENTS` switch models
+    with ``--model <id>`` without adding a ``models.<id>`` entry: the base
+    runtime config still comes from the agent's active/default model entry,
+    only ``model_id`` is overridden. Returns None when ``model_name`` is absent,
+    already resolves to a configured entry, or the agent does not support raw
+    model ids (an unknown model then stays a config-resolution error).
     """
     if not model_name or model_name in shared_models or active_model in shared_models:
+        return None
+    if agent not in _RAW_MODEL_PASSTHROUGH_AGENTS:
         return None
     logger.warning(
         "Model '%s' is not a configured models entry; passing it through as a literal "
@@ -407,7 +419,7 @@ def resolve_agent_inline_config(
             or root_config.get("default", {}).get("browser_id"),
             shared_browsers,
         )
-        model_override = _model_passthrough(model_name, active_model, shared_models)
+        model_override = _model_passthrough(agent, model_name, active_model, shared_models)
         if model_override is not None:
             active_model = _select_canonical(
                 agent_entry.get("active_model") or root_config.get("default", {}).get("model"),

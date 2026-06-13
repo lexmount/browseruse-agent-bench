@@ -191,6 +191,20 @@ def test_resolve_agent_inline_config_passthrough_needs_a_base_model() -> None:
     assert resolve_agent_inline_config("cursor", config, model_name="bogus") is None
 
 
+def test_resolve_agent_inline_config_no_passthrough_for_provider_agents() -> None:
+    # browser-use needs the model entry's provider/api_key, so an unknown
+    # --model-name (e.g. a typo) stays a config-resolution error, not a
+    # silent run with the default provider settings under a wrong model id.
+    config = {
+        "default": {"model": "gpt", "browser": "lexmount"},
+        "models": {"gpt": {"model_id": "gpt-5.4", "api_key": "$OPENAI_API_KEY"}},
+        "browsers": {"lexmount": {"browser_id": "lexmount"}},
+        "agents": {"browser-use": {"active_model": "gpt"}},
+    }
+
+    assert resolve_agent_inline_config("browser-use", config, model_name="gpt-5.4-typo") is None
+
+
 def test_resolve_agent_inline_config_uses_explicit_model_override(tmp_path: Path) -> None:
     config = load_config_file(_write_runtime_root_config(tmp_path))
 
