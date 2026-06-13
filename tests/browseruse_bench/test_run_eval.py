@@ -34,9 +34,12 @@ class _Harness:
         self.produce_output = True
         self.emit_marker = True
         self.run_timestamp = "20260101_000000"
+        self.model_dir_override: str | None = None  # for slash-bearing model ids
+        self.concurrent_dir: str | None = None  # a dir another process creates mid-run
 
-    @staticmethod
-    def _model_dir(argv: list[str]) -> str:
+    def _model_dir(self, argv: list[str]) -> str:
+        if self.model_dir_override is not None:
+            return self.model_dir_override
         for i, a in enumerate(argv):
             if a in ("--model", "--model-name") and i + 1 < len(argv):
                 return argv[i + 1]
@@ -53,10 +56,15 @@ class _Harness:
     def cli_main(self, argv: list[str]) -> int:
         self.calls.append(list(argv))
         if argv[0] == "run":
-            run_dir = self.exp_root / self._model_dir(argv) / self.run_timestamp
+            model = self._model_dir(argv)
+            run_dir = self.exp_root / model / self.run_timestamp
             if self.produce_output:
                 (run_dir / "tasks").mkdir(parents=True, exist_ok=True)
                 os.utime(run_dir / "tasks", (5000.0, 5000.0))  # fresh vs any prior dir
+            if self.concurrent_dir is not None:  # another run-eval's fresh dir
+                other = self.exp_root / model / self.concurrent_dir / "tasks"
+                other.mkdir(parents=True, exist_ok=True)
+                os.utime(other, (9000.0, 9000.0))
             # Real run writes the marker right after mkdir — before tasks run —
             # so it is present even on a resume that reran no task.
             if self.emit_marker and "--write-output-dir" in argv:
@@ -101,6 +109,33 @@ def test_passthrough_model_flows_to_eval_model_id(harness: _Harness) -> None:
     ev = harness.eval_call()
     assert ev[ev.index("--model-id") + 1] == "claude-fable-5-thinking-high"
     assert "claude-fable-5-thinking-high" in harness.calls[0]  # forwarded to run untouched
+
+
+def test_slash_bearing_model_id_targets_full_nested_dir(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An OpenRouter-style id like "openai/gpt-5.4" nests two dirs; eval must get
+    # the full id, not just the last path component.
+    monkeypatch.setattr(run_eval_mod, "resolve_output_model_id", lambda *a: "openai/gpt-5.4")
+    harness.model_dir_override = "openai/gpt-5.4"
+    run_and_eval(["--agent", "browser-use", "--mode", "single"])
+    ev = harness.eval_call()
+    assert ev[ev.index("--model-id") + 1] == "openai/gpt-5.4"
+    assert ev[ev.index("--timestamp") + 1] == "20260101_000000"
+
+
+def test_stale_marker_does_not_fall_back_to_concurrent_dir(harness: _Harness) -> None:
+    # Marker points to a stale resume dir this run did not write; a concurrent
+    # run-eval created a fresh dir. The marker is authoritative, so we must NOT
+    # fall back and score the other process's dir.
+    harness.run_timestamp = "20251231_120000"
+    harness.add_existing_run("20251231_120000")  # stale; marker will point here
+    harness.produce_output = False  # this run does not advance the dir's mtime
+    harness.concurrent_dir = "20260102_000000"  # another process's fresh dir
+    harness.run_rc = 1
+    rc = run_and_eval(["--agent", "cursor", "--mode", "by_id", "--timestamp", "20251231_120000"])
+    assert harness.stages == ["run"]  # eval skipped, not bound to the other dir
+    assert rc == 1
 
 
 def test_completed_run_with_task_failures_is_still_evaluated(harness: _Harness) -> None:

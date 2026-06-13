@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import tempfile
 from pathlib import Path
 
@@ -160,17 +161,23 @@ def _dir_written_this_run(run_dir: Path, before: dict[str, float]) -> bool:
     return prior is None or current > prior
 
 
-def _read_marker(marker: Path) -> Path | None:
-    """Read the run's emitted output dir from its marker file, if written."""
+def _read_marker(marker: Path) -> tuple[bool, Path | None]:
+    """Read the run's emitted output dir from its marker file.
+
+    Returns ``(emitted, run_dir)``: *emitted* is True when the run stage wrote
+    a path (it is marker-capable), regardless of whether that path is a usable
+    run dir; *run_dir* is the path only when it is an actual run dir (has a
+    tasks/ subdir). The two are distinct so a marker-capable run with a
+    stale/invalid marker is never silently re-bound by the mtime fallback.
+    """
     try:
         text = marker.read_text(encoding="utf-8").strip()
     except OSError:
-        return None
+        return False, None
     if not text:
-        return None
+        return False, None
     run_dir = Path(text)
-    # Trust it only if it is an actual run dir (has a tasks/ subdir).
-    return run_dir if (run_dir / "tasks").is_dir() else None
+    return True, (run_dir if (run_dir / "tasks").is_dir() else None)
 
 
 def _invoke_cli(argv: list[str]) -> int:
@@ -219,7 +226,9 @@ def run_and_eval(argv: list[str] | None = None) -> int:
     # binds to exactly this run even under concurrency.
     forwardable = [a for a in (raw_args or []) if a != "--skip-eval"]
     run_only, eval_only = _partition_eval_only(forwardable)
-    marker = Path(tempfile.mkstemp(prefix="run-eval-outdir-")[1])
+    fd, marker_path = tempfile.mkstemp(prefix="run-eval-outdir-")
+    os.close(fd)  # the run subprocess writes this path; do not hold the fd open
+    marker = Path(marker_path)
     run_argv = ["run", *run_only, "--write-output-dir", str(marker)]
     # Snapshot run dirs before the run for the mtime fallback (older run stages
     # that do not honor --write-output-dir).
@@ -227,7 +236,7 @@ def run_and_eval(argv: list[str] | None = None) -> int:
     logger.info("[run-eval] Stage 1/2: run")
     try:
         run_rc = _invoke_cli(run_argv)
-        run_dir = _read_marker(marker)
+        marker_emitted, run_dir = _read_marker(marker)
     finally:
         marker.unlink(missing_ok=True)
 
@@ -240,17 +249,21 @@ def run_and_eval(argv: list[str] | None = None) -> int:
         logger.error("[run-eval] Run interrupted (exit 130); skipping eval.")
         return run_rc
 
-    # Bind to the exact dir the run emitted (concurrency-safe identity), but
-    # only if this invocation actually wrote it (so a --timestamp resume that
-    # reran no task is not scored on stale trajectories). Fall back to the
-    # mtime heuristic when no marker was written (older run stage).
+    # model_id (resolved the same way run does) names the experiments subdir,
+    # incl. slash-bearing ids like "openai/gpt-5.4"; the timestamp is the run
+    # dir's final component. The marker gives concurrency-safe identity, the
+    # mtime check confirms this invocation actually wrote it.
     eval_model_id: str | None = None
     run_ts: str | None = None
-    if run_dir is not None and _dir_written_this_run(run_dir, pre_mtimes):
-        eval_model_id, run_ts = run_dir.parent.name, run_dir.name
+    if marker_emitted:
+        # The marker is authoritative for this run; never fall back to the
+        # mtime scan (which could pick a concurrent run-eval's fresh dir).
+        if run_dir is not None and model_id and _dir_written_this_run(run_dir, pre_mtimes):
+            eval_model_id, run_ts = model_id, run_dir.name
     elif output_base is not None and model_id:
-        # A completed run with task failures still has fresh output and should
-        # be scored; a setup failure that produced nothing is skipped.
+        # Older run stage with no marker: identify this run's dir by mtime. A
+        # completed run with task failures still has fresh output and is scored;
+        # a setup failure that produced nothing is skipped.
         fresh = _run_dir_written_since(output_base, pre_mtimes)
         if fresh:
             eval_model_id, run_ts = model_id, fresh
