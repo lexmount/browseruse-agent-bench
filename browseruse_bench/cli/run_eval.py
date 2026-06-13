@@ -14,6 +14,14 @@ still scored). Eval is skipped only when the run produced no output directory
 — that comes from ``eval.model`` in config.yaml — so it is intentionally not
 forwarded to the eval stage.
 
+``--report-output-dir <file>`` is a caller-facing flag (consumed here, not
+forwarded): when the run produces an experiment directory, its repo-relative
+path (e.g. ``experiments/LexBench-Browser/global/cursor/gpt-5.2/20260613_074712``)
+is written to *file*, so the caller can locate/upload artifacts without knowing
+bench's directory layout. It is written whenever a dir exists (incl. partial
+task failures, eval failure, or interrupt) and not written when the run
+produced nothing.
+
 Concurrency: the run stage is told to write its resolved output directory to a
 per-invocation marker file (``run --write-output-dir``), so eval binds to the
 exact directory this process produced even when several run-eval jobs for the
@@ -62,7 +70,46 @@ def _shared_parser() -> argparse.ArgumentParser:
     parser.add_argument("--force-download", dest="force_download", action="store_true")
     parser.add_argument("--dry-run", dest="dry_run", action="store_true")
     parser.add_argument("--skip-eval", dest="skip_eval", action="store_true")
+    # Caller-facing: where to report the produced experiment dir. Consumed here
+    # (not forwarded to run) — distinct from run's internal --write-output-dir.
+    parser.add_argument("--report-output-dir", dest="report_output_dir", default=None)
     return parser
+
+
+# Flags run-eval owns and must not forward to the run stage.
+_RUN_EVAL_BOOL_FLAGS = {"--skip-eval"}
+_RUN_EVAL_VALUE_FLAGS = {"--report-output-dir"}
+
+
+def _strip_run_eval_flags(args: list[str]) -> list[str]:
+    """Drop run-eval's own flags (and their values) from the run-stage argv."""
+    out: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        key = arg.split("=", 1)[0]
+        if key in _RUN_EVAL_VALUE_FLAGS:
+            i += 1 if "=" in arg else 2
+            continue
+        if arg in _RUN_EVAL_BOOL_FLAGS:
+            i += 1
+            continue
+        out.append(arg)
+        i += 1
+    return out
+
+
+def _report_output_dir(report_file: str, run_dir: Path) -> None:
+    """Write the produced run dir's repo-relative path for the caller."""
+    try:
+        rel = run_dir.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        rel = run_dir.as_posix()  # outside the repo: report the absolute path
+    try:
+        Path(report_file).write_text(rel + "\n", encoding="utf-8")
+        logger.info("[run-eval] Reported output dir to %s: %s", report_file, rel)
+    except OSError as exc:
+        logger.warning("[run-eval] Failed to write --report-output-dir %s: %s", report_file, exc)
 
 
 # Eval-only options the run subparser rejects: strip them from the run stage
@@ -161,6 +208,31 @@ def _dir_written_this_run(run_dir: Path, before: dict[str, float]) -> bool:
     return prior is None or current > prior
 
 
+def _bind_run_dir(
+    marker_emitted: bool,
+    run_dir: Path | None,
+    output_base: Path | None,
+    model_id: str | None,
+    pre_mtimes: dict[str, float],
+) -> Path | None:
+    """The full run dir this invocation produced, or None when it produced nothing.
+
+    A marker-capable run is authoritative (no mtime fallback). The dir is bound
+    only if this invocation actually wrote it (so a stale --timestamp resume is
+    not scored / reported). For an older run stage with no marker, fall back to
+    the mtime heuristic under *output_base*.
+    """
+    if marker_emitted:
+        if run_dir is not None and model_id and _dir_written_this_run(run_dir, pre_mtimes):
+            return run_dir
+        return None
+    if output_base is not None and model_id:
+        fresh = _run_dir_written_since(output_base, pre_mtimes)
+        if fresh:
+            return output_base / fresh
+    return None
+
+
 def _read_marker(marker: Path) -> tuple[bool, Path | None]:
     """Read the run's emitted output dir from its marker file.
 
@@ -220,11 +292,12 @@ def run_and_eval(argv: list[str] | None = None) -> int:
         _run_output_base(canonical_agent, data, known.split, model_id) if model_id else None
     )
 
-    # --skip-eval is ours; eval-only options the run parser rejects are routed
-    # to the eval stage; the rest is forwarded to run verbatim. The run stage
-    # writes its resolved output dir to a per-invocation marker file so eval
-    # binds to exactly this run even under concurrency.
-    forwardable = [a for a in (raw_args or []) if a != "--skip-eval"]
+    # run-eval's own flags (--skip-eval, --report-output-dir) are consumed here,
+    # not forwarded; eval-only options the run parser rejects are routed to the
+    # eval stage; the rest is forwarded to run verbatim. The run stage writes
+    # its resolved output dir to a per-invocation marker file so eval binds to
+    # exactly this run even under concurrency.
+    forwardable = _strip_run_eval_flags(list(raw_args or []))
     run_only, eval_only = _partition_eval_only(forwardable)
     fd, marker_path = tempfile.mkstemp(prefix="run-eval-outdir-")
     os.close(fd)  # the run subprocess writes this path; do not hold the fd open
@@ -240,6 +313,17 @@ def run_and_eval(argv: list[str] | None = None) -> int:
     finally:
         marker.unlink(missing_ok=True)
 
+    # The dir this invocation produced (None when it produced nothing). model_id
+    # (resolved the same way run does) names the experiments subdir incl.
+    # slash-bearing ids like "openai/gpt-5.4"; the timestamp is its final part.
+    bound_dir = _bind_run_dir(marker_emitted, run_dir, output_base, model_id, pre_mtimes)
+
+    # Report the produced dir to the caller whenever a dir exists (even on
+    # partial task failures, eval failure, or interrupt — so artifacts can
+    # still be uploaded); skip only when the run produced nothing.
+    if bound_dir is not None and known.report_output_dir:
+        _report_output_dir(known.report_output_dir, bound_dir)
+
     if known.dry_run or known.skip_eval:
         logger.info("[run-eval] %s set; stopping after run.", "--dry-run" if known.dry_run else "--skip-eval")
         return run_rc
@@ -248,31 +332,13 @@ def run_and_eval(argv: list[str] | None = None) -> int:
     if run_rc == 130:
         logger.error("[run-eval] Run interrupted (exit 130); skipping eval.")
         return run_rc
-
-    # model_id (resolved the same way run does) names the experiments subdir,
-    # incl. slash-bearing ids like "openai/gpt-5.4"; the timestamp is the run
-    # dir's final component. The marker gives concurrency-safe identity, the
-    # mtime check confirms this invocation actually wrote it.
-    eval_model_id: str | None = None
-    run_ts: str | None = None
-    if marker_emitted:
-        # The marker is authoritative for this run; never fall back to the
-        # mtime scan (which could pick a concurrent run-eval's fresh dir).
-        if run_dir is not None and model_id and _dir_written_this_run(run_dir, pre_mtimes):
-            eval_model_id, run_ts = model_id, run_dir.name
-    elif output_base is not None and model_id:
-        # Older run stage with no marker: identify this run's dir by mtime. A
-        # completed run with task failures still has fresh output and is scored;
-        # a setup failure that produced nothing is skipped.
-        fresh = _run_dir_written_since(output_base, pre_mtimes)
-        if fresh:
-            eval_model_id, run_ts = model_id, fresh
-    if not run_ts or not eval_model_id:
+    if bound_dir is None or not model_id:
         logger.error(
             "[run-eval] Run produced no fresh output directory (exit %d); skipping eval.", run_rc
         )
         return run_rc or 1
 
+    eval_model_id, run_ts = model_id, bound_dir.name
     eval_argv = [
         "eval", "--agent", agent, "--data", data,
         "--model-id", eval_model_id, "--timestamp", run_ts,
