@@ -52,10 +52,13 @@ class _Harness:
 
     def cli_main(self, argv: list[str]) -> int:
         self.calls.append(list(argv))
-        if argv[0] == "run" and self.produce_output:
+        if argv[0] == "run":
             run_dir = self.exp_root / self._model_dir(argv) / self.run_timestamp
-            (run_dir / "tasks").mkdir(parents=True, exist_ok=True)
-            os.utime(run_dir / "tasks", (5000.0, 5000.0))  # fresh vs any prior dir
+            if self.produce_output:
+                (run_dir / "tasks").mkdir(parents=True, exist_ok=True)
+                os.utime(run_dir / "tasks", (5000.0, 5000.0))  # fresh vs any prior dir
+            # Real run writes the marker right after mkdir — before tasks run —
+            # so it is present even on a resume that reran no task.
             if self.emit_marker and "--write-output-dir" in argv:
                 Path(argv[argv.index("--write-output-dir") + 1]).write_text(str(run_dir))
         # cli.main is wrapped by handle_cli_errors (sys.exit), so the real entry
@@ -176,14 +179,35 @@ def test_setup_failure_no_marker_no_output_skips_eval(harness: _Harness) -> None
 
 
 def test_timestamp_resume_targets_that_run(harness: _Harness) -> None:
-    # --timestamp resumes an older dir; eval must target it. The run reuses the
-    # dir and emits the marker for it.
+    # --timestamp resumes an existing dir and reruns tasks (mtime advances);
+    # eval targets it.
     harness.run_timestamp = "20251231_120000"
     harness.add_existing_run("20251231_120000")
     ev_rc = run_and_eval(["--agent", "cursor", "--mode", "by_id", "--timestamp", "20251231_120000"])
     assert ev_rc == 0
     ev = harness.eval_call()
     assert ev[ev.index("--timestamp") + 1] == "20251231_120000"
+
+
+def test_timestamp_resume_without_rerun_is_not_evaluated(harness: _Harness) -> None:
+    # --timestamp accepted but no task reran (the resume failed setup): the
+    # dir's mtime is unchanged, so its stale trajectories are NOT scored.
+    harness.run_timestamp = "20251231_120000"
+    harness.add_existing_run("20251231_120000")
+    harness.produce_output = False  # marker written, but mtime not advanced
+    harness.run_rc = 1
+    rc = run_and_eval(["--agent", "cursor", "--mode", "by_id", "--timestamp", "20251231_120000"])
+    assert harness.stages == ["run"]
+    assert rc == 1
+
+
+def test_interrupt_propagates_and_skips_eval(harness: _Harness) -> None:
+    # A SIGINT'd run (exit 130) is cut short; the interrupt must propagate and
+    # the partial run must not be auto-scored as complete.
+    harness.run_rc = 130
+    rc = run_and_eval(["--agent", "cursor", "--mode", "first_n", "--count", "5"])
+    assert harness.stages == ["run"]
+    assert rc == 130
 
 
 def test_forwards_data_source_and_force_download_to_eval(harness: _Harness) -> None:

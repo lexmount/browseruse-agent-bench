@@ -9,12 +9,18 @@ an older run, or when some tasks failed (a completed run with task failures is
 still scored). Eval is skipped only when the run produced no output directory
 (a genuine setup/infra failure) or for ``--dry-run`` / ``--skip-eval``.
 
+``--model`` / ``--model-name`` here selects the *agent* model for the run stage
+(it also names the experiments dir eval reads). It is not the eval judge model
+— that comes from ``eval.model`` in config.yaml — so it is intentionally not
+forwarded to the eval stage.
+
 Concurrency: the run stage is told to write its resolved output directory to a
 per-invocation marker file (``run --write-output-dir``), so eval binds to the
 exact directory this process produced even when several run-eval jobs for the
-same agent/data/model/split overlap in wall-clock time. The tasks/ mtime
-heuristic is only a fallback for an older run stage that does not emit the
-marker.
+same agent/data/model/split overlap in wall-clock time. run-eval still confirms
+that directory's tasks/ was written by this invocation (vs a stale ``--timestamp``
+resume that reran no task). The tasks/ mtime heuristic is the fallback for an
+older run stage that does not emit the marker.
 """
 
 from __future__ import annotations
@@ -136,6 +142,24 @@ def _run_dir_written_since(base: Path, before: dict[str, float]) -> str | None:
     return max(fresh) if fresh else None
 
 
+def _dir_written_this_run(run_dir: Path, before: dict[str, float]) -> bool:
+    """Whether *run_dir*'s tasks/ was created or updated since the *before* snapshot.
+
+    Distinguishes a dir this invocation actually wrote from a stale resume
+    target (e.g. ``--timestamp`` accepted but no task reran before the run
+    failed), where the trajectories are from a prior run.
+    """
+    tasks = run_dir / "tasks"
+    if not tasks.is_dir():
+        return False
+    try:
+        current = tasks.stat().st_mtime
+    except OSError:
+        return False
+    prior = before.get(run_dir.name)
+    return prior is None or current > prior
+
+
 def _read_marker(marker: Path) -> Path | None:
     """Read the run's emitted output dir from its marker file, if written."""
     try:
@@ -210,25 +234,29 @@ def run_and_eval(argv: list[str] | None = None) -> int:
     if known.dry_run or known.skip_eval:
         logger.info("[run-eval] %s set; stopping after run.", "--dry-run" if known.dry_run else "--skip-eval")
         return run_rc
+    # An interrupted run (SIGINT/SIGTERM -> 130) was cut short; do not auto-score
+    # it as a complete run. Propagate the interrupt instead.
+    if run_rc == 130:
+        logger.error("[run-eval] Run interrupted (exit 130); skipping eval.")
+        return run_rc
 
-    # Prefer the exact dir the run emitted (concurrency-safe); model_id and the
-    # timestamp come straight from it. Fall back to deriving model_id + the
-    # mtime heuristic only when no marker was written.
-    if run_dir is not None:
-        eval_model_id: str | None = run_dir.parent.name
-        run_ts: str | None = run_dir.name
-    else:
-        if not model_id or output_base is None:
-            logger.error("[run-eval] Could not derive model_id for eval (agent=%s); skipping.", canonical_agent)
-            return run_rc or 1
-        # A completed run with task failures still has output and should be
-        # scored; a setup failure that produced nothing is skipped. run_rc is
-        # not a gate — non-zero often just means "some tasks failed".
-        eval_model_id = model_id
-        run_ts = known.timestamp or _run_dir_written_since(output_base, pre_mtimes)
+    # Bind to the exact dir the run emitted (concurrency-safe identity), but
+    # only if this invocation actually wrote it (so a --timestamp resume that
+    # reran no task is not scored on stale trajectories). Fall back to the
+    # mtime heuristic when no marker was written (older run stage).
+    eval_model_id: str | None = None
+    run_ts: str | None = None
+    if run_dir is not None and _dir_written_this_run(run_dir, pre_mtimes):
+        eval_model_id, run_ts = run_dir.parent.name, run_dir.name
+    elif output_base is not None and model_id:
+        # A completed run with task failures still has fresh output and should
+        # be scored; a setup failure that produced nothing is skipped.
+        fresh = _run_dir_written_since(output_base, pre_mtimes)
+        if fresh:
+            eval_model_id, run_ts = model_id, fresh
     if not run_ts or not eval_model_id:
         logger.error(
-            "[run-eval] Run produced no output directory (exit %d); skipping eval.", run_rc
+            "[run-eval] Run produced no fresh output directory (exit %d); skipping eval.", run_rc
         )
         return run_rc or 1
 
