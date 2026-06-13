@@ -50,6 +50,9 @@ def harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Harness:
     monkeypatch.setattr(cli_pkg, "main", h.cli_main)
     monkeypatch.setattr(run_eval_mod, "load_config_file", lambda _: _ROOT_CONFIG)
     monkeypatch.setattr(run_eval_mod, "_run_output_base", lambda *a: h.base)
+    # Pin the run-start stamp; the run dir the harness creates is >= it, so it
+    # is recognized as this run's output (deterministic regardless of clock).
+    monkeypatch.setattr(run_eval_mod, "_now_stamp", lambda: "20260101_000000")
     return h
 
 
@@ -100,6 +103,26 @@ def test_skip_eval_stops_after_run(harness: _Harness) -> None:
     assert harness.stages == ["run"]
     assert rc == 0
     assert "--skip-eval" not in harness.calls[0]  # ours, not forwarded
+
+
+def test_same_second_dir_reuse_is_still_evaluated(harness: _Harness) -> None:
+    # A run starting the same second as an existing dir reuses it (exist_ok);
+    # the run still produced/updated output, so it must be evaluated.
+    (harness.base / "20260101_000000" / "tasks").mkdir(parents=True)  # pre-existing, same name
+    rc = run_and_eval(["--agent", "cursor", "--mode", "single"])
+    assert harness.stages == ["run", "eval"]
+    assert rc == 0
+
+
+def test_stale_prior_run_without_new_output_is_not_evaluated(harness: _Harness) -> None:
+    # This run produces nothing (setup failure); an older prior run dir exists
+    # but must not be evaluated as if it were this run.
+    harness.produce_output = False
+    (harness.base / "20251231_120000" / "tasks").mkdir(parents=True)
+    harness.run_rc = 1
+    rc = run_and_eval(["--agent", "cursor", "--mode", "single"])
+    assert harness.stages == ["run"]
+    assert rc == 1
 
 
 def test_timestamp_resume_targets_that_run(harness: _Harness) -> None:

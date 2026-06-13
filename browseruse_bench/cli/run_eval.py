@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from datetime import datetime
 from pathlib import Path
 
 from browseruse_bench.cli import CONFIG_PATH
@@ -78,6 +79,11 @@ def _latest_run_dir(base: Path) -> str | None:
     return max(runs) if runs else None
 
 
+def _now_stamp() -> str:
+    """Current time as a run-dir-comparable YYYYMMDD_HHMMSS stamp."""
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
 def _invoke_cli(argv: list[str]) -> int:
     """Run a bubench subcommand, returning its exit code.
 
@@ -115,10 +121,15 @@ def run_and_eval(argv: list[str] | None = None) -> int:
     output_base = (
         _run_output_base(canonical_agent, data, known.split, model_id) if model_id else None
     )
-    pre_run = _latest_run_dir(output_base) if output_base else None
 
     # --skip-eval is ours; strip it before forwarding the rest to run.
     run_argv = ["run", *[a for a in (raw_args or []) if a != "--skip-eval"]]
+    # Captured before the run: run.py stamps its output dir with the wall-clock
+    # second at launch, which is >= this. A run dir whose name is >= start_stamp
+    # therefore belongs to this run (even on a same-second name collision with a
+    # prior run, which run.py reuses via exist_ok=True); an older name is a
+    # stale prior run we must not evaluate.
+    start_stamp = _now_stamp()
     logger.info("[run-eval] Stage 1/2: run")
     run_rc = _invoke_cli(run_argv)
 
@@ -137,7 +148,7 @@ def run_and_eval(argv: list[str] | None = None) -> int:
     run_ts = known.timestamp
     if not run_ts:
         post_run = _latest_run_dir(output_base)
-        run_ts = post_run if post_run and post_run != pre_run else None
+        run_ts = post_run if post_run and post_run >= start_stamp else None
     if not run_ts:
         logger.error(
             "[run-eval] Run produced no output directory (exit %d); skipping eval.", run_rc
