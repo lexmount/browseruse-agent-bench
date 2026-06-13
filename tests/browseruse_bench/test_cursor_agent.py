@@ -75,7 +75,7 @@ AGENT_CONFIG: dict[str, Any] = {
 
 class TestParseStream:
     def test_empty_input(self) -> None:
-        answer, items, usage, result_obj = _parse_stream([])
+        answer, items, usage, result_obj, reported = _parse_stream([])
         assert answer == ""
         assert items == []
         assert usage == {"input_tokens": 0, "cached_input_tokens": 0, "output_tokens": 0}
@@ -83,7 +83,7 @@ class TestParseStream:
 
     def test_last_assistant_message_wins(self) -> None:
         lines = [_assistant("first"), _assistant("final answer"), _result("first final answer")]
-        answer, _, usage, result_obj = _parse_stream(lines)
+        answer, _, usage, result_obj, _ = _parse_stream(lines)
         assert answer == "final answer"
         assert usage == {"input_tokens": 100, "cached_input_tokens": 40, "output_tokens": 20}
         assert result_obj["is_error"] is False
@@ -93,7 +93,7 @@ class TestParseStream:
             _mcp_started("c1", "browser_navigate", {"url": "https://example.com"}),
             _mcp_completed("c1", text="Page Title: Example Domain"),
         ]
-        _, items, _, _ = _parse_stream(lines)
+        _, items, _, _, _ = _parse_stream(lines)
         assert len(items) == 1
         item = items[0]
         assert item["type"] == "mcp_tool_call"
@@ -107,7 +107,7 @@ class TestParseStream:
             _mcp_started("c1", "browser_navigate", {"url": "https://example.com"}),
             _mcp_completed("c1", rejected="User rejected MCP: playwright-browser_navigate"),
         ]
-        _, items, _, _ = _parse_stream(lines)
+        _, items, _, _, _ = _parse_stream(lines)
         assert items[0]["status"] == "failed"
         assert "rejected" in items[0]["error"]["message"]
 
@@ -122,14 +122,23 @@ class TestParseStream:
                 "tool_call": {"shellToolCall": {"result": {"permissionDenied": {"command": "whoami"}}}},
             }),
         ]
-        _, items, _, _ = _parse_stream(lines)
+        _, items, _, _, _ = _parse_stream(lines)
         assert items[0]["type"] == "command_execution"
         assert items[0]["command"] == "whoami"
 
     def test_invalid_lines_skipped(self) -> None:
         lines = ["not json\n", "{broken\n", _assistant("ok")]
-        answer, _, _, _ = _parse_stream(lines)
+        answer, _, _, _, _ = _parse_stream(lines)
         assert answer == "ok"
+
+    def test_init_event_reports_resolved_model(self) -> None:
+        lines = [
+            _line({"type": "system", "subtype": "init", "model": "GPT-5.2 Medium"}),
+            _assistant("done"),
+            _result("done"),
+        ]
+        _, _, _, _, reported = _parse_stream(lines)
+        assert reported == "GPT-5.2 Medium"
 
 
 class TestCursorAgentRunTask:
@@ -156,6 +165,39 @@ class TestCursorAgentRunTask:
         assert result.metrics.usage.total_prompt_tokens == 100
         assert result.metrics.usage.total_prompt_cached_tokens == 40
         assert result.action_history == ["Navigate to https://example.com"]
+
+    def test_reported_model_recorded_in_metadata(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        stream = [
+            _line({"type": "system", "subtype": "init", "model": "Claude Fable 5 Thinking High"}),
+            *self._stream(),
+        ]
+        agent = CursorAgent()
+        monkeypatch.setattr(agent, "_run_subprocess", lambda *a, **kw: (0, stream, None))
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        # model_id stays the configured id (names the experiments dir); the
+        # actually-resolved Cursor model is traceable via agent_metadata.
+        assert result.model_id == "gpt-test"
+        assert result.agent_metadata.get("reported_model") == "Claude Fable 5 Thinking High"
+
+    def test_invalid_model_error_surfaced_from_stderr(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # cursor-agent rejects an unknown model on stderr and emits no result
+        # event; the run must fail with that message, not a generic one.
+        def fake_run(cmd: list[str], **kw: Any) -> tuple[int, list[str], None]:
+            (tmp_path / "stderr.txt").write_text(
+                "Cannot use this model: bogus-model. Available models: auto, gpt-5.2\n",
+                encoding="utf-8",
+            )
+            return 1, [], None
+
+        agent = CursorAgent()
+        monkeypatch.setattr(agent, "_run_subprocess", fake_run)
+        result = agent.run_task(TASK_INFO, {**AGENT_CONFIG, "model_id": "bogus-model"}, tmp_path)
+        assert result.env_status == "failed"
+        assert "Cannot use this model: bogus-model" in (result.error or "")
 
     def test_workspace_config_written(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

@@ -160,12 +160,28 @@ models:
     model_type: OPENAI
     model_id: gpt-5.5
     api_key: $OPENAI_API_KEY
-  # Cursor CLI model. Only supported by the cursor agent; model calls are
+  # Cursor CLI models. Only supported by the cursor agent; model calls are
   # routed through Cursor's backend, so auth is `cursor-agent login` or
-  # CURSOR_API_KEY (a Cursor key, not an OpenAI key).
+  # CURSOR_API_KEY (a Cursor key, not an OpenAI key). model_id must be a
+  # Cursor-hosted model id (run `cursor-agent --list-models`); there is no
+  # BYOK, so a proxy/OpenAI model id will be rejected. To test a model not
+  # listed here without adding an entry, pass it through directly, e.g.
+  # `bubench run --agent cursor --model claude-opus-4-8-high`.
   cursor:
     model_type: OPENAI
     model_id: gpt-5.2
+    api_key: $CURSOR_API_KEY
+  cursor-gpt-5.5:
+    model_type: OPENAI
+    model_id: gpt-5.5-high
+    api_key: $CURSOR_API_KEY
+  cursor-fable:
+    model_type: OPENAI
+    model_id: claude-fable-5-thinking-high
+    api_key: $CURSOR_API_KEY
+  cursor-opus:
+    model_type: OPENAI
+    model_id: claude-opus-4-8-high
     api_key: $CURSOR_API_KEY
   # OpenClaw CLI model. Only supported by the openclaw agent; the agent writes
   # a per-task OpenClaw provider config from these values (OpenAI-compatible

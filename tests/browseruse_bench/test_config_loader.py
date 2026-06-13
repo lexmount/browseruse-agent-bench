@@ -157,6 +157,40 @@ def _write_runtime_root_config(tmp_path: Path) -> Path:
     return runtime_config
 
 
+def test_resolve_agent_inline_config_passthrough_unknown_model_name() -> None:
+    # --model-name that is not a configured models entry is passed through as a
+    # literal model id; base runtime config comes from the agent's active model.
+    config = {
+        "default": {"model": "cursor", "browser": "lexmount"},
+        "models": {"cursor": {"model_id": "gpt-5.2", "api_key": "$CURSOR_API_KEY"}},
+        "browsers": {"lexmount": {"browser_id": "lexmount"}},
+        "agents": {"cursor": {"active_model": "cursor", "timeout": 600}},
+    }
+
+    inline = resolve_agent_inline_config(
+        "cursor", config, model_name="claude-fable-5-thinking-high"
+    )
+
+    assert inline is not None
+    # api_key/browser preserved from the base model; only model_id overridden.
+    assert inline["model_id"] == "claude-fable-5-thinking-high"
+    assert inline["api_key"] == "$CURSOR_API_KEY"
+    assert inline["browser_id"] == "lexmount"
+    assert inline["timeout"] == 600
+
+
+def test_resolve_agent_inline_config_passthrough_needs_a_base_model() -> None:
+    # Without an active/default model to seed the base config, an unknown
+    # --model-name still yields None (the missing-config error is preserved).
+    config = {
+        "models": {"cursor": {"model_id": "gpt-5.2"}},
+        "browsers": {"lexmount": {"browser_id": "lexmount"}},
+        "agents": {"cursor": {"timeout": 600}},
+    }
+
+    assert resolve_agent_inline_config("cursor", config, model_name="bogus") is None
+
+
 def test_resolve_agent_inline_config_uses_explicit_model_override(tmp_path: Path) -> None:
     config = load_config_file(_write_runtime_root_config(tmp_path))
 

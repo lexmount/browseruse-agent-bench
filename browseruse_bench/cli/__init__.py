@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import textwrap
 from typing import Any, Dict, List, Optional
 
@@ -107,6 +108,14 @@ def _build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
 
 @handle_cli_errors
 def main(argv: Optional[List[str]] = None) -> int:
+    cli_args = list(argv) if argv is not None else sys.argv[1:]
+    # run-eval chains `run` then `eval`; handled before argparse so the
+    # combined flag set is forwarded to each stage without re-declaring them.
+    if cli_args and cli_args[0] == "run-eval":
+        from browseruse_bench.cli.run_eval import run_and_eval
+
+        return run_and_eval(cli_args[1:])
+
     config = load_config_file(CONFIG_PATH)
     parser = _build_parser(config)
     args, extra = parser.parse_known_args(argv)

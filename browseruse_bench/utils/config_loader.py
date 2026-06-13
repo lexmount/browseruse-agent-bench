@@ -197,6 +197,25 @@ def _select_canonical(name: Any, mapping: Any) -> Any:
     return resolve_key_case_insensitive(name, mapping)
 
 
+def _model_passthrough(model_name: str | None, active_model: Any, shared_models: dict[str, Any]) -> str | None:
+    """Return an explicit --model that is not a configured models entry.
+
+    Lets CLI agents whose model is just a literal id (e.g. cursor) switch
+    models with ``--model <id>`` without adding a ``models.<id>`` entry: the
+    base runtime config still comes from the agent's active/default model
+    entry, only ``model_id`` is overridden. Returns None when ``model_name``
+    is absent or already resolves to a configured entry.
+    """
+    if not model_name or model_name in shared_models or active_model in shared_models:
+        return None
+    logger.warning(
+        "Model '%s' is not a configured models entry; passing it through as a literal "
+        "model id (base runtime config from the agent's active/default model).",
+        model_name,
+    )
+    return model_name
+
+
 def normalize_agent_name(agent: str, root_config: dict[str, Any]) -> str:
     """Normalize agent name to the canonical registry key, case-insensitively.
 
@@ -388,9 +407,17 @@ def resolve_agent_inline_config(
             or root_config.get("default", {}).get("browser_id"),
             shared_browsers,
         )
+        model_override = _model_passthrough(model_name, active_model, shared_models)
+        if model_override is not None:
+            active_model = _select_canonical(
+                agent_entry.get("active_model") or root_config.get("default", {}).get("model"),
+                shared_models,
+            )
         if not (active_model and active_model in shared_models):
             return None
         model_cfg = shared_models[active_model] or {}
+        if model_override is not None:
+            model_cfg = {**model_cfg, "model_id": model_override}
         browser_cfg = shared_browsers.get(active_browser, {}) if active_browser else {}
         if active_browser and active_browser not in shared_browsers:
             browser_cfg = {"browser_id": active_browser}

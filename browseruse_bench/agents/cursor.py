@@ -123,11 +123,14 @@ def _parse_stream(stdout_lines: list[str]) -> tuple[str, list[dict[str, Any]], d
     - *items*: completed tool calls normalized to the shared step-item shape.
     - *usage_totals*: token usage from the final ``result`` event.
     - *result_obj*: the final ``result`` event (empty when it never arrived).
+    - *reported_model*: the model Cursor actually resolved, from the init
+      event (e.g. "GPT-5.2 Medium"); empty when the init event never arrived.
     """
     answer = ""
     items: list[dict[str, Any]] = []
     usage_totals = {"input_tokens": 0, "cached_input_tokens": 0, "output_tokens": 0}
     result_obj: dict[str, Any] = {}
+    reported_model = ""
     pending: dict[str, dict[str, Any]] = {}
 
     for raw_line in stdout_lines:
@@ -139,7 +142,10 @@ def _parse_stream(stdout_lines: list[str]) -> tuple[str, list[dict[str, Any]], d
         except json.JSONDecodeError:
             continue
         event_type = obj.get("type")
-        if event_type == "assistant":
+        if event_type == "system" and obj.get("subtype") == "init":
+            if isinstance(obj.get("model"), str):
+                reported_model = obj["model"]
+        elif event_type == "assistant":
             text = _text_of_message(obj.get("message", {}))
             if text:
                 answer = text
@@ -156,7 +162,7 @@ def _parse_stream(stdout_lines: list[str]) -> tuple[str, list[dict[str, Any]], d
                     if isinstance(value, int | float):
                         usage_totals[dst_key] += int(value)
 
-    return answer, items, usage_totals, result_obj
+    return answer, items, usage_totals, result_obj, reported_model
 
 
 @register_agent
@@ -231,6 +237,16 @@ class CursorAgent(CLIAgent):
         prompt = task_info.get("prompt") or self.build_task_prompt(task_info)
         rules = agent_config.get("system_prompt") or DEFAULT_BROWSER_RULES
         model = agent_config.get("model_id") or agent_config.get("model", "gpt-5.2")
+        if model == "auto":
+            # 'auto' lets Cursor pick per turn, so the recorded model_id (and
+            # the experiments path / eval lookup) would not reflect the model
+            # actually used. Pin a concrete Cursor model id instead.
+            logger.warning(
+                "Cursor task %s uses model 'auto': the recorded model_id will not "
+                "reflect the model Cursor actually picks. Set a concrete Cursor "
+                "model id (see cursor-agent --list-models) for reproducible eval.",
+                task_id,
+            )
         timeout = self._resolve_timeout(task_id, agent_config)
 
         trajectory_dir = task_workspace / "trajectory"
@@ -366,7 +382,7 @@ class CursorAgent(CLIAgent):
         task_workspace: Path,
         trajectory_dir: Path,
     ) -> AgentResult:
-        answer, items, usage_totals, result_obj = _parse_stream(stdout_lines)
+        answer, items, usage_totals, result_obj, reported_model = _parse_stream(stdout_lines)
         if not answer and isinstance(result_obj.get("result"), str):
             answer = result_obj["result"].strip()
 
@@ -377,10 +393,13 @@ class CursorAgent(CLIAgent):
         )
         error_message = self._result_error(result_obj)
         # A normal run always ends with a terminal result event; exiting
-        # without one (e.g. MCP startup failure after a partial preamble)
-        # is a failure even when some assistant text was emitted.
+        # without one (e.g. an invalid model id, which cursor-agent prints to
+        # stderr and rejects, or an MCP startup failure) is a failure even
+        # when some assistant text was emitted.
         if not result_obj and not error_message:
-            error_message = "Cursor exited without a terminal result event"
+            error_message = self._stderr_error(task_workspace) or (
+                "Cursor exited without a terminal result event"
+            )
         if agent_done != "timeout" and error_message:
             env_status, agent_done = "failed", "error"
         if env_status == "failed" and not answer:
@@ -402,6 +421,13 @@ class CursorAgent(CLIAgent):
             total_tokens=total_tokens,
         ) if total_tokens else None
 
+        # Record the model Cursor actually resolved (e.g. "GPT-5.2 Medium") so a
+        # config model id that maps to an unexpected Cursor model is traceable;
+        # model_id stays the configured id that names the experiments dir.
+        agent_metadata = {"reported_model": reported_model} if reported_model else {}
+        if reported_model:
+            logger.info("Cursor task %s resolved model_id=%s to %s", task_id, model, reported_model)
+
         return AgentResult(
             task_id=task_id,
             timestamp=datetime.now(UTC),
@@ -413,6 +439,7 @@ class CursorAgent(CLIAgent):
             screenshots=saved_screenshots,
             model_id=model,
             metrics=AgentMetrics(end_to_end_ms=duration_ms, steps=steps, usage=usage),
+            agent_metadata=agent_metadata,
         )
 
     @staticmethod
@@ -423,6 +450,22 @@ class CursorAgent(CLIAgent):
         if result_obj.get("is_error") or result_obj.get("subtype") != "success":
             return str(result_obj.get("result") or "Cursor reported an error result")
         return None
+
+    @staticmethod
+    def _stderr_error(task_workspace: Path) -> str | None:
+        """Return a notable error line from stderr (e.g. an invalid model id).
+
+        cursor-agent prints 'Cannot use this model: ...' to stderr and exits
+        without a result event; surfacing it makes the failure self-explanatory.
+        """
+        stderr_file = task_workspace / "stderr.txt"
+        if not stderr_file.is_file():
+            return None
+        lines = [line.strip() for line in stderr_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+        for line in lines:
+            if "Cannot use this model" in line or "error" in line.lower():
+                return line[:500]
+        return lines[-1][:500] if lines else None
 
 
 def _stdout_hook(line: str) -> None:
