@@ -9,6 +9,14 @@ through (``--model <id>``) rather than configured, when ``--timestamp`` resumes
 an older run, or when some tasks failed (a completed run with task failures is
 still scored). Eval is skipped only when the run produced no output directory
 (a genuine setup/infra failure) or for ``--dry-run`` / ``--skip-eval``.
+
+Concurrency note: the run dir is identified by which dir under the
+agent/model output base was created or whose tasks/ mtime advanced during
+this invocation. If two run-eval processes for the *same* agent/data/model/
+split overlap in wall-clock time, both dirs look fresh and eval targets the
+newest — a known limitation. A fully concurrency-safe binding needs the run
+stage to emit its own output path (a run.py change); until then, give
+concurrent jobs distinct models/agents/splits, or pass ``--timestamp``.
 """
 
 from __future__ import annotations
@@ -49,6 +57,39 @@ def _shared_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", dest="dry_run", action="store_true")
     parser.add_argument("--skip-eval", dest="skip_eval", action="store_true")
     return parser
+
+
+# Eval-only options the run subparser rejects: strip them from the run stage
+# and route them to eval. (--data-source / --force-download are shared and
+# stay on both.)
+_EVAL_ONLY_VALUE_FLAGS = {
+    "--score-threshold", "--num-worker", "--api-key", "--base-url", "--eval-strategy",
+}
+_EVAL_ONLY_BOOL_FLAGS = {"--force-reeval"}
+
+
+def _partition_eval_only(args: list[str]) -> tuple[list[str], list[str]]:
+    """Split argv into (run-stage args, eval-only args run would reject)."""
+    run_args: list[str] = []
+    eval_only: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        key = arg.split("=", 1)[0]
+        if key in _EVAL_ONLY_VALUE_FLAGS:
+            if "=" in arg:
+                eval_only.append(arg)
+                i += 1
+            else:
+                eval_only.extend(args[i:i + 2])
+                i += 2
+        elif key in _EVAL_ONLY_BOOL_FLAGS:
+            eval_only.append(arg)
+            i += 1
+        else:
+            run_args.append(arg)
+            i += 1
+    return run_args, eval_only
 
 
 def _source_config(root_config: dict, agent_config: str | None) -> dict:
@@ -136,8 +177,11 @@ def run_and_eval(argv: list[str] | None = None) -> int:
         _run_output_base(canonical_agent, data, known.split, model_id) if model_id else None
     )
 
-    # --skip-eval is ours; strip it before forwarding the rest to run.
-    run_argv = ["run", *[a for a in (raw_args or []) if a != "--skip-eval"]]
+    # --skip-eval is ours; eval-only options the run parser rejects are routed
+    # to the eval stage; the rest is forwarded to run verbatim.
+    forwardable = [a for a in (raw_args or []) if a != "--skip-eval"]
+    run_only, eval_only = _partition_eval_only(forwardable)
+    run_argv = ["run", *run_only]
     # Snapshot run dirs before the run so the one this invocation created or
     # updated can be identified by mtime afterwards.
     pre_mtimes = _run_dir_mtimes(output_base) if output_base else {}
@@ -175,5 +219,6 @@ def run_and_eval(argv: list[str] | None = None) -> int:
         eval_argv += ["--data-source", known.data_source]
     if known.force_download:
         eval_argv += ["--force-download"]
+    eval_argv += eval_only
     logger.info("[run-eval] Stage 2/2: eval (model_id=%s, timestamp=%s)", model_id, run_ts)
     return _invoke_cli(eval_argv)

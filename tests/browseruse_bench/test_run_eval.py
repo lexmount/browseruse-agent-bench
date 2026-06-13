@@ -167,6 +167,24 @@ def test_forwards_data_source_and_force_download_to_eval(harness: _Harness) -> N
     assert ev[ev.index("--agent-config") + 1] == "/app/config.yaml"
 
 
+def test_eval_only_flags_routed_to_eval_not_run(harness: _Harness) -> None:
+    # run's parser rejects eval-only options, so they must be stripped from the
+    # run stage and appended to eval.
+    run_and_eval([
+        "--agent", "cursor", "--mode", "single",
+        "--score-threshold", "0.7", "--num-worker", "4", "--force-reeval",
+    ])
+    run_call = harness.calls[0]
+    ev = harness.eval_call()
+    for flag in ("--score-threshold", "--num-worker", "--force-reeval"):
+        assert flag not in run_call
+        assert flag in ev
+    assert ev[ev.index("--score-threshold") + 1] == "0.7"
+    assert ev[ev.index("--num-worker") + 1] == "4"
+    # shared run flags stay on the run stage
+    assert "--mode" in run_call
+
+
 def test_defaults_agent_and_data_from_config(harness: _Harness) -> None:
     run_and_eval(["--mode", "single"])
     ev = harness.eval_call()
