@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 from contextlib import suppress
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -559,6 +559,30 @@ def configure_run_parser(parser: argparse.ArgumentParser, config: dict[str, Any]
     )
 
 
+def _claim_unique_run_dir(output_base: Path, max_seconds: int = 600) -> Path:
+    """Atomically create a fresh ``YYYYMMDD_HHMMSS`` run dir under *output_base*.
+
+    Two concurrent runs with identical parameters would otherwise resolve the
+    same second-resolution timestamp and, with exist_ok, interleave their
+    output in one directory. ``mkdir(exist_ok=False)`` is atomic, so on a
+    collision we advance to the next whole second and retry. The name stays a
+    strict ``YYYYMMDD_HHMMSS`` so downstream tools (eval find-latest,
+    leaderboard, ``--timestamp`` resume) keep recognizing it.
+    """
+    base = datetime.now()
+    for offset in range(max_seconds):
+        candidate = output_base / (base + timedelta(seconds=offset)).strftime("%Y%m%d_%H%M%S")
+        try:
+            candidate.mkdir(parents=True, exist_ok=False)
+            return candidate
+        except FileExistsError:
+            continue
+    raise SystemExit(
+        f"[FAILED] Could not allocate a unique run output directory under {output_base} "
+        f"after {max_seconds} attempts (too many concurrent identical runs)."
+    )
+
+
 def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args: argparse.Namespace) -> int:
     """
     Run agent using subprocess with process isolation per task.
@@ -610,11 +634,11 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
         if not output_dir.exists():
             raise SystemExit(f"[FAILED] Specified timestamp directory does not exist: {output_dir}")
         logger.info("Resuming/Running in existing timestamp directory: %s", timestamp)
+        output_dir.mkdir(parents=True, exist_ok=True)
     else:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = output_base / timestamp
+        output_dir = _claim_unique_run_dir(output_base)
+        timestamp = output_dir.name
 
-    output_dir.mkdir(parents=True, exist_ok=True)
     add_file_handler(logger, output_dir / "run.log", format_mode="plain")
 
     # Emit the resolved output dir for run-eval to bind to deterministically
