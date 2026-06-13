@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from browseruse_bench.browsers import login_contexts as lc
 from browseruse_bench.cli.run import (
     _canonicalize_cli_browser_id,
+    _claim_unique_run_dir,
     resolve_lexmount_routing_for_task,
 )
 
@@ -146,3 +148,23 @@ def test_canonicalize_cli_browser_id_falls_back_to_backend_registry() -> None:
     assert _canonicalize_cli_browser_id("LEXMOUNT", {"browsers": None}) == "lexmount"
     assert _canonicalize_cli_browser_id(None, {}) is None
     assert _canonicalize_cli_browser_id("no-such-backend", {}) == "no-such-backend"
+
+
+def test_claim_unique_run_dir_avoids_collision(tmp_path: Path) -> None:
+    # Concurrent runs with identical params must get distinct dirs, never one
+    # shared (which would interleave their output).
+    base = tmp_path / "model"
+    first = _claim_unique_run_dir(base)
+    second = _claim_unique_run_dir(base)
+    third = _claim_unique_run_dir(base)
+    names = {first.name, second.name, third.name}
+    assert len(names) == 3  # all distinct
+    for d in (first, second, third):
+        assert d.is_dir()
+        assert re.match(r"^\d{8}_\d{6}$", d.name)  # strict format preserved
+
+
+def test_claim_unique_run_dir_exhaustion_raises(tmp_path: Path) -> None:
+    base = tmp_path / "model"
+    with pytest.raises(SystemExit, match="unique run output directory"):
+        _claim_unique_run_dir(base, max_seconds=0)

@@ -81,6 +81,15 @@ export PATH="$HOME/.local/bin:$PATH"          # ensure on PATH for the bench pro
 - Override the executable path with `agents.cursor.cursor_agent_command` if
   `~/.local/bin` is not on the service PATH.
 - Browser: Playwright MCP via `npx`; managed CDP backends attach automatically.
+- **Model selection**: `models.cursor.model_id` must be a Cursor-hosted model
+  id (`cursor-agent --list-models`) — no BYOK, a proxy/OpenAI id is rejected.
+  To test models, either point at a preset entry
+  (`bubench run --agent cursor --model cursor-fable`) or pass a raw Cursor
+  model id through directly without a config entry
+  (`bubench run --agent cursor --model claude-opus-4-8-high`). The model
+  Cursor actually resolves (e.g. "GPT-5.2 Medium") is recorded under
+  `agent_metadata.reported_model` in each result; avoid `model_id: auto`
+  (non-deterministic, breaks the experiments-dir / eval model match).
 
 ### openclaw (verified: openclaw 2026.5.22)
 
