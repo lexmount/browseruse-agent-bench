@@ -302,3 +302,39 @@ def test_default_agent_falls_back_to_agent_tars_like_run_parser(
     run_and_eval(["--mode", "single"])
     ev = h.eval_call()
     assert ev[ev.index("--agent") + 1] == "Agent-TARS"
+
+
+def test_report_output_dir_writes_repo_relative_path(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The produced dir is reported to the caller as a repo-relative path, and
+    # the flag is consumed (never forwarded to run, never sent to eval).
+    monkeypatch.setattr(run_eval_mod, "REPO_ROOT", tmp_path)
+    report = tmp_path / "outdir.txt"
+    run_and_eval(["--agent", "cursor", "--mode", "single", "--report-output-dir", str(report)])
+    assert report.read_text().strip() == "exp/gpt-5.2/20260101_000000"
+    assert "--report-output-dir" not in harness.calls[0]  # not forwarded to run
+    assert "--report-output-dir" not in harness.eval_call()  # not sent to eval
+
+
+def test_report_output_dir_written_on_partial_failure(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(run_eval_mod, "REPO_ROOT", tmp_path)
+    harness.run_rc = 1  # some tasks failed, but a dir was produced
+    report = tmp_path / "outdir.txt"
+    run_and_eval(["--agent", "cursor", "--mode", "first_n", "--count", "3",
+                  "--report-output-dir", str(report)])
+    assert report.read_text().strip() == "exp/gpt-5.2/20260101_000000"
+
+
+def test_report_output_dir_not_written_when_no_output(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(run_eval_mod, "REPO_ROOT", tmp_path)
+    harness.produce_output = False
+    harness.emit_marker = False
+    harness.run_rc = 1
+    report = tmp_path / "outdir.txt"
+    run_and_eval(["--agent", "cursor", "--mode", "single", "--report-output-dir", str(report)])
+    assert not report.exists()
