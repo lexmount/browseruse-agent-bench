@@ -16,139 +16,110 @@ models:
     model_type: BROWSER_USE
     model_id: bu-2-0
     api_key: $BROWSER_USE_API_KEY
+
+  # OpenAI GPT family through the OpenAI-compatible gateway.
   gpt-5.4:
     model_type: OPENAI
     model_provider: openai
     model_id: gpt-5.4
     api_key: $OPENAI_API_KEY
     base_url: $OPENAI_BASE_URL
-  qwen-plus:
+    dont_force_structured_output: false
+    add_schema_to_system_prompt: true
+
+  # Anthropic Claude family, proxied as an OpenAI-compatible model.
+  claude-opus-4.8:
     model_type: OPENAI
     model_provider: openai
-    model_id: qwen3.5-plus
+    model_id: openrouter/claude-opus-4.8
     api_key: $OPENAI_API_KEY
     base_url: $OPENAI_BASE_URL
+    frequency_penalty: null
     dont_force_structured_output: true
     add_schema_to_system_prompt: true
-    max_tokens: 16000
-    temperature: 0.0
-    request_timeout: 600
-  kimi-k2.5:
+    claude_thinking: true
+    claude_reasoning_effort: high
+
+  # Google Gemini family.
+  gemini-3.5-flash:
     model_type: OPENAI
-    model_id: kimi-k2.5
+    model_provider: openai
+    model_id: gemini-3.5-flash
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+    frequency_penalty: null
+    dont_force_structured_output: false
+    add_schema_to_system_prompt: true
+
+  # Qwen family.
+  qwen3.7-max:
+    model_type: OPENAI
+    model_provider: openai
+    model_id: qwen3.7-max
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+    frequency_penalty: null
+    dont_force_structured_output: false
+    add_schema_to_system_prompt: true
+
+  # Moonshot Kimi family.
+  kimi-k2.6:
+    model_type: OPENAI
+    model_provider: openai
+    model_id: kimi-k2.6
     api_key: $OPENAI_API_KEY
     base_url: $OPENAI_BASE_URL
     temperature: 1.0
     frequency_penalty: 0
     remove_min_items_from_schema: true
     remove_defaults_from_schema: true
-    add_schema_to_system_prompt: true
-  minimax-m2.5:
-    model_type: OPENAI
-    model_id: MiniMax-M2.5
-    api_key: $OPENAI_API_KEY
-    base_url: $OPENAI_BASE_URL
     dont_force_structured_output: true
     add_schema_to_system_prompt: true
-  doubao-seed:
-    model_type: AZURE
+
+  # MiniMax family.
+  minimax-m3:
+    model_type: OPENAI
+    model_provider: openai
+    model_id: MiniMax-M3
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+    frequency_penalty: null
+    dont_force_structured_output: false
+    add_schema_to_system_prompt: true
+
+  # ByteDance Doubao family.
+  doubao-seed-pro:
+    model_type: OPENAI
+    model_provider: openai
     model_id: doubao-seed-2-0-pro
     api_key: $OPENAI_API_KEY
     base_url: $OPENAI_BASE_URL
-  claude-sonnet:
-    model_type: OPENAI
-    model_id: claude-sonnet-4-6
-    api_key: $OPENAI_API_KEY
-    base_url: $OPENAI_BASE_URL
+    frequency_penalty: null
     dont_force_structured_output: true
     add_schema_to_system_prompt: true
-  gemini-2.5-pro:
+
+  # Zhipu GLM.
+  glm-5.1:
     model_type: OPENAI
-    model_id: gemini-2.5-pro
+    model_provider: openai
+    model_id: glm-5.1
     api_key: $OPENAI_API_KEY
     base_url: $OPENAI_BASE_URL
     frequency_penalty: null
-  gpt-5-mini:
-    model_type: OPENAI
-    model_id: gpt-5-mini
-    api_key: $OPENAI_API_KEY
-    base_url: $OPENAI_BASE_URL
-  gemini-3-pro-preview:
-    model_type: OPENAI
-    model_id: gemini-3.1-pro-preview
-    api_key: $OPENAI_API_KEY
-    base_url: $OPENAI_BASE_URL
-    frequency_penalty: null
-  gemini:
-    model_type: OPENAI
-    model_provider: openai
-    model_id: gemini-3.1-pro-preview
-    api_key: $OPENAI_API_KEY
-    base_url: $OPENAI_BASE_URL
-    supports_vision: true
-    max_tokens: 16000
-    temperature: 0.0
-    request_timeout: 600
-  gpt:
-    model_type: OPENAI
-    model_provider: openai
-    model_id: gpt-5.4
-    api_key: $OPENAI_API_KEY
-    base_url: $OPENAI_BASE_URL
-    supports_vision: true
-    temperature: 1.0
-    max_tokens: 16000
-    request_timeout: 600
-  claude:
-    model_type: OPENAI
-    model_provider: openai
-    model_id: dmx-claude-sonnet-4-6
-    api_key: $OPENAI_API_KEY
-    base_url: $OPENAI_BASE_URL
-    supports_vision: true
-    max_tokens: 16000
-    temperature: 0.0
-    request_timeout: 600
-  minimax:
-    model_type: OPENAI
-    model_provider: openai
-    model_id: MiniMax-M2.5
-    api_key: $OPENAI_API_KEY
-    base_url: $OPENAI_BASE_URL
-    supports_vision: true
-    max_tokens: 16000
-    temperature: 0.0
-    request_timeout: 600
-  kimi:
-    model_type: OPENAI
-    model_provider: openai
-    model_id: kimi-k2.5
-    api_key: $OPENAI_API_KEY
-    base_url: $OPENAI_BASE_URL
-    supports_vision: false
-    temperature: 1.0
-    frequency_penalty: 0
-    remove_min_items_from_schema: true
-    remove_defaults_from_schema: true
+    dont_force_structured_output: false
     add_schema_to_system_prompt: true
-    max_tokens: 16000
-    request_timeout: 600
-  glm-5:
+
+  # DeepSeek family.
+  deepseek-v4-pro:
     model_type: OPENAI
     model_provider: openai
-    model_id: glm-5
+    model_id: deepseek-v4-pro
     api_key: $OPENAI_API_KEY
     base_url: $OPENAI_BASE_URL
-    supports_vision: true
-    max_tokens: 16000
-    temperature: 0.0
-    request_timeout: 600
-  sonnet:
-    model_id: claude-sonnet-4-6
-    api_key: $ANTHROPIC_API_KEY
-  opus:
-    model_id: claude-opus-4-6
-    api_key: $ANTHROPIC_API_KEY
+    frequency_penalty: null
+    dont_force_structured_output: false
+    add_schema_to_system_prompt: true
+
   openrouter:
     model_type: OPENROUTER
     model_id: openai/gpt-5.4
@@ -165,7 +136,7 @@ models:
     model_id: gpt-5.4
     api_key: $OPENAI_API_KEY
     base_url: $OPENAI_BASE_URL
-  # Cursor CLI models. Only supported by the cursor agent; model calls are
+  # Cursor CLI model. Only supported by the cursor agent; model calls are
   # routed through Cursor's backend, so auth is `cursor-agent login` or
   # CURSOR_API_KEY (a Cursor key, not an OpenAI key). model_id must be a
   # Cursor-hosted model id (run `cursor-agent --list-models`); there is no
@@ -175,18 +146,6 @@ models:
   cursor:
     model_type: OPENAI
     model_id: gpt-5.2
-    api_key: $CURSOR_API_KEY
-  cursor-gpt-5.5:
-    model_type: OPENAI
-    model_id: gpt-5.5-high
-    api_key: $CURSOR_API_KEY
-  cursor-fable:
-    model_type: OPENAI
-    model_id: claude-fable-5-thinking-high
-    api_key: $CURSOR_API_KEY
-  cursor-opus:
-    model_type: OPENAI
-    model_id: claude-opus-4-8-high
     api_key: $CURSOR_API_KEY
   # OpenClaw CLI model. Only supported by the openclaw agent; the agent writes
   # a per-task OpenClaw provider config from these values (OpenAI-compatible
@@ -202,6 +161,23 @@ browsers:
     lexmount_browser_mode: normal
     lexmount_api_key: $LEXMOUNT_API_KEY
     lexmount_project_id: $LEXMOUNT_PROJECT_ID
+    # lexmount_base_url: $LEXMOUNT_BASE_URL
+    # Optional per-region profiles. Keys match task.website_region and are used
+    # for routing sessions and saved login contexts.
+    lexmount_profiles:
+      zh:
+        api_key: $LEXMOUNT_API_KEY_ZH
+        project_id: $LEXMOUNT_PROJECT_ID_ZH
+        base_url: $LEXMOUNT_BASE_URL_ZH
+      en:
+        api_key: $LEXMOUNT_API_KEY_EN
+        project_id: $LEXMOUNT_PROJECT_ID_EN
+        base_url: $LEXMOUNT_BASE_URL_EN
+    # Optional proxy for lexmount sessions.
+    # lexmount_proxy_server: http://1.2.3.4:8080
+    # lexmount_proxy_type: external
+    # lexmount_proxy_username: your_username
+    # lexmount_proxy_password: your_password
   local:
     browser_id: local
     headless: false
@@ -263,9 +239,8 @@ agents:
     # Set database_string only when you want a managed/persistent Skyvern database.
     # database_string: postgresql+psycopg://skyvern@localhost/skyvern
   claude-code:
-    # claude-code needs an Anthropic model (api_key=$ANTHROPIC_API_KEY); without
-    # active_model it would inherit default.model (an OpenAI entry) and fail auth.
-    active_model: sonnet
+    # Override the global default model so claude-code uses the Claude example.
+    active_model: claude-opus-4.8
     active_browser: lexmount
     max_turns: 50
     timeout: 300
@@ -308,7 +283,7 @@ eval:
   max_tries: 5
   api_max_images: 50
   detail: high
-  max_tokens: 512
+  max_tokens: 4096
 leaderboard:
   default_timeout_seconds: 300
   regenerate_timeout_seconds: 300
