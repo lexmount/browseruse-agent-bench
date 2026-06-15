@@ -15,7 +15,7 @@ popups, dynamic content, flaky pages, and different browser environments.
 browseruse-agent-bench is our attempt to make that question runnable. It is a multi-agent browser
 evaluation framework with local and cloud browser backend support, trajectory artifacts, cost and
 latency accounting, and a reviewable result submission workflow. Its default public dataset,
-LexBench-Browser, contains 210 no-login tasks across 107 websites.
+LexBench-Browser, contains 208 no-login tasks across 107 websites.
 
 ## Why We Built It
 
@@ -33,15 +33,15 @@ submit enough metadata for maintainers to review and rerun the result.
 
 The LexBench-Browser v1.0 public dataset snapshot includes:
 
-- 210 tasks
+- 208 tasks
 - 107 distinct websites
-- 137 Chinese-language tasks and 73 English-language tasks
-- 92 global split tasks and 118 Lexmount-region split tasks
+- 135 Chinese-language tasks and 73 English-language tasks
+- 90 global split tasks and 118 Lexmount-region split tasks
 - no-login tasks only
 - task-level reference steps, key points, common mistakes, scoring items, and robustness tags
 
-The tasks cover e-commerce, video platforms, tools and education, finance and gaming, social and
-lifestyle, and general web workflows.
+The tasks cover commerce, media and entertainment, education and research, finance, gaming,
+local lifestyle, productivity tools, safety, and social/community workflows.
 
 ## What the Benchmark Tries to Expose
 

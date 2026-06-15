@@ -29,8 +29,8 @@
     "success_rate": 0.0,
     "average_steps": 0.0,
     "average_end_to_end_seconds": 0.0,
-    "total_tasks": 210,
-    "accounted_tasks": 210
+    "total_tasks": 208,
+    "accounted_tasks": 208
   },
   "artifacts": {
     "run_directory": "experiments/LexBench-Browser/All/example-agent/gpt-4.1/20260101_120000",

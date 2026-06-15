@@ -50,7 +50,7 @@ class TestBenchmarkLoading:
         global_ids = {task["id"] for task in global_tasks}
 
         assert len(lexmount_tasks) == 118
-        assert len(global_tasks) == 92
+        assert len(global_tasks) == 90
         assert lexmount_ids.isdisjoint(global_ids)
         assert lexmount_ids | global_ids == all_ids
 

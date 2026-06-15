@@ -14,7 +14,7 @@ We support running Skyvern in LexBench-Browser and would like to invite an offic
 submission from your team or community.
 
 browseruse-agent-bench is a reproducible browser-agent benchmark framework. LexBench-Browser is
-its default public dataset, with 210 no-login tasks across 107 websites. The framework records
+its default public dataset, with 208 no-login tasks across 107 websites. The framework records
 success rate, task-level artifacts, steps, latency, token/cost metrics, model settings, and
 browser backend.
 

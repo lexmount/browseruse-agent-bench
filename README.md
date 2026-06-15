@@ -23,7 +23,7 @@ Together they make external results easy to run, compare, cite, and submit back.
 
 | What you can do | Why it matters |
 |-----------------|----------------|
-| Run **LexBench-Browser: 210 public tasks across 107 real websites** | Test browser agents on long-tail multilingual workflows beyond toy pages |
+| Run **LexBench-Browser: 208 public tasks across 107 real websites** | Test browser agents on long-tail multilingual workflows beyond toy pages |
 | Compare **Agent × Model × Browser × Eval** | Separate agent quality from model choice, browser backend, and judge strategy |
 | Inspect leaderboard, cost, latency, token usage, and trajectories | Debug failures instead of only reporting a final score |
 | Submit agents, dataset tasks, and reproducible results | Turn forks and PRs into visible benchmark contributions |
@@ -36,8 +36,8 @@ Together they make external results easy to run, compare, cite, and submit back.
 **Supported Datasets**
 
 - [x] **LexBench-Browser** — Browser-agent dataset covering e-commerce, social, academic, financial, and other mainstream Chinese/English websites (v1.0, 2026-04-30)
-  - `All` (210, no login required)
-  - `lexmount` (118, mainland-accessible websites) / `global` (92, international websites)
+  - `All` (208, no login required)
+  - `lexmount` (118, mainland-accessible websites) / `global` (90, international websites)
   - Hugging Face: [Lexmount/LexBench-Browser](https://huggingface.co/datasets/Lexmount/LexBench-Browser)
 - [x] **Online-Mind2Web** — Real website interaction tasks
   - `All` (300) / `Hard` (hard subset)
@@ -60,7 +60,7 @@ Together they make external results easy to run, compare, cite, and submit back.
 
 ## News
 
-- **[2026.04.30]** 🎉 **browseruse-agent-bench v1.0** — initial open-source release. The LexBench-Browser dataset v1.0 ships 210 public tasks across 107 distinct websites with a 6-category × 16-tag robustness label system; reference integrations cover browser-use, skyvern, Agent-TARS and deepbrowse.
+- **[2026.04.30]** 🎉 **browseruse-agent-bench v1.0** — initial open-source release. The LexBench-Browser dataset v1.0 ships 208 public tasks across 107 distinct websites with a 6-category × 16-tag robustness label system; reference integrations cover browser-use, skyvern, Agent-TARS and deepbrowse.
 
 ## Quickstart
 

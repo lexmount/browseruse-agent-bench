@@ -23,7 +23,7 @@
 
 | 你可以做什么 | 为什么重要 |
 | ------------ | ---------- |
-| 运行 **LexBench-Browser：210 个公开任务，覆盖 107 个真实网站** | 在长尾、多语言真实网页工作流上测试浏览器 Agent |
+| 运行 **LexBench-Browser：208 个公开任务，覆盖 107 个真实网站** | 在长尾、多语言真实网页工作流上测试浏览器 Agent |
 | 比较 **Agent × Model × Browser × Eval** | 区分 Agent 能力、模型选择、浏览器后端和评测策略的影响 |
 | 查看排行榜、成本、延迟、Token 使用量和轨迹 | 不只看最终分数，也能定位失败原因 |
 | 提交 Agent、数据集任务和可复现实验结果 | 让 fork 和 PR 直接变成可见的 benchmark 贡献 |
@@ -35,8 +35,8 @@
 **支持的数据集**
 
 - **LexBench-Browser** — 浏览器 Agent 数据集，覆盖电商、社交、学术、金融等主流中英文网站（v1.0，2026-04-30）
-  - `All`（210，无需登录）
-  - `lexmount`（118，国内可访问网站）/ `global`（92，国外网站）
+  - `All`（208，无需登录）
+  - `lexmount`（118，国内可访问网站）/ `global`（90，国外网站）
   - Hugging Face：[Lexmount/LexBench-Browser](https://huggingface.co/datasets/Lexmount/LexBench-Browser)
 - **Online-Mind2Web** — 真实网站交互任务
   - `All`（300）/ `Hard`（困难子集）
@@ -60,7 +60,7 @@
 
 ## 新闻
 
-- **[2026.04.30]** 🎉 **browseruse-agent-bench v1.0** —— 首个开源版本发布。LexBench-Browser 数据集 v1.0 包含 210 个公开任务，覆盖 107 个真实网站，搭配 6 大类 / 16 个标签的鲁棒性标签体系；参考集成覆盖 browser-use、skyvern、Agent-TARS、deepbrowse。
+- **[2026.04.30]** 🎉 **browseruse-agent-bench v1.0** —— 首个开源版本发布。LexBench-Browser 数据集 v1.0 包含 208 个公开任务，覆盖 107 个真实网站，搭配 6 大类 / 16 个标签的鲁棒性标签体系；参考集成覆盖 browser-use、skyvern、Agent-TARS、deepbrowse。
 
 ## 快速开始
 

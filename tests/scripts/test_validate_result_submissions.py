@@ -42,8 +42,8 @@ def _valid_submission() -> dict:
             "success_rate": 0.5,
             "average_steps": 12.3,
             "average_end_to_end_seconds": 90.0,
-            "total_tasks": 210,
-            "accounted_tasks": 210,
+            "total_tasks": 208,
+            "accounted_tasks": 208,
         },
         "artifacts": {
             "run_directory": "experiments/LexBench-Browser/All/example-agent/gpt-4.1/20260101_120000",

@@ -13,7 +13,7 @@
   <text x="120" y="360" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="800" fill="#1D4ED8">LexBench-Browser dataset</text>
 
   <rect x="468" y="324" width="178" height="54" rx="27" fill="#F0FDF4" stroke="#BBF7D0"/>
-  <text x="500" y="360" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="800" fill="#15803D">210 tasks</text>
+  <text x="500" y="360" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="800" fill="#15803D">208 tasks</text>
 
   <rect x="676" y="324" width="198" height="54" rx="27" fill="#FFF7ED" stroke="#FED7AA"/>
   <text x="708" y="360" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="800" fill="#C2410C">107 websites</text>

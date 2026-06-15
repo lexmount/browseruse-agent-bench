@@ -12,7 +12,7 @@ also be downloaded from Hugging Face.
 | Attribute | Value |
 |-----------|-------|
 | Version | v1.0 (2026-04-30) |
-| Total tasks | 210 |
+| Total tasks | 208 |
 | Languages | zh / en |
 | Target websites | 50+ mainstream Chinese/English websites |
 
@@ -40,9 +40,9 @@ bubench eval --agent browser-use --data LexBench-Browser --model-id bu-2-0
 
 | Split | File (relative to `browseruse_bench/data/LexBench-Browser/`) | Tasks | Description |
 |-------|--------------------------------------------------------------|-------|-------------|
-| All | `task.jsonl` | 210 | Full dataset; no login required. |
+| All | `task.jsonl` | 208 | Full dataset; no login required. |
 | lexmount | `task_lexmount.jsonl` | 118 | Tasks whose target websites are accessible from the mainland Lexmount environment. |
-| global | `task_global.jsonl` | 92 | Tasks whose target websites require the international/global Lexmount environment. |
+| global | `task_global.jsonl` | 90 | Tasks whose target websites require the international/global Lexmount environment. |
 
 `All` is the default split. Split paths are defined in `browseruse_bench/data/LexBench-Browser/data_info.json`.
 
@@ -55,7 +55,7 @@ bubench eval --agent browser-use --data LexBench-Browser --model-id bu-2-0
   "query": "Task description",
   "task_type": "T1",
   "reasoning_type": "multi_step",
-  "domain": "ecommerce",
+  "domain": "commerce",
   "difficulty": "medium",
   "login_required": false,
   "login_type": "",
@@ -81,7 +81,7 @@ Use `login_required`, `domain`, or `risk_control` to slice the data.
 ### Field Descriptions
 
 - **reasoning_type**: `single_step` | `multi_step` | `cross_platform` | `deep_analysis`
-- **domain**: `ecommerce` | `social_lifestyle` | `video_platform` | `tools_education` | `finance_gaming` | `general`
+- **domain**: `commerce` | `education_research` | `finance` | `gaming` | `local_lifestyle` | `media_entertainment` | `productivity_tools` | `safety` | `social_community`
 - **difficulty**: `easy` | `medium` | `hard`
 - **login_type**: `account_password` | `phone_verification` | `qr_code` | `login_captcha`
 - **risk_control_types**: `captcha` | `slider_verification` | `anti_bot` | `rate_limiting`

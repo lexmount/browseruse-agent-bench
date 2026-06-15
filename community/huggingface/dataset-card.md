@@ -16,12 +16,21 @@ tags:
   - benchmark
   - evaluation
   - automation
+configs:
+  - config_name: LexBench-Browser
+    data_files:
+      - split: train
+        path: LexBench-Browser/task.jsonl
+      - split: global
+        path: LexBench-Browser/task_global.jsonl
+      - split: lexmount
+        path: LexBench-Browser/task_lexmount.jsonl
 ---
 
 # LexBench-Browser
 
 LexBench-Browser is a public browser-agent dataset for evaluating agents on real-web workflows.
-The v1.0 snapshot contains 210 no-login tasks across 107 distinct websites, with Chinese and
+The v1.0 snapshot contains 208 no-login tasks across 107 distinct websites, with Chinese and
 English instructions, task-level reference steps, key points, common mistakes, scoring rubrics,
 and robustness tags.
 
@@ -53,6 +62,7 @@ LexBench-Browser/
 |-- task.jsonl
 |-- task_global.jsonl
 |-- task_lexmount.jsonl
+|-- task_sample50.jsonl
 `-- VERSION_HISTORY.md
 ```
 
@@ -60,9 +70,10 @@ Splits:
 
 | Split | File | Tasks | Notes |
 | --- | --- | ---: | --- |
-| `All` | `task.jsonl` | 210 | Default public v1.0 split |
-| `global` | `task_global.jsonl` | 92 | Global-region task subset |
+| `All` | `task.jsonl` | 208 | Default public v1.0 split |
+| `global` | `task_global.jsonl` | 90 | Global-region task subset |
 | `lexmount` | `task_lexmount.jsonl` | 118 | Lexmount-region task subset |
+| `sample50` | `task_sample50.jsonl` | 50 | Small sample subset |
 
 ## Fields
 
@@ -89,14 +100,14 @@ Language:
 
 | Language | Tasks |
 | --- | ---: |
-| `zh` | 137 |
+| `zh` | 135 |
 | `en` | 73 |
 
 Reasoning type:
 
 | Reasoning type | Tasks |
 | --- | ---: |
-| `single_step` | 117 |
+| `single_step` | 115 |
 | `multi_step` | 70 |
 | `deep_analysis` | 23 |
 
@@ -104,13 +115,15 @@ Domain:
 
 | Domain | Tasks |
 | --- | ---: |
-| `finance_gaming` | 44 |
-| `video_platform` | 42 |
-| `tools_education` | 40 |
-| `general` | 34 |
-| `social_lifestyle` | 26 |
-| `ecommerce` | 23 |
-| `gaming` | 1 |
+| `media_entertainment` | 48 |
+| `education_research` | 42 |
+| `gaming` | 25 |
+| `commerce` | 23 |
+| `safety` | 23 |
+| `local_lifestyle` | 19 |
+| `finance` | 17 |
+| `productivity_tools` | 6 |
+| `social_community` | 5 |
 
 ## Robustness Tags
 

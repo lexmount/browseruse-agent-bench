@@ -2,16 +2,15 @@
   "default_split": "All",
   "split": {
     "All": "task.jsonl",
-    "task_all": "task_all.jsonl",
     "lexmount": "task_lexmount.jsonl",
     "global": "task_global.jsonl",
     "sample50": "task_sample50.jsonl"
   },
   "version_info": {
     "LexBench-Browser": {
-      "total_tasks": 210,
+      "total_tasks": 208,
       "version": "1.0",
-      "description": "v1.0 - Initial public release: 210 tasks across 107 distinct websites, no login required. Slice the data via the `login_required`, `domain`, or `risk_control` fields.",
+      "description": "v1.0 - Public release: 208 tasks across 107 distinct websites, no login required. Slice the data via the `login_required`, `domain`, or `risk_control` fields.",
       "robustness_tags": {
         "categories": 6,
         "tag_count": 16,
