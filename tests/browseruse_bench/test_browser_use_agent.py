@@ -240,6 +240,111 @@ def test_patch_output_model_json_parser_preserves_validation_kwargs_for_wrapped_
     assert parsed.count == 1
 
 
+def test_strip_numeric_bounds_removes_nested_schema_limits() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "count": {"type": "integer", "minimum": 0, "maximum": 5},
+            "items": {
+                "type": "array",
+                "items": {"type": "number", "exclusiveMinimum": 1, "exclusiveMaximum": 10},
+            },
+        },
+    }
+
+    browser_use_module._strip_numeric_bounds(schema)
+
+    assert schema == {
+        "type": "object",
+        "properties": {
+            "count": {"type": "integer"},
+            "items": {"type": "array", "items": {"type": "number"}},
+        },
+    }
+
+
+def test_enable_claude_thinking_injects_reasoning_params() -> None:
+    captured: dict[str, Any] = {}
+
+    class FakeCompletions:
+        async def create(self, *args: Any, **kwargs: Any) -> str:
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return "ok"
+
+    class FakeChat:
+        def __init__(self) -> None:
+            self.completions = FakeCompletions()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.chat = FakeChat()
+
+    class FakeLLM:
+        def get_client(self) -> FakeClient:
+            return FakeClient()
+
+    llm = FakeLLM()
+    browser_use_module._enable_claude_thinking(llm, "medium")
+
+    result = asyncio.run(
+        llm.get_client().chat.completions.create(
+            messages=[],
+            extra_body={"allowed_openai_params": ["temperature"]},
+        )
+    )
+
+    assert result == "ok"
+    assert captured["kwargs"]["extra_body"] == {
+        "reasoning_effort": "medium",
+        "allowed_openai_params": ["temperature", "reasoning_effort"],
+    }
+
+
+def test_create_llm_enables_claude_schema_and_thinking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class FakeLLM:
+        def __init__(self, **kwargs: Any) -> None:
+            captured["kwargs"] = kwargs
+
+    def fake_patch_schema_optimizer() -> None:
+        captured["schema_patched"] = True
+
+    def fake_enable_thinking(llm: Any, reasoning_effort: str) -> None:
+        captured["thinking_llm"] = llm
+        captured["reasoning_effort"] = reasoning_effort
+
+    monkeypatch.setattr(browser_use_module, "ChatOpenAI", FakeLLM)
+    monkeypatch.setattr(
+        browser_use_module,
+        "_patch_schema_optimizer_for_claude",
+        fake_patch_schema_optimizer,
+    )
+    monkeypatch.setattr(browser_use_module, "_enable_claude_thinking", fake_enable_thinking)
+
+    config_info: dict[str, Any] = {}
+    llm = BrowserUseAgent()._create_llm(
+        "OPENAI",
+        "openrouter/claude-opus-4.8",
+        {
+            "api_key": "key",
+            "base_url": "https://gateway.example/v1",
+            "claude_reasoning_effort": "medium",
+        },
+        config_info,
+    )
+
+    assert captured["schema_patched"] is True
+    assert captured["thinking_llm"] is llm
+    assert captured["reasoning_effort"] == "medium"
+    assert captured["kwargs"]["model"] == "openrouter/claude-opus-4.8"
+    assert config_info["claude_schema_numeric_bounds_stripped"] is True
+    assert config_info["claude_reasoning_effort"] == "medium"
+
+
 def test_create_browser_instance_rejects_cloud_transport_for_unknown_backend() -> None:
     with pytest.raises(ValueError, match="Unsupported browser backend for browser-use agent"):
         BrowserUseAgent._create_browser_instance(

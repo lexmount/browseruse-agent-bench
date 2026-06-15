@@ -28,6 +28,7 @@ from browser_use import ChatGoogle as BrowserUseSDKChatGoogle
 from browser_use import ChatOpenAI as BrowserUseSDKChatOpenAI
 from browser_use.browser import session as browser_use_session_module
 from browser_use.browser.profile import ProxySettings as BrowserUseProxySettings
+from browser_use.llm.schema import SchemaOptimizer
 from pydantic import BaseModel as _PydanticBaseModel
 
 from browseruse_bench.agents.base import BaseAgent
@@ -177,6 +178,66 @@ def _patch_agent_output_json_parsers(agent: Any) -> None:
     for attr in ("AgentOutput", "DoneAgentOutput"):
         for model in _iter_output_model_bases(getattr(agent, attr, None)):
             _patch_output_model_json_parser(model)
+
+
+_PATCHED_SCHEMA_OPTIMIZER_ATTR = "_browseruse_bench_strip_numeric_bounds_patched"
+_VALID_REASONING_EFFORTS = ("minimal", "low", "medium", "high")
+
+
+def _is_claude_model(model_id: str | None) -> bool:
+    return "claude" in (model_id or "").lower()
+
+
+def _strip_numeric_bounds(obj: Any) -> None:
+    """Recursively drop numeric-range keywords from a JSON schema in place."""
+    if isinstance(obj, dict):
+        for key in ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"):
+            obj.pop(key, None)
+        for value in obj.values():
+            _strip_numeric_bounds(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            _strip_numeric_bounds(item)
+
+
+def _patch_schema_optimizer_for_claude() -> None:
+    """Make browser-use structured-output schemas compatible with Claude validators."""
+    if getattr(SchemaOptimizer, _PATCHED_SCHEMA_OPTIMIZER_ATTR, False):
+        return
+
+    original = SchemaOptimizer.create_optimized_json_schema
+
+    def patched(model: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        schema = original(model, *args, **kwargs)
+        _strip_numeric_bounds(schema)
+        return schema
+
+    SchemaOptimizer.create_optimized_json_schema = staticmethod(patched)  # type: ignore[method-assign]
+    setattr(SchemaOptimizer, _PATCHED_SCHEMA_OPTIMIZER_ATTR, True)
+
+
+def _enable_claude_thinking(llm: Any, reasoning_effort: str) -> None:
+    """Inject Claude reasoning params for OpenAI-compatible gateways."""
+    original_get_client = llm.get_client
+
+    def get_client_with_thinking() -> Any:
+        client = original_get_client()
+        original_create = client.chat.completions.create
+
+        async def create_with_thinking(*args: Any, **kwargs: Any) -> Any:
+            extra_body = dict(kwargs.get("extra_body") or {})
+            extra_body.setdefault("reasoning_effort", reasoning_effort)
+            allowed = list(extra_body.get("allowed_openai_params") or [])
+            if "reasoning_effort" not in allowed:
+                allowed.append("reasoning_effort")
+            extra_body["allowed_openai_params"] = allowed
+            kwargs["extra_body"] = extra_body
+            return await original_create(*args, **kwargs)
+
+        client.chat.completions.create = create_with_thinking  # type: ignore[method-assign]
+        return client
+
+    llm.get_client = get_client_with_thinking  # type: ignore[method-assign]
 
 
 def _get_config_value(agent_config: dict[str, Any], *keys: str, default: Any = None) -> Any:
@@ -609,9 +670,39 @@ class BrowserUseAgent(BaseAgent):
         if model_type not in provider_classes:
             raise ValueError(f"Invalid model type: {model_type}")
 
+        is_claude = _is_claude_model(model_id)
+        if is_claude:
+            _patch_schema_optimizer_for_claude()
+            config_info["claude_schema_numeric_bounds_stripped"] = True
+
         llm_class = provider_classes[model_type]
         kwargs = provider_builders[model_type](model_id, agent_config, config_info)
-        return llm_class(**kwargs)
+        llm = llm_class(**kwargs)
+
+        if is_claude and model_type in ("OPENAI", "AZURE"):
+            thinking_enabled = _get_config_value(
+                agent_config,
+                "claude_thinking",
+                "CLAUDE_THINKING",
+                default=True,
+            )
+            if thinking_enabled:
+                reasoning_effort = _get_config_value(
+                    agent_config,
+                    "claude_reasoning_effort",
+                    "CLAUDE_REASONING_EFFORT",
+                    default="high",
+                )
+                if reasoning_effort not in _VALID_REASONING_EFFORTS:
+                    logger.warning(
+                        "Invalid claude_reasoning_effort=%r; falling back to 'high'",
+                        reasoning_effort,
+                    )
+                    reasoning_effort = "high"
+                _enable_claude_thinking(llm, reasoning_effort)
+                config_info["claude_reasoning_effort"] = reasoning_effort
+
+        return llm
 
     @staticmethod
     def _build_browser_use_kwargs(
@@ -653,7 +744,8 @@ class BrowserUseAgent(BaseAgent):
         if "frequency_penalty" in agent_config:
             frequency_penalty = agent_config["frequency_penalty"]
             openai_kwargs["frequency_penalty"] = frequency_penalty
-            config_info["frequency_penalty"] = frequency_penalty
+            if frequency_penalty is not None:
+                config_info["frequency_penalty"] = frequency_penalty
         if agent_config.get("max_tokens") is not None:
             openai_kwargs["max_completion_tokens"] = agent_config["max_tokens"]
             config_info["max_tokens"] = agent_config["max_tokens"]
@@ -693,7 +785,8 @@ class BrowserUseAgent(BaseAgent):
         if "frequency_penalty" in agent_config:
             frequency_penalty = agent_config["frequency_penalty"]
             azure_kwargs["frequency_penalty"] = frequency_penalty
-            config_info["frequency_penalty"] = frequency_penalty
+            if frequency_penalty is not None:
+                config_info["frequency_penalty"] = frequency_penalty
         if agent_config.get("max_tokens") is not None:
             azure_kwargs["max_completion_tokens"] = agent_config["max_tokens"]
             config_info["max_tokens"] = agent_config["max_tokens"]
