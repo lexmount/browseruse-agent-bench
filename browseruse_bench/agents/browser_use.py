@@ -145,7 +145,9 @@ def _patch_output_model_json_parser(output_model: type[Any] | None) -> None:
     original_validate_json = output_model.model_validate_json.__func__
 
     @classmethod
-    def robust_model_validate_json(cls: type[Any], json_data: Any, *args: Any, **kwargs: Any) -> Any:
+    def robust_model_validate_json(
+        cls: type[Any], json_data: Any, *args: Any, **kwargs: Any
+    ) -> Any:
         try:
             return original_validate_json(cls, json_data, *args, **kwargs)
         except Exception:
@@ -247,6 +249,37 @@ def _get_config_value(agent_config: dict[str, Any], *keys: str, default: Any = N
     return default
 
 
+def _get_bool_config(
+    agent_config: dict[str, Any], *keys: str, default: bool | None = None
+) -> bool | None:
+    raw = _get_config_value(agent_config, *keys, default=None)
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, int | float):
+        return bool(raw)
+    if isinstance(raw, str):
+        normalized = raw.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off"}:
+            return False
+    return bool(raw)
+
+
+def _get_int_config(
+    agent_config: dict[str, Any], *keys: str, default: int | None = None
+) -> int | None:
+    raw = _get_config_value(agent_config, *keys, default=None)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
 @contextmanager
 def _browser_use_cdp_connect_timeout(timeout_seconds: float) -> Iterator[None]:
     """Override browser-use SDK's hard-coded 15s CDP connect guard."""
@@ -319,7 +352,9 @@ def _history_reached_max_steps(
 ) -> bool:
     if steps_count >= max_steps:
         return True
-    return any("maximum steps" in error.lower() or "max steps" in error.lower() for error in history_errors)
+    return any(
+        "maximum steps" in error.lower() or "max steps" in error.lower() for error in history_errors
+    )
 
 
 def _unfinished_history_error(
@@ -352,7 +387,9 @@ class BrowserUseAgent(BaseAgent):
         """Execute a browser automation task using browser-use."""
         timeout = self.get_timeout(agent_config, 300)
         flash_mode = _get_config_value(agent_config, "flash_mode", "FLASH_MODE", default=True)
-        browser_id = _get_config_value(agent_config, "browser_id", "BROWSER_ID", default="Chrome-Local")
+        browser_id = _get_config_value(
+            agent_config, "browser_id", "BROWSER_ID", default="Chrome-Local"
+        )
 
         with open_browser_session(
             browser_id=browser_id,
@@ -448,17 +485,83 @@ class BrowserUseAgent(BaseAgent):
         # Read parameters from configuration dictionary
         model_type: str = _get_config_value(agent_config, "model_type", "MODEL_TYPE", default="")
         model_id: str = _get_config_value(agent_config, "model_id", "MODEL_ID", default="")
-        browser_id = _get_config_value(agent_config, "browser_id", "BROWSER_ID", default="Chrome-Local")
+        browser_id = _get_config_value(
+            agent_config, "browser_id", "BROWSER_ID", default="Chrome-Local"
+        )
         use_vision = _get_config_value(agent_config, "use_vision", "USE_VISION", default=False)
         max_steps = self.get_max_steps(agent_config, 40)
-        save_api_logs = _get_config_value(agent_config, "save_api_logs", "SAVE_API_LOGS", default=True)
+        step_timeout = _get_int_config(agent_config, "step_timeout", "STEP_TIMEOUT", default=None)
+        save_api_logs = _get_config_value(
+            agent_config, "save_api_logs", "SAVE_API_LOGS", default=True
+        )
+        runtime_assist_kwargs = {
+            "enable_api_tool": _get_bool_config(
+                agent_config, "enable_api_tool", "ENABLE_API_TOOL", default=False
+            ),
+            "auto_enable_api_tool": _get_bool_config(
+                agent_config, "auto_enable_api_tool", "AUTO_ENABLE_API_TOOL", default=True
+            ),
+            "enable_known_adapters": _get_bool_config(
+                agent_config, "enable_known_adapters", "ENABLE_KNOWN_ADAPTERS", default=False
+            ),
+            "adapters_dir": _get_config_value(
+                agent_config, "adapters_dir", "ADAPTERS_DIR", default=None
+            ),
+            "adapter_catalog_path": _get_config_value(
+                agent_config, "adapter_catalog_path", "ADAPTER_CATALOG_PATH", default=None
+            ),
+            "known_adapters": _get_config_value(
+                agent_config, "known_adapters", "KNOWN_ADAPTERS", default=None
+            ),
+            "enable_site_hints": _get_bool_config(
+                agent_config, "enable_site_hints", "ENABLE_SITE_HINTS", default=False
+            ),
+            "site_hints_path": _get_config_value(
+                agent_config, "site_hints_path", "SITE_HINTS_PATH", default=None
+            ),
+            "capture_browser_state_screenshots": _get_bool_config(
+                agent_config,
+                "capture_browser_state_screenshots",
+                "CAPTURE_BROWSER_STATE_SCREENSHOTS",
+                default=None,
+            ),
+            "use_lightweight_browser_state": _get_bool_config(
+                agent_config,
+                "use_lightweight_browser_state",
+                "USE_LIGHTWEIGHT_BROWSER_STATE",
+                default=None,
+            ),
+            "enable_page_program": _get_bool_config(
+                agent_config, "enable_page_program", "ENABLE_PAGE_PROGRAM", default=None
+            ),
+            "prefer_code_extraction": _get_bool_config(
+                agent_config, "prefer_code_extraction", "PREFER_CODE_EXTRACTION", default=None
+            ),
+            "force_page_program": _get_bool_config(
+                agent_config, "force_page_program", "FORCE_PAGE_PROGRAM", default=False
+            ),
+            "compact_api_response_content": _get_bool_config(
+                agent_config,
+                "compact_api_response_content",
+                "COMPACT_API_RESPONSE_CONTENT",
+                default=None,
+            ),
+            "skip_navigation_health_check": _get_bool_config(
+                agent_config,
+                "skip_navigation_health_check",
+                "SKIP_NAVIGATION_HEALTH_CHECK",
+                default=None,
+            ),
+        }
 
         config_info = {
             "timeout_seconds": timeout,
             "flash_mode": flash_mode,
             "use_vision": use_vision,
             "max_steps": max_steps,
+            "step_timeout": step_timeout,
             "save_api_logs": save_api_logs,
+            "runtime_assist": runtime_assist_kwargs,
         }
 
         # Initialize LLM based on model type, this is a BU specific implementation, and different
@@ -472,6 +575,9 @@ class BrowserUseAgent(BaseAgent):
 
         start_time = time.time()
         error_msg = None
+        agent_kwargs = dict(runtime_assist_kwargs)
+        if step_timeout is not None:
+            agent_kwargs["step_timeout"] = step_timeout
 
         try:
             agent = Agent(
@@ -482,6 +588,7 @@ class BrowserUseAgent(BaseAgent):
                 flash_mode=flash_mode,
                 use_vision=use_vision,
                 use_judge=_get_config_value(agent_config, "use_judge", "USE_JUDGE", default=False),
+                **agent_kwargs,
             )
             _patch_agent_output_json_parsers(agent)
 
@@ -652,7 +759,9 @@ class BrowserUseAgent(BaseAgent):
     ) -> Any:
         # TODO Why not Claude?
         """Create LLM instance based on model type."""
-        provider_builders: dict[str, Callable[[str, dict[str, Any], dict[str, Any]], dict[str, Any]]] = {
+        provider_builders: dict[
+            str, Callable[[str, dict[str, Any], dict[str, Any]], dict[str, Any]]
+        ] = {
             "BROWSER_USE": self._build_browser_use_kwargs,
             "OPENAI": self._build_openai_kwargs,
             "AZURE": self._build_azure_kwargs,
@@ -806,7 +915,11 @@ class BrowserUseAgent(BaseAgent):
         config_info: dict[str, Any],
     ) -> dict[str, Any]:
         google_config: dict[str, Any] = {}
-        gemini_thinking_models = {"gemini-3-flash-preview", "gemini-3-pro-preview", "gemini-3.1-pro-preview"}
+        gemini_thinking_models = {
+            "gemini-3-flash-preview",
+            "gemini-3-pro-preview",
+            "gemini-3.1-pro-preview",
+        }
 
         if model_id in gemini_thinking_models:
             thinking_level = agent_config.get("gemini3_thinking_level")
