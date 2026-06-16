@@ -35,10 +35,15 @@ def _install_fake_lexmount_sdk(
         def create(
             self,
             browser_mode: str,
+            official_proxy: bool = False,
             proxy: str | None = None,
             context: dict | None = None,
         ) -> FakeSession:
-            state["create_calls"].append({"browser_mode": browser_mode, "context": context})
+            state["create_calls"].append({
+                "browser_mode": browser_mode,
+                "official_proxy": official_proxy,
+                "context": context,
+            })
             return FakeSession()
 
         def delete(self, session_id: str) -> None:
@@ -133,6 +138,7 @@ def test_lexmount_backend_forks_login_context_when_env_set(
     assert state["create_calls"] == [
         {
             "browser_mode": "normal",
+            "official_proxy": False,
             "context": {"id": "forked_ctx_9876", "mode": "read_write"},
         }
     ]
@@ -158,7 +164,9 @@ def test_lexmount_backend_skips_fork_when_env_unset(monkeypatch: pytest.MonkeyPa
     session_context = backend.open(agent_name="browser-use", agent_config={})
 
     assert state["fork_calls"] == []
-    assert state["create_calls"] == [{"browser_mode": "normal", "context": None}]
+    assert state["create_calls"] == [
+        {"browser_mode": "normal", "official_proxy": False, "context": None}
+    ]
     assert "forked_context_id" not in session_context.metadata
     backend.close(session_context)
     assert state["ctx_delete_calls"] == []
@@ -270,3 +278,55 @@ def test_lexmount_profile_partial_override(monkeypatch: pytest.MonkeyPatch) -> N
         "project_id": "P-default",
         "base_url": "https://en.example",
     }
+
+
+def test_lexmount_official_proxy_defaults_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lexmount sessions default to official_proxy=False unless config opts in."""
+    state = _install_fake_lexmount_sdk(monkeypatch)
+    backend = LexmountBackend("lexmount")
+
+    backend.open(agent_name="browser-use", agent_config={})
+
+    assert state["create_calls"] == [
+        {"browser_mode": "normal", "official_proxy": False, "context": None}
+    ]
+
+
+def test_lexmount_official_proxy_from_top_level_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """lexmount_official_proxy controls the SDK sessions.create official_proxy kwarg."""
+    state = _install_fake_lexmount_sdk(monkeypatch)
+    backend = LexmountBackend("lexmount")
+
+    backend.open(
+        agent_name="browser-use",
+        agent_config={"lexmount_official_proxy": True},
+    )
+
+    assert state["create_calls"] == [
+        {"browser_mode": "normal", "official_proxy": True, "context": None}
+    ]
+
+
+def test_lexmount_official_proxy_profile_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Per-profile official_proxy can override the top-level lexmount_official_proxy."""
+    state = _install_fake_lexmount_sdk(monkeypatch)
+    monkeypatch.setenv(lexmount_module.LEXMOUNT_PROFILE_ENV_KEY, "zh")
+    backend = LexmountBackend("lexmount")
+
+    backend.open(
+        agent_name="browser-use",
+        agent_config={
+            "lexmount_official_proxy": False,
+            "lexmount_profiles": {
+                "zh": {"official_proxy": True},
+            },
+        },
+    )
+
+    assert state["create_calls"] == [
+        {"browser_mode": "normal", "official_proxy": True, "context": None}
+    ]

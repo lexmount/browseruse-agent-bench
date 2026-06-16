@@ -55,6 +55,145 @@ def _make_args(**overrides) -> object:
     )
 
 
+def test_profile_keys_for_run_reads_flat_lexmount_profiles() -> None:
+    """bubench login add should discover profiles from new-style browsers.lexmount config."""
+    args = _make_args(profile=None)
+    cfg = {
+        "browsers": {
+            "lexmount": {
+                "browser_id": "lexmount",
+                "lexmount_profiles": {
+                    "zh": {"api_key": "K-zh"},
+                    "en": {"api_key": "K-en"},
+                },
+            }
+        }
+    }
+
+    assert login_cli._profile_keys_for_run(args, cfg) == ["zh", "en"]
+
+
+def test_resolve_creds_uses_flat_lexmount_official_proxy_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """lexmount_official_proxy in browsers.lexmount flows into login session creation config."""
+    monkeypatch.delenv("LEXMOUNT_API_KEY", raising=False)
+    monkeypatch.delenv("LEXMOUNT_API", raising=False)
+    monkeypatch.delenv("LEXMOUNT_PROJECT_ID", raising=False)
+    monkeypatch.delenv("LEXMOUNT_BASE_URL", raising=False)
+    monkeypatch.delenv("LEXMOUNT_OFFICIAL_PROXY", raising=False)
+    args = _make_args()
+    cfg = {
+        "browsers": {
+            "lexmount": {
+                "browser_id": "lexmount",
+                "lexmount_api_key": "K-flat",
+                "lexmount_project_id": "P-flat",
+                "lexmount_base_url": "https://flat.example",
+                "lexmount_official_proxy": True,
+            }
+        }
+    }
+
+    creds = login_cli._resolve_creds_for_profile(args, cfg, profile_key=None)
+
+    assert creds == {
+        "api_key": "K-flat",
+        "project_id": "P-flat",
+        "base_url": "https://flat.example",
+        "verify_ssl": True,
+        "official_proxy": True,
+    }
+
+
+def test_resolve_creds_official_proxy_defaults_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """official_proxy defaults to false when config and env do not opt in."""
+    monkeypatch.delenv("LEXMOUNT_OFFICIAL_PROXY", raising=False)
+    args = _make_args()
+    cfg = {
+        "browsers": {
+            "lexmount": {
+                "browser_id": "lexmount",
+                "lexmount_api_key": "K-flat",
+                "lexmount_project_id": "P-flat",
+            }
+        }
+    }
+
+    creds = login_cli._resolve_creds_for_profile(args, cfg, profile_key=None)
+
+    assert creds is not None
+    assert creds["official_proxy"] is False
+
+
+def test_login_one_profile_passes_official_proxy_to_session_create(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The login flow passes the resolved official_proxy value into Lexmount sessions.create."""
+    captured: dict = {}
+
+    class _Context:
+        id = "ctx_login"
+
+    class _Session:
+        session_id = "session_login"
+        id = session_id
+        inspect_url = "https://inspect.example"
+
+        def close(self) -> None:
+            captured["closed"] = True
+
+    class _Contexts:
+        def create(self, metadata):
+            captured["metadata"] = metadata
+            return _Context()
+
+    class _Sessions:
+        def create(self, **kwargs):
+            captured["session_create"] = kwargs
+            return _Session()
+
+        def delete(self, session_id):
+            captured["deleted_session"] = session_id
+
+    class _Client:
+        contexts = _Contexts()
+        sessions = _Sessions()
+
+    monkeypatch.setattr(login_cli, "_build_client", lambda *args: _Client())
+    monkeypatch.setattr(login_cli, "_get_page_target", lambda client, session: None)
+    monkeypatch.setattr(login_cli, "_wait_for_user_login", lambda *args: None)
+    monkeypatch.setattr(login_cli, "_persist_login_entry", lambda *args: None)
+    args = _make_args(browser_mode="normal")
+    cfg = {
+        "browsers": {
+            "lexmount": {
+                "browser_id": "lexmount",
+                "lexmount_api_key": "K-flat",
+                "lexmount_project_id": "P-flat",
+                "lexmount_official_proxy": True,
+            }
+        }
+    }
+
+    rc = login_cli._login_one_profile(
+        args,
+        cfg,
+        site="example",
+        website="https://example.com",
+        profile_key=None,
+    )
+
+    assert rc == 0
+    assert captured["session_create"] == {
+        "context": {"id": "ctx_login", "mode": "read_write"},
+        "browser_mode": "normal",
+        "official_proxy": True,
+    }
+
+
 def test_delete_remote_entry_uses_per_profile_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

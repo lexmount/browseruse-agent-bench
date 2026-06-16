@@ -36,7 +36,7 @@ dependencies = [
     "fastapi",
     "uvicorn",
     "psycopg2-binary>=2.9.9",
-    "lexmount>=0.4.8",
+    "lexmount==0.5.12",
     "lexbench-sdk>=0.1.0",
     "python-socks",
     "pandas>=2.1.3",

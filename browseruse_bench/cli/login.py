@@ -57,9 +57,22 @@ def _resolve_credential(cli_value: str | None, *env_keys: str) -> str | None:
 def _as_bool(flag: bool | None, env_val: str | None, default: bool = True) -> bool:
     if flag is not None:
         return flag
-    if env_val is None:
+    return _coerce_bool(env_val, default=default)
+
+
+def _coerce_bool(value: Any, *, default: bool) -> bool:
+    if value in (None, ""):
         return default
-    return env_val.strip().lower() not in ("false", "0", "no", "off")
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in ("false", "0", "no", "off")
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return None
 
 
 def configure_login_parser(parser: argparse.ArgumentParser, _config: dict[str, Any]) -> None:
@@ -218,13 +231,7 @@ def _profile_keys_for_run(args: argparse.Namespace, _config: dict[str, Any]) -> 
         return [str(args.profile).strip().lower()]
     keys: list[str] = []
     seen: set[str] = set()
-    agents_cfg = (_config or {}).get("agents") or {}
-    if not isinstance(agents_cfg, dict):
-        return keys
-    for agent_cfg in agents_cfg.values():
-        if not isinstance(agent_cfg, dict):
-            continue
-        browser = agent_cfg.get("browser") if isinstance(agent_cfg, dict) else None
+    for browser in _iter_lexmount_browser_configs(_config):
         profiles = normalize_profile_keys(
             browser.get("lexmount_profiles") if isinstance(browser, dict) else None
         )
@@ -235,18 +242,41 @@ def _profile_keys_for_run(args: argparse.Namespace, _config: dict[str, Any]) -> 
     return keys
 
 
+def _iter_lexmount_browser_configs(_config: dict[str, Any]) -> list[dict[str, Any]]:
+    configs: list[dict[str, Any]] = []
+    browsers_cfg = (_config or {}).get("browsers") or {}
+    if isinstance(browsers_cfg, dict):
+        preferred = browsers_cfg.get("lexmount")
+        if isinstance(preferred, dict):
+            configs.append(preferred)
+        for key, browser in browsers_cfg.items():
+            if key == "lexmount" or not isinstance(browser, dict):
+                continue
+            if str(browser.get("browser_id") or "").lower() == "lexmount":
+                configs.append(browser)
+
+    agents_cfg = (_config or {}).get("agents") or {}
+    if isinstance(agents_cfg, dict):
+        for agent_cfg in agents_cfg.values():
+            if not isinstance(agent_cfg, dict):
+                continue
+            browser = agent_cfg.get("browser")
+            if isinstance(browser, dict):
+                configs.append(browser)
+    return configs
+
+
+def _lexmount_browser_config(_config: dict[str, Any]) -> dict[str, Any]:
+    configs = _iter_lexmount_browser_configs(_config)
+    return configs[0] if configs else {}
+
+
 def _profile_cfg_from_config(_config: dict[str, Any], profile_key: str) -> dict[str, Any]:
     """Find the per-profile dict in any agent's `lexmount_profiles`, case-insensitive."""
     if not profile_key:
         return {}
     norm_key = profile_key.strip().lower()
-    agents_cfg = (_config or {}).get("agents") or {}
-    if not isinstance(agents_cfg, dict):
-        return {}
-    for agent_cfg in agents_cfg.values():
-        if not isinstance(agent_cfg, dict):
-            continue
-        browser = agent_cfg.get("browser")
+    for browser in _iter_lexmount_browser_configs(_config):
         profiles = normalize_profile_keys(
             browser.get("lexmount_profiles") if isinstance(browser, dict) else None
         )
@@ -262,6 +292,7 @@ def _resolve_creds_for_profile(
 ) -> dict[str, Any] | None:
     """Resolve creds for one profile. Returns None when api_key or project_id missing."""
     cfg_profile = _profile_cfg_from_config(_config, profile_key) if profile_key else {}
+    browser_cfg = _lexmount_browser_config(_config)
     upper = (profile_key or "").upper().replace("-", "_")
     api_env = (f"LEXMOUNT_API_KEY_{upper}", f"LEXMOUNT_API_{upper}") if upper else ()
     project_env = (f"LEXMOUNT_PROJECT_ID_{upper}",) if upper else ()
@@ -270,28 +301,40 @@ def _resolve_creds_for_profile(
         args.api_key
         or _resolve_credential(None, *api_env)
         or cfg_profile.get("api_key")
+        or browser_cfg.get("lexmount_api_key")
         or _resolve_credential(None, "LEXMOUNT_API_KEY", "LEXMOUNT_API")
     )
     project_id = (
         args.project_id
         or _resolve_credential(None, *project_env)
         or cfg_profile.get("project_id")
+        or browser_cfg.get("lexmount_project_id")
         or _resolve_credential(None, "LEXMOUNT_PROJECT_ID")
     )
     base_url = (
         args.base_url
         or _resolve_credential(None, *base_env)
         or cfg_profile.get("base_url")
+        or browser_cfg.get("lexmount_base_url")
         or _resolve_credential(None, "LEXMOUNT_BASE_URL")
     )
     if not api_key or not project_id:
         return None
     verify_ssl = _as_bool(args.verify_ssl, os.getenv("LEXMOUNT_VERIFY_SSL"), default=True)
+    official_proxy = _coerce_bool(
+        _first_present(
+            cfg_profile.get("official_proxy"),
+            browser_cfg.get("lexmount_official_proxy"),
+            os.getenv("LEXMOUNT_OFFICIAL_PROXY"),
+        ),
+        default=False,
+    )
     return {
         "api_key": api_key,
         "project_id": project_id,
         "base_url": base_url,
         "verify_ssl": verify_ssl,
+        "official_proxy": official_proxy,
     }
 
 
@@ -401,6 +444,7 @@ def _login_one_profile(
         session = client.sessions.create(
             context={"id": base_ctx_id, "mode": "read_write"},
             browser_mode=args.browser_mode,
+            official_proxy=creds["official_proxy"],
         )
         target = _get_page_target(client, session)
         page_ws_url = (

@@ -159,6 +159,7 @@ browsers:
   lexmount:
     browser_id: lexmount
     lexmount_browser_mode: normal
+    lexmount_official_proxy: false
     lexmount_api_key: $LEXMOUNT_API_KEY
     lexmount_project_id: $LEXMOUNT_PROJECT_ID
     # lexmount_base_url: $LEXMOUNT_BASE_URL

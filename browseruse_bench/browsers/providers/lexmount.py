@@ -35,6 +35,7 @@ _PROFILE_FIELDS = (
     "base_url",
     "verify_ssl",
     "browser_mode",
+    "official_proxy",
     "proxy_server",
     "proxy_type",
     "proxy_username",
@@ -79,6 +80,14 @@ def _resolve_lexmount_creds(agent_config: dict[str, Any]) -> dict[str, Any]:
     return resolved
 
 
+def _coerce_bool(value: Any, *, default: bool) -> bool:
+    if value in (None, ""):
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in ("false", "0", "no", "off")
+
+
 _ANSI_GREEN = "\033[32m"
 _ANSI_RESET = "\033[0m"
 
@@ -120,8 +129,8 @@ class LexmountBackend(BrowserBackend):
         base_url = creds.get("base_url") or None
         if base_url and "://" not in base_url:
             base_url = "https://" + base_url
-        verify_ssl_raw = creds.get("verify_ssl")
-        verify_ssl = False if str(verify_ssl_raw).lower() in ("false", "0", "no") else True
+        verify_ssl = _coerce_bool(creds.get("verify_ssl"), default=True)
+        official_proxy = _coerce_bool(creds.get("official_proxy"), default=False)
         lexmount_client = Lexmount(
             **({} if not api_key else {"api_key": api_key}),
             **({} if not project_id else {"project_id": project_id}),
@@ -181,6 +190,7 @@ class LexmountBackend(BrowserBackend):
         try:
             session = lexmount_client.sessions.create(
                 browser_mode=mode,
+                official_proxy=official_proxy,
                 proxy=proxy,
                 **({"context": session_context_arg} if session_context_arg else {}),
             )
