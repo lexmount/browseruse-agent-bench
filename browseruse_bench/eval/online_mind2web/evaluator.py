@@ -228,6 +228,33 @@ class OnlineMind2WebEvaluator(BaseEvaluator):
     name: ClassVar[str] = "Online-Mind2Web"
     default_mode: ClassVar[str] = "WebJudge_Online_Mind2Web_eval"
 
+    def __init__(self, args, model):
+        super().__init__(args, model)
+        self._engine: Optional[OpenaiEngine] = None
+
+    def _engine_kwargs(self) -> Dict[str, Any]:
+        kwargs: Dict[str, Any] = {
+            "model": self.args.model,
+            "api_key": self.args.api_key,
+            "base_url": self.args.base_url,
+        }
+        if self.args.temperature is not None:
+            kwargs["temperature"] = self.args.temperature
+        return kwargs
+
+    @property
+    def engine(self) -> OpenaiEngine:
+        """List-returning engine required by the WebJudge pipeline.
+
+        WebJudge indexes ``model.generate(...)[0]`` expecting ``list[str]`` (the
+        OpenaiEngine contract). The shared ``EvaluationModel.generate`` returns a
+        ``str`` for LexBench, so reusing it here would slice the first character
+        of every judge response. Build a dedicated OpenaiEngine for both paths.
+        """
+        if self._engine is None:
+            self._engine = OpenaiEngine(**self._engine_kwargs())
+        return self._engine
+
     def results_filename(self) -> str:
         threshold = self.args.score_threshold
         return (
@@ -248,7 +275,7 @@ class OnlineMind2WebEvaluator(BaseEvaluator):
 
     def evaluate_one(self, task_id, task, agent_result, trajectory_dir):
         return _judge_one(
-            task_id, trajectory_dir, agent_result, self.model,
+            task_id, trajectory_dir, agent_result, self.engine,
             self.args.score_threshold or 3, self.args.mode,
         )
 
@@ -267,13 +294,7 @@ class OnlineMind2WebEvaluator(BaseEvaluator):
             self.results_path(), len(pending), max(1, progress_interval),
         )
 
-        engine_kwargs = {
-            "model": self.args.model,
-            "api_key": self.args.api_key,
-            "base_url": self.args.base_url,
-        }
-        if self.args.temperature is not None:
-            engine_kwargs["temperature"] = self.args.temperature
+        engine_kwargs = self._engine_kwargs()
 
         chunk_size = max(1, len(pending) // num_workers)
         subsets = [pending[i:i + chunk_size] for i in range(0, len(pending), chunk_size)]
