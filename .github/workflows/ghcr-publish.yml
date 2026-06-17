@@ -58,12 +58,14 @@ jobs:
 
       - name: Trigger Kestra image warmup via bench webhook (best-effort)
         # The bench platform (bench.lexmount.com) forwards this to Kestra's
-        # lex-browser-image-warmup flow. Auth is a shared Bearer secret
+        # lex/lex-browser-image-warmup flow. Auth is a shared Bearer secret
         # (IMAGE_WARMUP_WEBHOOK_SECRET) configured both in this repo's Actions
         # secrets and in the platform's deployment env; the platform returns
         # 401 until both sides share the same value. Best-effort
-        # (continue-on-error): Kestra's 10-minute schedule trigger remains the
-        # fallback warmup mechanism, so a failed webhook never blocks CI.
+        # (continue-on-error) so a failed webhook never blocks CI. Note: the
+        # warmup flow currently has ONLY a webhook trigger (no schedule
+        # fallback), so a skipped or failed webhook leaves the image un-warmed
+        # until the next successful build webhook.
         continue-on-error: true
         shell: bash
         env:
@@ -72,8 +74,9 @@ jobs:
           set -euo pipefail
 
           if [ -z "${IMAGE_WARMUP_WEBHOOK_SECRET:-}" ]; then
-            echo "IMAGE_WARMUP_WEBHOOK_SECRET not configured."
-            echo "Warmup will be handled by Kestra's 10-minute schedule trigger."
+            echo "IMAGE_WARMUP_WEBHOOK_SECRET not configured; skipping warmup."
+            echo "The warmup flow has no schedule fallback, so the image will be"
+            echo "warmed only on the next build that sends this webhook."
             exit 0
           fi
 
