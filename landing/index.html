@@ -10,7 +10,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="LexBench-Browser">
 <meta property="og:title" content="LexBench-Browser — Real-World Browser Agent Benchmark">
-<meta property="og:description" content="210 public browser-agent tasks across 107 real websites, with multilingual long-tail workflows, stepwise judging, and reproducible leaderboards.">
+<meta property="og:description" content="377 live-web browser-agent tasks across 200+ websites, with multilingual authenticated workflows, stepwise judging, and reproducible leaderboards.">
 <meta property="og:url" content="https://lexmount.github.io/browseruse-agent-bench/">
 <meta property="og:image" content="https://lexmount.github.io/browseruse-agent-bench/assets/img/hero.png">
 <meta name="twitter:card" content="summary_large_image">
@@ -39,7 +39,6 @@
       <a href="#agents">Agents</a>
       <a href="#community">Community</a>
       <a href="#leaderboard">Leaderboard</a>
-      <a href="#citation">Cite</a>
       <a class="topnav-cta" href="https://github.com/lexmount/browseruse-agent-bench" target="_blank" rel="noopener">GitHub →</a>
     </div>
   </div>
@@ -140,43 +139,44 @@
   <div class="container">
     <h2 class="section-title">Tasks</h2>
     <p class="section-lede">
-      The first dataset, <strong>LexBench-Browser</strong>, focuses on browser-agent tasks
-      that resemble actual user workflows: search, e-commerce, video, social, academic and
-      tool-use across both English and Chinese websites, with varying difficulty tiers.
+      <strong>LexBench-Browser</strong> is a live-web benchmark for realistic browser-agent
+      workflows across Chinese and English websites. It covers information retrieval and
+      state-changing task execution, including authenticated and safety-sensitive scenarios
+      that prior benchmarks often under-represent.
     </p>
 
     <div class="stat-grid">
       <div class="stat-card">
-        <div class="stat-num">210</div>
+        <div class="stat-num">377</div>
         <div class="stat-label">Tasks total</div>
-        <div class="stat-sub">across 107 distinct websites</div>
+        <div class="stat-sub">across 200+ target websites</div>
       </div>
       <div class="stat-card">
-        <div class="stat-num">4</div>
-        <div class="stat-label">Reference agents</div>
-        <div class="stat-sub">browser-use · deepbrowse · Agent-TARS · skyvern</div>
+        <div class="stat-num">2</div>
+        <div class="stat-label">Task types</div>
+        <div class="stat-sub">294 information retrieval · 83 task execution</div>
       </div>
       <div class="stat-card">
-        <div class="stat-num">15</div>
+        <div class="stat-num">10</div>
         <div class="stat-label">Models evaluated</div>
-        <div class="stat-sub">GPT · Claude · Gemini · Doubao · Kimi · Qwen · DeepSeek · MiniMax</div>
+        <div class="stat-sub">BU · GLM · GPT · Claude · Gemini · Doubao · Kimi · Qwen · MiniMax</div>
       </div>
       <div class="stat-card">
-        <div class="stat-num">3</div>
-        <div class="stat-label">Browser backends</div>
-        <div class="stat-sub">Chrome-Local · Lexmount Cloud · AgentBay</div>
+        <div class="stat-num">167</div>
+        <div class="stat-label">Login-required tasks</div>
+        <div class="stat-sub">plus 25 safety-testing tasks</div>
       </div>
     </div>
 
     <figure class="wide-fig">
-      <img src="assets/img/task-distribution.png" alt="Task distribution diagram showing the categorical and difficulty breakdown of LexBench-Browser tasks" loading="lazy">
-      <figcaption>Categorical and difficulty distribution across the LexBench-Browser task pool.</figcaption>
+      <img src="assets/img/task-distribution.png" alt="Task distribution diagram showing LexBench-Browser domains and task types" loading="lazy">
+      <figcaption>Domain and task-type distribution across the LexBench-Browser task pool.</figcaption>
     </figure>
     <div class="muted-card">
-      <strong>Login-gated and operation-tier tasks are coming soon.</strong>
-      The next release adds tasks that require account context, multi-step transactions
-      and safety-sensitive flows — to evaluate Agents on the parts of the web that
-      English-only benchmarks miss.
+      <strong>Authenticated and operational workflows are included.</strong>
+      The benchmark contains 281 Chinese and 96 English tasks, with live sessions, account
+      context, multi-step operations and safety-sensitive flows evaluated under the same
+      browser-agent protocol.
     </div>
   </div>
 </section>
@@ -332,13 +332,13 @@
   <div class="container">
     <h2 class="section-title">Leaderboard</h2>
     <p class="section-lede">
-      Live results across all reference agents and models. Click any header to sort. Showing the
-      top 15 entries by success rate.
+      Snapshot results for browser-use on LexBench-Browser across 10 models. Click any header to
+      sort. Showing all 10 entries by success rate.
     </p>
     <div class="lb-meta">
       <span class="lb-pill">benchmark · LexBench-Browser</span>
       <span class="lb-pill">judge · gpt-5.4 (per-task threshold)</span>
-      <span class="lb-pill">snapshot · 2026-04-29</span>
+      <span class="lb-pill">snapshot · 2026-06-16</span>
     </div>
     <div class="lb-wrap">
       <table class="lb-table" id="lb-table">
@@ -354,168 +354,102 @@
           </tr>
         </thead>
         <tbody>
-          <tr data-rank="1" data-agent="browser-use" data-model="claude-opus-4-7" data-browser="Lexmount" data-success="58.0" data-steps="14.20" data-e2e="205.8">
+          <tr data-rank="1" data-agent="browser-use" data-model="dmx-claude-opus-4-8-thinking" data-browser="Lexmount" data-success="75.3" data-steps="16.90" data-e2e="522.4">
             <td class="num">1</td>
             <td><span class="cell-strong">browser-use</span></td>
-            <td><code class="cell-mono">claude-opus-4-7</code></td>
+            <td><code class="cell-mono">dmx-claude-opus-4-8-thinking</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
-            <td class="num"><strong>58.0</strong></td>
-            <td class="num">14.2</td>
-            <td class="num">205.8</td>
+            <td class="num"><strong>75.3</strong></td>
+            <td class="num">16.9</td>
+            <td class="num">522.4</td>
           </tr>
-          <tr data-rank="2" data-agent="browser-use" data-model="kimi-k2.5" data-browser="Lexmount" data-success="58.0" data-steps="24.70" data-e2e="280.1">
+          <tr data-rank="2" data-agent="browser-use" data-model="gpt-5.5" data-browser="Lexmount" data-success="74.3" data-steps="14.00" data-e2e="212.0">
             <td class="num">2</td>
-            <td><span class="cell-strong">browser-use</span></td>
-            <td><code class="cell-mono">kimi-k2.5</code></td>
-            <td><span class="browser-pill">Lexmount</span></td>
-            <td class="num"><strong>58.0</strong></td>
-            <td class="num">24.7</td>
-            <td class="num">280.1</td>
-          </tr>
-          <tr data-rank="3" data-agent="browser-use" data-model="gemini-3.1-pro-preview" data-browser="Lexmount" data-success="56.0" data-steps="13.90" data-e2e="149.0">
-            <td class="num">3</td>
-            <td><span class="cell-strong">browser-use</span></td>
-            <td><code class="cell-mono">gemini-3.1-pro-preview</code></td>
-            <td><span class="browser-pill">Lexmount</span></td>
-            <td class="num"><strong>56.0</strong></td>
-            <td class="num">13.9</td>
-            <td class="num">149.0</td>
-          </tr>
-          <tr data-rank="4" data-agent="browser-use" data-model="gpt-5.5" data-browser="Lexmount" data-success="54.0" data-steps="14.10" data-e2e="273.0">
-            <td class="num">4</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">gpt-5.5</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
-            <td class="num"><strong>54.0</strong></td>
-            <td class="num">14.1</td>
-            <td class="num">273.0</td>
+            <td class="num"><strong>74.3</strong></td>
+            <td class="num">14.0</td>
+            <td class="num">212.0</td>
           </tr>
-          <tr data-rank="5" data-agent="browser-use" data-model="gemini-3.1-pro-preview" data-browser="Chrome-Local" data-success="54.0" data-steps="14.00" data-e2e="163.3">
+          <tr data-rank="3" data-agent="browser-use" data-model="bu-2-0" data-browser="Lexmount" data-success="68.7" data-steps="17.50" data-e2e="323.8">
+            <td class="num">3</td>
+            <td><span class="cell-strong">browser-use</span></td>
+            <td><code class="cell-mono">bu-2-0</code></td>
+            <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num"><strong>68.7</strong></td>
+            <td class="num">17.5</td>
+            <td class="num">323.8</td>
+          </tr>
+          <tr data-rank="4" data-agent="browser-use" data-model="glm-5.1" data-browser="Lexmount" data-success="68.2" data-steps="22.00" data-e2e="589.7">
+            <td class="num">4</td>
+            <td><span class="cell-strong">browser-use</span></td>
+            <td><code class="cell-mono">glm-5.1</code></td>
+            <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num"><strong>68.2</strong></td>
+            <td class="num">22.0</td>
+            <td class="num">589.7</td>
+          </tr>
+          <tr data-rank="5" data-agent="browser-use" data-model="qwen3.7-max" data-browser="Lexmount" data-success="65.8" data-steps="18.80" data-e2e="487.6">
             <td class="num">5</td>
             <td><span class="cell-strong">browser-use</span></td>
-            <td><code class="cell-mono">gemini-3.1-pro-preview</code></td>
-            <td><span class="browser-pill">Chrome-Local</span></td>
-            <td class="num"><strong>54.0</strong></td>
-            <td class="num">14.0</td>
-            <td class="num">163.3</td>
+            <td><code class="cell-mono">qwen3.7-max</code></td>
+            <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num"><strong>65.8</strong></td>
+            <td class="num">18.8</td>
+            <td class="num">487.6</td>
           </tr>
-          <tr data-rank="6" data-agent="browser-use" data-model="kimi-k2.6" data-browser="Lexmount" data-success="52.0" data-steps="30.30" data-e2e="447.6">
+          <tr data-rank="6" data-agent="browser-use" data-model="gemini-3.1-pro-preview" data-browser="Lexmount" data-success="63.9" data-steps="12.60" data-e2e="368.6">
             <td class="num">6</td>
             <td><span class="cell-strong">browser-use</span></td>
-            <td><code class="cell-mono">kimi-k2.6</code></td>
-            <td><span class="browser-pill">Lexmount</span></td>
-            <td class="num"><strong>52.0</strong></td>
-            <td class="num">30.3</td>
-            <td class="num">447.6</td>
-          </tr>
-          <tr data-rank="7" data-agent="browser-use" data-model="bu-2-0" data-browser="Chrome-Local" data-success="48.0" data-steps="20.80" data-e2e="136.5">
-            <td class="num">7</td>
-            <td><span class="cell-strong">browser-use</span></td>
-            <td><code class="cell-mono">bu-2-0</code></td>
-            <td><span class="browser-pill">Chrome-Local</span></td>
-            <td class="num"><strong>48.0</strong></td>
-            <td class="num">20.8</td>
-            <td class="num">136.5</td>
-          </tr>
-          <tr data-rank="8" data-agent="browser-use" data-model="MiniMax-M2.7" data-browser="Chrome-Local" data-success="42.0" data-steps="27.50" data-e2e="413.1">
-            <td class="num">8</td>
-            <td><span class="cell-strong">browser-use</span></td>
-            <td><code class="cell-mono">MiniMax-M2.7</code></td>
-            <td><span class="browser-pill">Chrome-Local</span></td>
-            <td class="num"><strong>42.0</strong></td>
-            <td class="num">27.5</td>
-            <td class="num">413.1</td>
-          </tr>
-          <tr data-rank="9" data-agent="Agent-TARS" data-model="gemini-3.1-pro-preview" data-browser="Lexmount" data-success="40.0" data-steps="18.40" data-e2e="121.1">
-            <td class="num">9</td>
-            <td><span class="cell-strong">Agent-TARS</span></td>
             <td><code class="cell-mono">gemini-3.1-pro-preview</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
-            <td class="num"><strong>40.0</strong></td>
-            <td class="num">18.4</td>
-            <td class="num">121.1</td>
+            <td class="num"><strong>63.9</strong></td>
+            <td class="num">12.6</td>
+            <td class="num">368.6</td>
           </tr>
-          <tr data-rank="10" data-agent="browser-use" data-model="bu-2-0" data-browser="Lexmount" data-success="40.0" data-steps="23.40" data-e2e="350.7">
-            <td class="num">10</td>
-            <td><span class="cell-strong">browser-use</span></td>
-            <td><code class="cell-mono">bu-2-0</code></td>
-            <td><span class="browser-pill">Lexmount</span></td>
-            <td class="num"><strong>40.0</strong></td>
-            <td class="num">23.4</td>
-            <td class="num">350.7</td>
-          </tr>
-          <tr data-rank="11" data-agent="browser-use" data-model="gemini-2.5-pro" data-browser="Lexmount" data-success="40.0" data-steps="18.70" data-e2e="279.2">
-            <td class="num">11</td>
-            <td><span class="cell-strong">browser-use</span></td>
-            <td><code class="cell-mono">gemini-2.5-pro</code></td>
-            <td><span class="browser-pill">Lexmount</span></td>
-            <td class="num"><strong>40.0</strong></td>
-            <td class="num">18.7</td>
-            <td class="num">279.2</td>
-          </tr>
-          <tr data-rank="12" data-agent="browser-use" data-model="qwen3.5-plus" data-browser="Lexmount" data-success="40.0" data-steps="23.70" data-e2e="326.7">
-            <td class="num">12</td>
-            <td><span class="cell-strong">browser-use</span></td>
-            <td><code class="cell-mono">qwen3.5-plus</code></td>
-            <td><span class="browser-pill">Lexmount</span></td>
-            <td class="num"><strong>40.0</strong></td>
-            <td class="num">23.7</td>
-            <td class="num">326.7</td>
-          </tr>
-          <tr data-rank="13" data-agent="browser-use" data-model="MiniMax-M2.5" data-browser="Lexmount" data-success="38.0" data-steps="27.40" data-e2e="354.3">
-            <td class="num">13</td>
-            <td><span class="cell-strong">browser-use</span></td>
-            <td><code class="cell-mono">MiniMax-M2.5</code></td>
-            <td><span class="browser-pill">Lexmount</span></td>
-            <td class="num"><strong>38.0</strong></td>
-            <td class="num">27.4</td>
-            <td class="num">354.3</td>
-          </tr>
-          <tr data-rank="14" data-agent="browser-use" data-model="MiniMax-M2.7" data-browser="Lexmount" data-success="36.0" data-steps="22.40" data-e2e="408.9">
-            <td class="num">14</td>
-            <td><span class="cell-strong">browser-use</span></td>
-            <td><code class="cell-mono">MiniMax-M2.7</code></td>
-            <td><span class="browser-pill">Lexmount</span></td>
-            <td class="num"><strong>36.0</strong></td>
-            <td class="num">22.4</td>
-            <td class="num">408.9</td>
-          </tr>
-          <tr data-rank="15" data-agent="browser-use" data-model="doubao-seed-2-0-pro" data-browser="Lexmount" data-success="36.0" data-steps="17.30" data-e2e="385.3">
-            <td class="num">15</td>
+          <tr data-rank="7" data-agent="browser-use" data-model="doubao-seed-2-0-pro" data-browser="Lexmount" data-success="61.8" data-steps="17.70" data-e2e="595.3">
+            <td class="num">7</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">doubao-seed-2-0-pro</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
-            <td class="num"><strong>36.0</strong></td>
-            <td class="num">17.3</td>
-            <td class="num">385.3</td>
+            <td class="num"><strong>61.8</strong></td>
+            <td class="num">17.7</td>
+            <td class="num">595.3</td>
+          </tr>
+          <tr data-rank="8" data-agent="browser-use" data-model="gemini-3.5-flash" data-browser="Lexmount" data-success="58.6" data-steps="26.90" data-e2e="376.4">
+            <td class="num">8</td>
+            <td><span class="cell-strong">browser-use</span></td>
+            <td><code class="cell-mono">gemini-3.5-flash</code></td>
+            <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num"><strong>58.6</strong></td>
+            <td class="num">26.9</td>
+            <td class="num">376.4</td>
+          </tr>
+          <tr data-rank="9" data-agent="browser-use" data-model="kimi-k2.6" data-browser="Lexmount" data-success="53.3" data-steps="23.60" data-e2e="433.4">
+            <td class="num">9</td>
+            <td><span class="cell-strong">browser-use</span></td>
+            <td><code class="cell-mono">kimi-k2.6</code></td>
+            <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num"><strong>53.3</strong></td>
+            <td class="num">23.6</td>
+            <td class="num">433.4</td>
+          </tr>
+          <tr data-rank="10" data-agent="browser-use" data-model="MiniMax-M3" data-browser="Lexmount" data-success="40.1" data-steps="20.10" data-e2e="584.5">
+            <td class="num">10</td>
+            <td><span class="cell-strong">browser-use</span></td>
+            <td><code class="cell-mono">MiniMax-M3</code></td>
+            <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num"><strong>40.1</strong></td>
+            <td class="num">20.1</td>
+            <td class="num">584.5</td>
           </tr>
         </tbody>
       </table>
     </div>
     <p class="muted small">
-      Live source: leaderboard server at the team intranet. Data is automatically pulled from
+      Snapshot source:
       <code>experiments/{benchmark}/{split}/{agent}/{model_id}/{ts}/</code> run dirs.
-    </p>
-  </div>
-</section>
-
-<section id="citation" class="section section-alt">
-  <div class="container">
-    <h2 class="section-title">Cite</h2>
-    <p class="section-lede">If you use LexBench-Browser in your work, please cite:</p>
-    <div class="bibtex">
-      <button class="copy-btn" type="button" data-target="#bibtex-block">Copy</button>
-      <pre><code id="bibtex-block">@misc{lexbench_browser_2026,
-  title        = {LexBench-Browser: A Real-World Browser Agent Benchmark with Long-Tail and Multilingual Tasks},
-  author       = {Lexmount Research and Collaborators},
-  year         = {2026},
-  howpublished = {\url{https://lexmount.github.io/browseruse-agent-bench/}},
-  note         = {Open benchmark; v1.0 reference release}
-}</code></pre>
-    </div>
-    <p class="muted small">
-      Acknowledgements: integration scaffolding adapted patterns from browser-use, skyvern,
-      Agent-TARS and deepbrowse upstream codebases.
     </p>
   </div>
 </section>
