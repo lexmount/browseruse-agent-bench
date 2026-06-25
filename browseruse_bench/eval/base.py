@@ -122,11 +122,21 @@ class BaseEvaluator(ABC):
         tasks = self.load_tasks()
         completed = self.list_completed_tasks()
         already = self._resume_skip_set()
+        include_task_ids = self._task_id_filter("task_ids")
+        exclude_task_ids = self._task_id_filter("exclude_task_ids")
         pending = [
             p.name for p in completed
             if p.name not in already and p.name in tasks
+            and (not include_task_ids or p.name in include_task_ids)
+            and p.name not in exclude_task_ids
         ]
-        logger.info("Evaluating %d tasks (skip %d already done)", len(pending), len(already))
+        logger.info(
+            "Evaluating %d tasks (skip %d already done, include_filter=%d, exclude_filter=%d)",
+            len(pending),
+            len(already),
+            len(include_task_ids),
+            len(exclude_task_ids),
+        )
         for result in self._run_iteration(pending, tasks):
             self._append_result(result)
         # Hook runs before summary so subclasses (e.g. LexBench coverage backfill)
@@ -137,6 +147,16 @@ class BaseEvaluator(ABC):
         records = self._load_all_records()
         self._generate_summary(records)
         return 0
+
+    def _task_id_filter(self, key: str) -> Set[str]:
+        raw = self.args.extra.get(key)
+        if raw is None:
+            return set()
+        if isinstance(raw, str):
+            return {item for item in raw.split() if item}
+        if isinstance(raw, (list, tuple, set)):
+            return {str(item) for item in raw if str(item)}
+        return {str(raw)}
 
     def _load_all_records(self) -> List[Dict[str, Any]]:
         """Load every record currently appended to the results JSONL on disk."""

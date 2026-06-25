@@ -229,6 +229,14 @@ def _parse_extra_args(extra_args: list[str]) -> dict[str, Any]:
     return extra
 
 
+def _read_task_ids_file(path: Path | None) -> list[str]:
+    if path is None:
+        return []
+    if not path.exists():
+        raise SystemExit(f"[FAILED] Task id file does not exist: {path}")
+    return path.read_text(encoding="utf-8").split()
+
+
 def run_evaluation(
     agent_name: str,
     benchmark_name: str,
@@ -303,6 +311,14 @@ def run_evaluation(
         "force_download": bool(getattr(args, "force_download", False)),
     }
     extra.update(_parse_extra_args(extra_args))
+    task_ids = [str(task_id) for task_id in (getattr(args, "task_ids", None) or [])]
+    task_ids.extend(_read_task_ids_file(getattr(args, "task_ids_file", None)))
+    exclude_task_ids = [str(task_id) for task_id in (getattr(args, "exclude_task_ids", None) or [])]
+    exclude_task_ids.extend(_read_task_ids_file(getattr(args, "exclude_task_ids_file", None)))
+    if task_ids:
+        extra["task_ids"] = task_ids
+    if exclude_task_ids:
+        extra["exclude_task_ids"] = exclude_task_ids
     if max_tokens is not None:
         extra["max_tokens"] = max_tokens
 
@@ -424,6 +440,20 @@ def configure_eval_parser(parser: argparse.ArgumentParser, config: dict[str, Any
         "--force-reeval",
         action="store_true",
         help="Rerun evaluation (default reuses existing results, only runs failure classification)",
+    )
+    parser.add_argument("--task-ids", nargs="*", default=[], help="Only evaluate these task IDs.")
+    parser.add_argument(
+        "--task-ids-file",
+        type=Path,
+        default=None,
+        help="Whitespace-separated task IDs to evaluate.",
+    )
+    parser.add_argument("--exclude-task-ids", nargs="*", default=[], help="Do not evaluate these task IDs.")
+    parser.add_argument(
+        "--exclude-task-ids-file",
+        type=Path,
+        default=None,
+        help="Whitespace-separated task IDs to skip during evaluation.",
     )
     parser.add_argument(
         "--agent-config",

@@ -568,6 +568,12 @@ class LexBenchBrowserEvaluator(BaseEvaluator):
             return
         attempted_ids = {d.name for d in self.args.trajectories_dir.iterdir() if d.is_dir()}
         expected = [tid for tid in self._expected_task_ids if tid in attempted_ids]
+        include_task_ids = self._task_id_filter("task_ids")
+        exclude_task_ids = self._task_id_filter("exclude_task_ids")
+        if include_task_ids:
+            expected = [tid for tid in expected if tid in include_task_ids]
+        if exclude_task_ids:
+            expected = [tid for tid in expected if tid not in exclude_task_ids]
         if not expected:
             return
         records_by_task_id = {

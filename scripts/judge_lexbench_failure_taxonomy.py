@@ -697,6 +697,9 @@ def _process_eval_file(eval_file: Path, system_prompt: str, model: Any, args: ar
     if args.task_ids:
         keep_task_ids = {str(task_id) for task_id in args.task_ids}
         records = [row for row in records if str(row.get("task_id", "")) in keep_task_ids]
+    if args.exclude_task_ids:
+        exclude_task_ids = {str(task_id) for task_id in args.exclude_task_ids}
+        records = [row for row in records if str(row.get("task_id", "")) not in exclude_task_ids]
     if args.max_samples is not None:
         records = records[: args.max_samples]
 
@@ -830,6 +833,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--max-samples", type=int, default=None, help="Max failed samples per eval file.")
     parser.add_argument("--task-ids", nargs="*", default=[], help="Only classify these task IDs.")
+    parser.add_argument("--exclude-task-ids", nargs="*", default=[], help="Do not classify these task IDs.")
+    parser.add_argument(
+        "--exclude-task-ids-file",
+        type=Path,
+        default=None,
+        help="Whitespace-separated task IDs to exclude from classification.",
+    )
     parser.add_argument("--max-screenshots", type=int, default=3, help="Number of final screenshots to include.")
     parser.add_argument("--image-scale-factor", type=float, default=0.6)
     parser.add_argument("--trace-char-budget", type=int, default=18000)
@@ -914,6 +924,14 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     _load_env_file(REPO_ROOT / ".env")
     args = parse_args()
+    if args.exclude_task_ids_file:
+        if not args.exclude_task_ids_file.exists():
+            LOGGER.error("--exclude-task-ids-file does not exist: %s", args.exclude_task_ids_file)
+            return 2
+        args.exclude_task_ids = [
+            *args.exclude_task_ids,
+            *args.exclude_task_ids_file.read_text(encoding="utf-8").split(),
+        ]
 
     eval_files = _find_eval_files(args)
     args.eval_files = [str(path) for path in eval_files]

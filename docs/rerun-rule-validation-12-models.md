@@ -65,14 +65,13 @@ false positives vs M3.2/M3.3: 99
 This is acceptable as a pre-attribution artifact scan, but not enough for the
 final high-recall rerun pool.
 
-### Final Post-Attribution Rule
+### Final Token-Efficient Rule
 
 Definition:
 
 ```text
-result_json_hard
-∪ latest_agent_run_log_hard
-∪ taxonomy_primary_M3.2_or_M3.3
+hard_artifact_rerun
+∪ taxonomy_primary_M3.2_or_M3.3_on_non_hard_tasks
 ```
 
 Command:
@@ -129,14 +128,19 @@ such as consecutive failures, early max-steps, tunnel errors, or LLM timeout 6/6
 
 ## Final Recommendation
 
-Use two phases:
+Use hard pre-check first, then attribution only for the remaining ambiguous
+failures:
 
-1. **Before failure attribution**: run artifact-only scanner as a provisional
-   rerun detector. It catches deterministic infrastructure failures without
-   needing judge outputs.
-2. **After failure attribution**: use the final post-attribution rule above.
-   This is the rule that satisfies high M3.2/M3.3 recall while keeping false
-   positives bounded.
+1. **Hard artifact pre-check**: catch deterministic infrastructure failures and
+   send them directly to rerun without judge calls.
+2. **Eval/failure attribution on non-hard tasks**: classify only the remaining
+   failed tasks.
+3. **Post-attribution rerun check**: add non-hard tasks whose attribution
+   primary code is M3.2 or M3.3.
+
+This is the rule that satisfies high M3.2/M3.3 recall while keeping false
+positives bounded and avoiding unnecessary attribution tokens for deterministic
+hard failures.
 
 Do not use broad api-log render/session evidence as a default hard rerun rule.
 It should remain constrained or optional because transient empty DOM/loading

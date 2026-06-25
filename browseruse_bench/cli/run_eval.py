@@ -117,6 +117,7 @@ def _report_output_dir(report_file: str, run_dir: Path) -> None:
 # stay on both.)
 _EVAL_ONLY_VALUE_FLAGS = {
     "--score-threshold", "--num-worker", "--api-key", "--base-url", "--eval-strategy",
+    "--task-ids-file", "--exclude-task-ids-file",
 }
 _EVAL_ONLY_BOOL_FLAGS = {"--force-reeval"}
 

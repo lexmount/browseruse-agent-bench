@@ -197,7 +197,33 @@ Older M3.3 audit reports may contain `manual_review`. For validation-only
 M3.3 recall studies, merge those rows into `rerun_candidate`. For the final
 rerun set, use the post-attribution rule below instead.
 
-Use the independent rerun scanner to collect final rerun ids for a target run:
+Use the rerun scanner in hard mode first to collect deterministic rerun ids for
+a target run:
+
+```zsh
+PYTHONPATH=. python scripts/collect_lexbench_rerun_candidates.py \
+  --root /Users/abc/Desktop/lexmount/browseruse-agent-bench/experiments/LexBench-Browser/All/browser-use \
+  --model MODEL \
+  --timestamp TIMESTAMP \
+  --artifact-mode hard \
+  --out-dir experiments/LexBench-Browser/All/browser-use/MODEL/TIMESTAMP/rerun_candidates_hard
+```
+
+This hard pre-check does not require failure-attribution results. Outputs are
+written to:
+
+```text
+experiments/LexBench-Browser/All/browser-use/MODEL/TIMESTAMP/rerun_candidates_hard/
+  rerun_candidates.json
+  rerun_candidates.csv
+  rerun_candidates_summary.md
+  rerun_task_ids.txt
+```
+
+These hard-hit tasks should go directly into the rerun set and can be excluded
+from eval and failure attribution.
+
+There is also an optional strict artifact diagnostic mode:
 
 ```zsh
 PYTHONPATH=. python scripts/collect_lexbench_rerun_candidates.py \
@@ -206,32 +232,24 @@ PYTHONPATH=. python scripts/collect_lexbench_rerun_candidates.py \
   --timestamp TIMESTAMP
 ```
 
-This pre-attribution mode does not require failure-attribution results. Outputs
-are written to:
-
-```text
-experiments/LexBench-Browser/All/browser-use/MODEL/TIMESTAMP/rerun_candidates/
-  rerun_candidates.json
-  rerun_candidates.csv
-  rerun_candidates_summary.md
-  rerun_task_ids.txt
-```
-
-By default, this pre-attribution scanner includes result hard rules, latest
-run-log hard rules, and constrained api-log access/render/session evidence.
-Repeated parse or LLM-timeout-only api-log evidence can be added to a broader
+The strict mode includes result hard rules, latest run-log hard rules, and
+constrained api-log access/render/session evidence. It is useful for debugging
+before attribution exists, but it is not the final default rerun rule. Repeated
+parse or LLM-timeout-only api-log evidence can be added to an even broader
 debugging pool with:
 
 ```zsh
 --include-protocol-only
 ```
 
-The `api_logs` part is applied only to unsuccessful task results by default.
-This avoids rerunning tasks that recovered from transient loading/empty-DOM
-states and finished successfully. `result.json` hard rules and latest run-log
-hard rules still take precedence even if `agent_success == true`.
+In strict mode, the `api_logs` part is applied only to unsuccessful task results
+by default. This avoids rerunning tasks that recovered from transient
+loading/empty-DOM states and finished successfully. `result.json` hard rules and
+latest run-log hard rules still take precedence even if `agent_success == true`.
 
-After failure attribution is available, use the final high-recall mode:
+After failure attribution is available, use the final high-recall mode. In the
+token-efficient workflow, run this after the hard artifact pre-check and
+attribution on the remaining non-hard failures:
 
 ```zsh
 PYTHONPATH=. python scripts/collect_lexbench_rerun_candidates.py \
@@ -245,9 +263,8 @@ PYTHONPATH=. python scripts/collect_lexbench_rerun_candidates.py \
 This mode uses:
 
 ```text
-result_json_hard
-∪ latest_agent_run_log_hard
-∪ taxonomy_primary_M3.2_or_M3.3
+hard_artifact_rerun
+∪ taxonomy_primary_M3.2_or_M3.3_on_non_hard_tasks
 ```
 
 On the 12 current model runs, this rule covered `171/171` primary M3.2/M3.3
@@ -268,19 +285,28 @@ prove that logs contain these errors, but they cannot guarantee that rerunning
 will fix the task or that the original attribution is wrong. This rule
 intentionally prioritizes recall over precision.
 
-## Final High-Recall Rerun Set
+## Final Token-Efficient Rerun Set
 
 For each `MODEL/TIMESTAMP`, the final rerun candidate set is:
 
 ```text
-result_json_hard
-∪ latest_agent_run_log_hard
-∪ taxonomy_primary_M3.2_or_M3.3
+hard_artifact_rerun
+∪ taxonomy_primary_M3.2_or_M3.3_on_non_hard_tasks
 ```
 
+Recommended order:
+
+```text
+1. Run hard artifact pre-check.
+2. Put hard-hit tasks directly into the rerun set.
+3. Exclude hard-hit tasks from eval/failure attribution when possible.
+4. Run eval and failure attribution on the remaining tasks.
+5. Add remaining tasks whose attribution primary_code is M3.2 or M3.3.
+```
+
+This avoids spending judge tokens on deterministic run/infrastructure failures.
 When failure attribution is not available yet, use the pre-attribution scanner
-output as a provisional artifact-only rerun set. When attribution is available,
-prefer the final set above.
+output as a provisional artifact-only rerun set.
 
 If asking Codex or another agent to collect ids, give this instruction:
 
@@ -289,9 +315,8 @@ For the target MODEL/TIMESTAMP under
 /Users/abc/Desktop/lexmount/browseruse-agent-bench/experiments/LexBench-Browser/All/browser-use,
 run scripts/collect_lexbench_rerun_candidates.py with
 `--artifact-mode hard --include-taxonomy-web-constraints` and return the union of:
-1. result.json hard rerun ids,
-2. hard ids from the latest matching agent execution log under output/logs/run,
-3. failure-taxonomy ids whose primary_code is M3.2 or M3.3.
+1. hard artifact rerun ids from result.json and latest matching run logs,
+2. failure-taxonomy ids whose primary_code is M3.2 or M3.3 among non-hard tasks.
 
 Return sorted unique task ids and the reason for each id.
 ```

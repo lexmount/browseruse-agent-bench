@@ -5,17 +5,19 @@ automation pipeline:
 
 ```text
 run benchmark
-→ eval
-→ failure attribution
+→ hard artifact pre-check
+→ eval non-hard tasks
+→ failure attribution on non-hard failures
 → post-attribution rerun check
 → rerun selected tasks
 → re-eval
 → final failure attribution / visualization
 ```
 
-The final rerun check is intentionally **post-attribution**. Artifact-only
-signals are still useful as hard infrastructure checks, but they are not enough
-to get high M3.2/M3.3 recall with bounded false positives.
+The workflow intentionally runs deterministic hard-artifact rules before judge
+calls. Hard-hit tasks go straight into the rerun set and can be excluded from
+eval/failure-attribution to save judge tokens. Attribution is then used only to
+catch non-hard failures whose primary cause is M3.2/M3.3.
 
 ## File Map
 
@@ -61,9 +63,35 @@ experiments/LexBench-Browser/All/browser-use/MODEL/TIMESTAMP/tasks/*/api_logs/
 output/logs/run/*.log
 ```
 
-## Stage 2: Evaluate Run Results
+## Stage 2: Hard Artifact Pre-Check
 
-Run the normal LexBench-Browser evaluator:
+Run deterministic hard rules before any judge call:
+
+```zsh
+PYTHONPATH=. python scripts/collect_lexbench_rerun_candidates.py \
+  --model MODEL_DIR_NAME \
+  --timestamp TIMESTAMP \
+  --artifact-mode hard \
+  --out-dir experiments/LexBench-Browser/All/browser-use/MODEL_DIR_NAME/TIMESTAMP/rerun_candidates_hard
+```
+
+This collects only:
+
+```text
+result_json_hard
+∪ latest_agent_run_log_hard
+```
+
+These tasks are definite run/infrastructure failures and do not need eval or
+failure attribution before rerun. Their ids are written to:
+
+```text
+experiments/LexBench-Browser/All/browser-use/MODEL/TIMESTAMP/rerun_candidates_hard/rerun_task_ids.txt
+```
+
+## Stage 3: Evaluate Non-Hard Tasks
+
+Run the normal LexBench-Browser evaluator, excluding hard-hit tasks:
 
 ```zsh
 PYTHONPATH=. ./.venvs/browser_use/bin/python scripts/eval.py \
@@ -71,7 +99,8 @@ PYTHONPATH=. ./.venvs/browser_use/bin/python scripts/eval.py \
   --split All \
   --agent browser-use \
   --model MODEL_CONFIG_KEY \
-  --timestamp TIMESTAMP
+  --timestamp TIMESTAMP \
+  --exclude-task-ids-file experiments/LexBench-Browser/All/browser-use/MODEL_DIR_NAME/TIMESTAMP/rerun_candidates_hard/rerun_task_ids.txt
 ```
 
 The expected eval output is:
@@ -81,10 +110,11 @@ experiments/LexBench-Browser/All/browser-use/MODEL/TIMESTAMP/tasks_eval_result/
   task_gpt-4.1_per_task_threshold_stepwise_eval_results.json
 ```
 
-## Stage 3: Failure Attribution
+## Stage 4: Failure Attribution on Non-Hard Failures
 
-Run failure attribution after evaluation. This classifies evaluator-failed tasks
-into the M1/M2/M3 taxonomy.
+Run failure attribution after evaluation, again excluding hard-hit tasks. This
+keeps judge tokens focused on failures that are not already deterministic
+reruns.
 
 Prompt:
 
@@ -101,6 +131,7 @@ PYTHONPATH=. python scripts/judge_lexbench_failure_taxonomy.py \
   --eval-filename task_gpt-4.1_per_task_threshold_stepwise_eval_results.json \
   --model gpt-5.5-judge \
   --include-judge-in-output \
+  --exclude-task-ids-file experiments/LexBench-Browser/All/browser-use/MODEL_DIR_NAME/TIMESTAMP/rerun_candidates_hard/rerun_task_ids.txt \
   --num-workers 4
 ```
 
@@ -112,9 +143,9 @@ tasks_eval_result/
   task_gpt-4.1_per_task_threshold_stepwise_failure_taxonomy_gpt-5.5-judge_summary.json
 ```
 
-## Stage 4: Post-Attribution Rerun Check
+## Stage 5: Post-Attribution Rerun Check
 
-This is the recommended final rerun/review pool for reducing M3.2/M3.3:
+This is the recommended final rerun pool for reducing M3.2/M3.3:
 
 ```zsh
 PYTHONPATH=. python scripts/collect_lexbench_rerun_candidates.py \
@@ -127,16 +158,14 @@ PYTHONPATH=. python scripts/collect_lexbench_rerun_candidates.py \
 The final post-attribution set is:
 
 ```text
-result_json_hard
-∪ latest_agent_run_log_hard
-∪ taxonomy_primary_M3.2_or_M3.3
+hard_artifact_rerun
+∪ taxonomy_primary_M3.2_or_M3.3_on_non_hard_tasks
 ```
 
 Where:
 
-- `result_json_hard` catches missing/invalid results, `agent_done == error`, `env_status == failed`, early `max_steps`, and suspicious early `timeout`.
-- `latest_agent_run_log_hard` catches `Stopping due to 5 consecutive failures`, `Result failed 6/6 times: LLM call timed out`, and `ERR_TUNNEL_CONNECTION_FAILED` from the latest matching agent execution log.
-- `taxonomy_primary_M3.2_or_M3.3` catches attribution primary-code `M3.2 Access Barrier` or `M3.3 Site Limitation`.
+- `hard_artifact_rerun` is the Stage 2 set: result-json hard failures plus latest run-log hard failures.
+- `taxonomy_primary_M3.2_or_M3.3_on_non_hard_tasks` catches attribution primary-code `M3.2 Access Barrier` or `M3.3 Site Limitation` among the remaining evaluated failures.
 
 Outputs are written to:
 
@@ -158,7 +187,7 @@ total candidates: 219
 false positives vs primary M3.2/M3.3: 48
 ```
 
-There is also a provisional artifact-only mode for debugging before attribution
+There is also a broader artifact-only mode for debugging before attribution
 exists:
 
 ```zsh
@@ -185,7 +214,7 @@ even broader debugging pool, add:
 --include-protocol-only
 ```
 
-## Stage 5: Rerun Candidates
+## Stage 6: Rerun Candidates
 
 Read task ids from:
 
@@ -211,7 +240,7 @@ PYTHONPATH=. ./.venvs/browser_use/bin/python scripts/run.py \
 
 Do not use `--skip-completed` for this rerun. These tasks are intentionally being overwritten/retested.
 
-## Stage 6: Re-Evaluate Rerun Results
+## Stage 7: Re-Evaluate Rerun Results
 
 After rerun, run the evaluator again:
 
@@ -231,7 +260,7 @@ experiments/LexBench-Browser/All/browser-use/MODEL/TIMESTAMP/tasks_eval_result/
   task_gpt-4.1_per_task_threshold_stepwise_eval_results.json
 ```
 
-## Stage 7: Re-Run Failure Attribution
+## Stage 8: Re-Run Failure Attribution
 
 After rerun and re-eval, run failure attribution again so final analysis uses the
 latest task outcomes.
@@ -265,7 +294,7 @@ tasks_eval_result/
 The taxonomy output is both part of the post-attribution rerun check and the
 input to model capability analysis.
 
-## Stage 8: Validate Rerun Rule Recall
+## Stage 9: Validate Rerun Rule Recall
 
 Use taxonomy output to measure whether the post-attribution rerun rule covers
 M3.2/M3.3 while keeping false positives bounded. The current validation record is:
@@ -303,7 +332,7 @@ experiments/LexBench-Browser/All/browser-use/failure_taxonomy_review/
 This audit is for diagnosis and rule validation. It is not the final rerun
 selection rule.
 
-## Stage 9: Visualize Failure Attribution
+## Stage 10: Visualize Failure Attribution
 
 Main failure taxonomy figure:
 
@@ -340,17 +369,19 @@ reports/assets/
 
 ```text
 1. Run benchmark tasks.
-2. Evaluate task results.
-3. Run failure attribution on evaluator-failed tasks.
-4. Run post-attribution rerun check.
-5. Rerun selected candidates.
-6. Re-evaluate rerun results.
-7. Re-run failure attribution on final failures.
-8. Generate taxonomy figures/reports.
-9. Optionally cross-check rerun-rule recall against M3.2/M3.3.
+2. Run hard artifact pre-check.
+3. Evaluate non-hard task results.
+4. Run failure attribution on non-hard evaluator-failed tasks.
+5. Run post-attribution rerun check.
+6. Rerun selected candidates.
+7. Re-evaluate rerun results.
+8. Re-run failure attribution on final failures.
+9. Generate taxonomy figures/reports.
+10. Optionally cross-check rerun-rule recall against M3.2/M3.3.
 ```
 
 Keep these two concepts separate:
 
-- **Post-attribution rerun check** answers: "Which tasks should be rerun to reduce M3.2/M3.3 and hard run-artifact failures?"
+- **Hard artifact pre-check** answers: "Which tasks are deterministic infrastructure/run failures and can skip judge calls?"
+- **Post-attribution rerun check** answers: "Which additional non-hard tasks should be rerun to reduce M3.2/M3.3?"
 - **Failure attribution** answers: "For the evaluated failed trajectory, what capability or web-constraint category best explains the failure?"

@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Collect high-recall LexBench-Browser rerun task candidates.
 
-This scanner is intentionally independent of failure-taxonomy attribution. It
-uses only run artifacts:
+By default, this scanner uses only run artifacts:
 
 - tasks/<task_id>/result.json
 - tasks/<task_id>/api_logs/step_*.json
 - output/logs/run/*.log matching the target MODEL/TIMESTAMP output directory
+
+When ``--include-taxonomy-web-constraints`` is set, it also merges tasks whose
+failure taxonomy primary code is M3.2 or M3.3. The recommended workflow is to
+run hard artifact mode first, exclude those hard-hit tasks from judge calls,
+then run this script again to union hard artifacts with non-hard taxonomy hits.
 """
 
 from __future__ import annotations

@@ -205,19 +205,29 @@ bubench eval --agent browser-use --data LexBench-Browser --model-id gpt-4.1
 LexBench-Browser 结果分析推荐使用这套自动化 post-run 流程：
 
 ```text
-run benchmark -> eval -> failure attribution -> post-attribution rerun check
+run benchmark -> hard artifact pre-check -> eval remaining results
+-> failure attribution excluding hard-hit tasks -> post-attribution rerun check
 -> rerun selected tasks -> re-eval -> final attribution / visualization
 ```
 
 最终 rerun candidate 集合是：
 
 ```text
-result_json_hard
-∪ latest_agent_run_log_hard
-∪ taxonomy_primary_M3.2_or_M3.3
+hard_artifact_rerun
+∪ taxonomy_primary_M3.2_or_M3.3_on_non_hard_tasks
 ```
 
-在 eval 和 failure attribution 之后生成 rerun task ids：
+先收集确定性的 hard failures，这部分可以直接进入 rerun，并从 judge 调用中排除：
+
+```bash
+PYTHONPATH=. python scripts/collect_lexbench_rerun_candidates.py \
+  --model MODEL_DIR_NAME \
+  --timestamp TIMESTAMP \
+  --artifact-mode hard \
+  --out-dir experiments/LexBench-Browser/All/browser-use/MODEL_DIR_NAME/TIMESTAMP/rerun_candidates_hard
+```
+
+然后对 non-hard tasks 跑 eval / failure attribution，再生成最终 rerun task ids：
 
 ```bash
 PYTHONPATH=. python scripts/collect_lexbench_rerun_candidates.py \
