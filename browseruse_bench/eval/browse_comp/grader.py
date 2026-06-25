@@ -3,7 +3,7 @@ import os
 import re
 import time
 
-from openai import OpenAI
+from openai import APIConnectionError, APIError, OpenAI, RateLimitError
 
 from browseruse_bench.utils import load_eval_config, load_prompt, make_template_prompt
 
@@ -38,12 +38,12 @@ class GraderModel:
                 )
                 self.last_usage = getattr(response, "usage", None)
                 return response.choices[0].message.content or ""
-            except Exception:
+            except (APIError, APIConnectionError, RateLimitError):
                 if trial < _max_tries - 1:
                     time.sleep(2 ** trial)
                 else:
                     self.last_usage = None
-                    return "correct: no"
+                    raise
         raise RuntimeError("Unreachable: max_tries exhausted without return")
 
 def load_grader_model(model=None, api_key=None, base_url=None, temperature=None):

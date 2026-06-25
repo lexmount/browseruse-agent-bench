@@ -101,13 +101,12 @@ class TestOdysseysGrader:
     def test_grade_rubrics_computes_partial_score(self):
         from browseruse_bench.eval.odysseys.grader import grade_rubrics
 
-        model = self._make_mock_model(json.dumps({
-            "rubric_results": {
-                "R1": {"passed": True, "reasoning": "done"},
-                "R2": {"passed": False, "reasoning": "missing"},
-            },
-            "reasoning": "partial",
-        }))
+        model = MagicMock()
+        model.generate.side_effect = [
+            'Thoughts: The first checkpoint is visible.\nStatus: "success"',
+            'Thoughts: The second checkpoint is missing.\nStatus: "failure"',
+        ]
+        model.last_usage = None
 
         result = grade_rubrics(
             task="Do a long task.",
@@ -115,22 +114,28 @@ class TestOdysseysGrader:
             rubrics={"R1": {}, "R2": {}},
             screenshot_paths=[],
             model=model,
+            action_history=["Open search", "Inspect result"],
         )
 
         assert result["passed_rubrics"] == 1
         assert result["total_rubrics"] == 2
         assert result["rubric_score"] == 0.5
         assert result["is_correct"] is False
+        assert model.generate.call_count == 2
+        first_prompt = model.generate.call_args_list[0].args[0][1]["content"][0]["text"]
+        assert "Evaluate ONLY this rubric item" in first_prompt
+        assert "Full Action History" in first_prompt
+        assert "1. Open search" in first_prompt
 
     def test_grade_rubrics_marks_perfect_success(self):
         from browseruse_bench.eval.odysseys.grader import grade_rubrics
 
-        model = self._make_mock_model(json.dumps({
-            "rubric_results": {
-                "R1": {"passed": True},
-                "R2": {"passed": True},
-            }
-        }))
+        model = MagicMock()
+        model.generate.side_effect = [
+            'Thoughts: Done.\nStatus: "success"',
+            'Thoughts: Also done.\nStatus: "success"',
+        ]
+        model.last_usage = None
 
         result = grade_rubrics(
             task="Do a long task.",
@@ -142,6 +147,54 @@ class TestOdysseysGrader:
 
         assert result["rubric_score"] == 1.0
         assert result["is_correct"] is True
+
+    def test_grade_rubrics_marks_missing_status_as_failure(self):
+        from browseruse_bench.eval.odysseys.grader import grade_rubrics
+
+        model = self._make_mock_model("Thoughts: I cannot tell.")
+
+        result = grade_rubrics(
+            task="Do a long task.",
+            answer="Done.",
+            rubrics={"R1": {"requirement": "Find evidence."}},
+            screenshot_paths=[],
+            model=model,
+        )
+
+        assert result["rubric_results"]["R1"]["passed"] is False
+        assert result["rubric_score"] == 0.0
+
+    def test_grade_rubrics_accumulates_usage_across_rubrics(self):
+        from browseruse_bench.eval.odysseys.grader import grade_rubrics
+
+        class UsageModel:
+            def __init__(self):
+                self.calls = 0
+                self.last_usage = None
+
+            def generate(self, *_args, **_kwargs):
+                self.calls += 1
+                self.last_usage = {
+                    "prompt_tokens": 100 * self.calls,
+                    "completion_tokens": 10 * self.calls,
+                    "total_tokens": 110 * self.calls,
+                    "prompt_tokens_details": {"cached_tokens": 5 * self.calls},
+                }
+                return 'Thoughts: Done.\nStatus: "success"'
+
+        result = grade_rubrics(
+            task="Do a long task.",
+            answer="Done.",
+            rubrics={"R1": {}, "R2": {}},
+            screenshot_paths=[],
+            model=UsageModel(),
+        )
+
+        assert result["usage"]["prompt_tokens"] == 300
+        assert result["usage"]["completion_tokens"] == 30
+        assert result["usage"]["total_tokens"] == 330
+        assert result["usage"]["cached_tokens"] == 15
+        assert result["usage"]["prompt_tokens_details"]["cached_tokens"] == 15
 
 
 class TestOdysseysEvaluatorLoadTasks:

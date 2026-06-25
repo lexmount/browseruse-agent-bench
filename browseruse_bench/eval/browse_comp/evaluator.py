@@ -4,8 +4,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar
 
 from browseruse_bench.eval.base import BaseEvaluator
 from browseruse_bench.eval.browse_comp.grader import (
@@ -43,7 +42,7 @@ class BrowseCompEvaluator(BaseEvaluator):
     def summary_filename(self) -> str:
         return f"BrowseComp_grader_eval_{self.args.model}_summary.json"
 
-    def load_tasks(self) -> Dict[str, Dict[str, Any]]:
+    def load_tasks(self) -> dict[str, dict[str, Any]]:
         tasks_jsonl = REPO_ROOT / "browseruse_bench/data/BrowseComp/task.jsonl"
         return {
             str(task["task_id"]): task
@@ -111,7 +110,7 @@ class BrowseCompEvaluator(BaseEvaluator):
             agent_response=agent_response,
         )
 
-    def _generate_summary(self, records: List[Dict[str, Any]]) -> None:
+    def _generate_summary(self, records: list[dict[str, Any]]) -> None:
         super()._generate_summary(records)
         path = self.summary_path()
         if not path.exists():

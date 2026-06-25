@@ -52,7 +52,7 @@ class OdysseysEvaluator(BaseEvaluator):
 
     @property
     def max_screenshots(self) -> int:
-        return int(self.args.extra.get("max_screenshots", 6))
+        return int(self.args.extra.get("max_screenshots", 0))
 
     def results_filename(self) -> str:
         return f"Odysseys_{self.args.model}_rubric_results.json"
@@ -95,6 +95,7 @@ class OdysseysEvaluator(BaseEvaluator):
             rubrics=rubrics,
             screenshot_paths=screenshots,
             model=self.model,
+            action_history=agent_result.get("action_history"),
             image_scale_factor=self.image_scale_factor,
             temperature=self.args.temperature or 0.0,
         )
@@ -133,6 +134,7 @@ class OdysseysEvaluator(BaseEvaluator):
                 "passed_rubrics": grading["passed_rubrics"],
                 "total_rubrics": grading["total_rubrics"],
                 "screenshot_count": len(screenshots),
+                "rubric_results_official": grading["official_rubric_results"],
             },
         )
 
@@ -178,7 +180,7 @@ class OdysseysEvaluator(BaseEvaluator):
             details = record.get("evaluation_details") or {}
             metrics = details.get("agent_metrics") or {}
             steps = metrics.get("steps") if isinstance(metrics, dict) else None
-            if isinstance(steps, (int, float)) and steps > 0:
+            if isinstance(steps, int | float) and steps > 0:
                 efficiency_values.append(score / steps)
         trajectory_efficiency = (
             sum(efficiency_values) / len(efficiency_values)
