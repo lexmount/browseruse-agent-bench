@@ -3,17 +3,16 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from browseruse_bench.eval.base import EvaluatorArgs
 from browseruse_bench.eval.model import TaskIdLogFilter
 from browseruse_bench.eval.registry import get_evaluator_class
 from browseruse_bench.utils import (
-    DataSource,
     REPO_ROOT,
+    DataSource,
     add_eval_args,
     classify_failures_batch,
     find_latest_tasks_dir,
@@ -57,8 +56,8 @@ def run_failure_classification(
     base_url: str,
     skip_existing: bool = False,
     num_workers: int = 4,
-    max_samples: Optional[int] = None,
-    temperature: Optional[float] = None,
+    max_samples: int | None = None,
+    temperature: float | None = None,
 ) -> int:
     """Run failure classification on results file (post-evaluation)."""
     if not results_file.exists():
@@ -66,8 +65,8 @@ def run_failure_classification(
         return 0
 
     with normalized_results_file(results_file) as prepared_file:
-        eval_results: List[Dict[str, Any]] = []
-        with open(prepared_file, "r", encoding="utf-8") as handle:
+        eval_results: list[dict[str, Any]] = []
+        with open(prepared_file, encoding="utf-8") as handle:
             for line in handle:
                 line = line.strip()
                 if not line:
@@ -109,16 +108,16 @@ def _merge_manifest_into_summary(
     eval_mode: str,
     model: str,
     base_url: str,
-    score_threshold: Optional[int],
-    results_file: Optional[Path],
+    score_threshold: int | None,
+    results_file: Path | None,
     trajectories_dir: Path,
     exit_code: int,
 ) -> None:
     """Append eval-run metadata to the summary file."""
-    summary: Dict[str, Any] = {}
+    summary: dict[str, Any] = {}
     if summary_path.exists():
         try:
-            with open(summary_path, "r", encoding="utf-8") as fh:
+            with open(summary_path, encoding="utf-8") as fh:
                 summary = json.load(fh)
         except (json.JSONDecodeError, OSError):
             pass
@@ -127,7 +126,7 @@ def _merge_manifest_into_summary(
     passed = 0
     failed = 0
     if results_file and results_file.exists():
-        with open(results_file, "r", encoding="utf-8") as fh:
+        with open(results_file, encoding="utf-8") as fh:
             for raw in fh:
                 raw = raw.strip()
                 if not raw:
@@ -138,7 +137,7 @@ def _merge_manifest_into_summary(
                     continue
                 evaluated += 1
                 score = rec.get("score") if "score" in rec else rec.get("predicted_label")
-                if isinstance(score, (int, float)) and score >= 1:
+                if isinstance(score, int | float) and score >= 1:
                     passed += 1
                 else:
                     failed += 1
@@ -148,7 +147,7 @@ def _merge_manifest_into_summary(
         "model": model,
         "base_url": base_url or None,
         "score_threshold": score_threshold,
-        "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "finished_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "exit_code": exit_code,
         "tasks_evaluated": evaluated,
         "tasks_passed": passed,
@@ -171,7 +170,7 @@ def _attach_file_logger(log_path: Path):
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with open(log_path, "a", encoding="utf-8") as fh:
         fh.write(
-            f"\n--- EVAL STARTED {datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')} ---\n"
+            f"\n--- EVAL STARTED {datetime.now(UTC).isoformat(timespec='seconds').replace('+00:00', 'Z')} ---\n"
         )
     handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
     handler.setLevel(logging.INFO)
@@ -184,12 +183,58 @@ def _attach_file_logger(log_path: Path):
     return handler
 
 
+def _coerce_extra_value(value: str) -> Any:
+    lowered = value.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    if lowered in {"none", "null"}:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
+
+def _parse_extra_args(extra_args: list[str]) -> dict[str, Any]:
+    extra: dict[str, Any] = {}
+    idx = 0
+    while idx < len(extra_args):
+        token = extra_args[idx]
+        if not token.startswith("--"):
+            raise SystemExit(f"[FAILED] Unexpected eval extra argument: {token}")
+        raw = token[2:]
+        if not raw:
+            raise SystemExit("[FAILED] Empty eval extra argument")
+        if "=" in raw:
+            key, value = raw.split("=", 1)
+            idx += 1
+        elif idx + 1 < len(extra_args) and not extra_args[idx + 1].startswith("--"):
+            key = raw
+            value = extra_args[idx + 1]
+            idx += 2
+        else:
+            key = raw
+            value = "true"
+            idx += 1
+        key = key.replace("-", "_")
+        if not key:
+            raise SystemExit("[FAILED] Empty eval extra argument key")
+        extra[key] = _coerce_extra_value(value)
+    return extra
+
+
 def run_evaluation(
     agent_name: str,
     benchmark_name: str,
-    config: Dict[str, Any],
+    config: dict[str, Any],
     args: argparse.Namespace,
-    extra_args: List[str],
+    extra_args: list[str],
 ) -> int:
     # Resolve evaluator class via registry (also validates benchmark name)
     evaluator_cls = get_evaluator_class(benchmark_name)
@@ -247,16 +292,17 @@ def run_evaluation(
                 "Ignoring --score-threshold for %s; per-task score_threshold will be used.",
                 benchmark_name,
             )
-        score_threshold: Optional[int] = None
+        score_threshold: int | None = None
     else:
         score_threshold = args.score_threshold if args.score_threshold is not None else 3
 
     # Pack benchmark-private extras unconditionally — evaluators that don't read
     # a given key simply ignore it.
-    extra: Dict[str, Any] = {
+    extra: dict[str, Any] = {
         "eval_strategy": getattr(args, "eval_strategy", None) or "stepwise",
         "force_download": bool(getattr(args, "force_download", False)),
     }
+    extra.update(_parse_extra_args(extra_args))
     if max_tokens is not None:
         extra["max_tokens"] = max_tokens
 
@@ -304,7 +350,7 @@ def run_evaluation(
         logging.getLogger().removeHandler(handler)
         handler.close()
 
-    results_file: Optional[Path] = evaluator.results_path()
+    results_file: Path | None = evaluator.results_path()
     if not results_file.exists():
         results_file = None
 
@@ -345,7 +391,7 @@ def run_evaluation(
     return classification_exit
 
 
-def configure_eval_parser(parser: argparse.ArgumentParser, config: Dict[str, Any]) -> None:
+def configure_eval_parser(parser: argparse.ArgumentParser, config: dict[str, Any]) -> None:
     """Configure arguments for the eval command."""
     add_eval_args(parser)
     parser.add_argument("--data", default=config.get("default", {}).get("data") or config.get("default", {}).get("benchmark", "Online-Mind2Web"))
@@ -395,7 +441,7 @@ def configure_eval_parser(parser: argparse.ArgumentParser, config: Dict[str, Any
     )
 
 
-def eval_command(args: argparse.Namespace, config: Dict[str, Any]) -> int:
+def eval_command(args: argparse.Namespace, config: dict[str, Any]) -> int:
     """Entry point for the eval subcommand."""
     extra_args = getattr(args, "extra_args", [])
     agent_name = normalize_agent_name(args.agent, config)
@@ -404,14 +450,14 @@ def eval_command(args: argparse.Namespace, config: Dict[str, Any]) -> int:
 
 
 @handle_cli_errors
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     config = load_config_file(CONFIG_PATH)
     parser = argparse.ArgumentParser(prog="bubench eval")
     configure_eval_parser(parser, config)
     args, extra = parser.parse_known_args(argv)
     if extra:
         logger.info("Forwarding extra arguments: %s", " ".join(extra))
-    setattr(args, "extra_args", extra)
+    args.extra_args = extra
     if args.agent_config is not None:
         cfg_path = args.agent_config
         if not cfg_path.is_absolute():
