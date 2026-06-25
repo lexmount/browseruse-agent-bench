@@ -1,6 +1,7 @@
 """Statistical utility functions."""
 from __future__ import annotations
 
+from math import fsum
 from typing import Any, Dict, List, Optional
 
 
@@ -98,7 +99,9 @@ def calculate_usage_stats(tasks: List[Dict[str, Any]], path: str = "evaluation_d
                     vals.append(float(usage[field]))
 
         if vals:
-            usage_stats[field] = _calc_stats(vals)
+            field_stats = _calc_stats(vals)
+            field_stats["sum"] = fsum(vals)
+            usage_stats[field] = field_stats
 
     return usage_stats
 
