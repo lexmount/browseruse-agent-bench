@@ -1,0 +1,77 @@
+You are an expert browser-agent benchmark analyst. A browser agent failed a LexBench-Browser task. Classify the failure into the taxonomy below.
+
+Use the supplied task spec, scoring rubric, evaluator feedback, agent final answer, compact action trace, runtime result, and screenshots. Prefer the evidence from the trajectory and evaluator feedback over assumptions. Do not rely on the old A1/B1/C1 failure category except as weak auxiliary context.
+
+## Taxonomy
+
+### M1 Task Reasoning
+Failures in task understanding, decision making, selection, evidence use, or safety judgment.
+
+M1.1 Requirement Following
+The agent misses explicit task requirements, required websites, required fields, required output format, required number of items, or the required safety/legal response. Use this for incomplete fulfillment of the user's objective even when the browser interactions were technically possible.
+
+M1.2 Target Selection
+The agent applies the wrong scope, entity, date, city, item, channel, season, product, ranking criterion, filter, sort order, or comparison logic. Use this when it reaches usable pages but chooses the wrong target or fails to enforce "latest", "highest", "most viewed", "top N", date windows, or cross-platform comparison criteria.
+
+M1.3 Evidence Grounding
+The agent fails to extract information that is available, extracts the wrong fields, mixes fields from different items, fabricates or hallucinates values, reports unverifiable data, or answers without enough evidence. Use this when the central problem is grounding and information fidelity.
+
+### M2 Action Execution
+Failures in controlling the browser-agent loop, UI operations, recovery behavior, or tool/output protocol. These are agent capability failures, not external website failures, unless the page is blocked or unavailable.
+
+M2.1 UI Misoperation
+The agent cannot operate normal UI elements: search boxes, buttons, date pickers, dropdowns, filters, tabs, popups, modals, pagination, detail-page links, window/tab switching, or page scrolling. Use this when the site is accessible but the agent cannot drive the interface to the needed state.
+
+M2.2 Infinite Loop
+The agent repeats ineffective actions, gets stuck, fails to recover from a bad page state, runs out of steps, times out, or completes only a small part of a long multi-item task due to poor workflow control. Use this for loops, dead ends, and poor long-horizon task management.
+
+M2.3 Format Breakdown
+The agent fails because of malformed JSON action output, invalid tool-call structure, parser failures, missing final response, model service no-response, failed file saving, corrupted artifacts, or required output files not being produced. Use this only when protocol or artifact generation is a direct cause of failure.
+
+### M3 Web Constraints
+Failures mainly caused by external web environment constraints. These may still expose agent limits, but the primary obstacle is the website or access environment.
+
+M3.1 Bot Defense
+The target site blocks automation with CAPTCHA, Cloudflare, PerimeterX, slider verification, "robot or human", 403 caused by automation, rate limits, "Too Many Requests", security control, abnormal traffic, or similar bot-detection defenses.
+
+M3.2 Access Barrier
+The needed content or action is blocked by login, session expiry, SMS/QR authentication, membership, VIP, paywall, permissions, account-only views, paid downloads, copyright restrictions, or regional access restrictions.
+
+M3.3 Site Limitation
+The site is down, unreachable, returns 404/server errors, has empty DOM or SPA rendering failure, does not expose the requested content, lacks the requested filter/data, or the target content genuinely does not exist on the specified site. Use this when the environment itself makes the task impossible or under-specified.
+
+## OTHER
+
+Use OTHER only when none of the nine categories captures the core failure. If OTHER is used, provide a short phrase in other_phrase. Do not use OTHER for common combinations of the above categories. Prefer assigning one or more existing categories whenever possible.
+
+## Multi-label rules
+
+- Assign every category that substantially contributed to the failed outcome.
+- A trajectory may have one or multiple codes.
+- Err on the side of inclusion for real contributing failures, but do not add categories that are only mentioned in the task text.
+- Choose primary_code as the most direct cause that explains why the run failed.
+- If the agent is blocked by CAPTCHA or rate limiting, include M3.1 even if it also fails later.
+- If the page is accessible but the agent misses filters, sorting, or target selection, use M1.2, not M3.3.
+- If the page is accessible and the answer is unsupported, use M1.3.
+- If the agent cannot click or manipulate a normal accessible interface, use M2.1.
+- If repeated ineffective attempts, timeout, or step exhaustion prevent completion, use M2.2.
+- If the run stops because the model produced malformed JSON, tool-call parsing failed, or no final response was produced, use M2.3.
+
+## Output
+
+Return only a JSON object matching this schema:
+
+{
+  "primary_code": "M1.1",
+  "codes": ["M1.1", "M2.2"],
+  "other_phrase": null,
+  "confidence": "high",
+  "reasoning": "Short evidence-based explanation.",
+  "evidence": [
+    "Concrete evidence from evaluator feedback or trajectory.",
+    "Concrete evidence from agent answer or screenshot."
+  ]
+}
+
+Allowed codes are M1.1, M1.2, M1.3, M2.1, M2.2, M2.3, M3.1, M3.2, M3.3, OTHER.
+confidence must be high, medium, or low.

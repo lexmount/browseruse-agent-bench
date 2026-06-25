@@ -201,6 +201,37 @@ bubench eval --agent browser-use --data LexBench-Browser --model-id gpt-4.1
 > `--split` is optional — the benchmark's `default_split` (from `data_info.json`) is used automatically. Pass `--split <name>` only to override the default.
 > For the full parameter reference, see the [Quickstart docs](https://docs.bubench.lexmount.io/en/quickstart).
 
+**Post-attribution rerun workflow**
+
+For LexBench-Browser result analysis, use the automated post-run workflow:
+
+```text
+run benchmark -> eval -> failure attribution -> post-attribution rerun check
+-> rerun selected tasks -> re-eval -> final attribution / visualization
+```
+
+The final rerun candidate set is:
+
+```text
+result_json_hard
+∪ latest_agent_run_log_hard
+∪ taxonomy_primary_M3.2_or_M3.3
+```
+
+Generate rerun task ids after evaluation and failure attribution:
+
+```bash
+PYTHONPATH=. python scripts/collect_lexbench_rerun_candidates.py \
+  --model MODEL_DIR_NAME \
+  --timestamp TIMESTAMP \
+  --artifact-mode hard \
+  --include-taxonomy-web-constraints
+```
+
+See [LexBench automated evaluation system](docs/lexbench-automated-evaluation-system.md),
+[rerun check rules](docs/result-rerun-check-rules.md), and
+[12-model rerun rule validation](docs/rerun-rule-validation-12-models.md).
+
 ## Data Loading
 
 Use `--data-source` to control where benchmark data is loaded from:

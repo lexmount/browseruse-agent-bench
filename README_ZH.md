@@ -200,6 +200,37 @@ bubench eval --agent browser-use --data LexBench-Browser --model-id gpt-4.1
 
 > 全量参数说明见[快速开始文档](https://docs.bubench.lexmount.io/zh/quickstart)。
 
+**Post-attribution 重测流程**
+
+LexBench-Browser 结果分析推荐使用这套自动化 post-run 流程：
+
+```text
+run benchmark -> eval -> failure attribution -> post-attribution rerun check
+-> rerun selected tasks -> re-eval -> final attribution / visualization
+```
+
+最终 rerun candidate 集合是：
+
+```text
+result_json_hard
+∪ latest_agent_run_log_hard
+∪ taxonomy_primary_M3.2_or_M3.3
+```
+
+在 eval 和 failure attribution 之后生成 rerun task ids：
+
+```bash
+PYTHONPATH=. python scripts/collect_lexbench_rerun_candidates.py \
+  --model MODEL_DIR_NAME \
+  --timestamp TIMESTAMP \
+  --artifact-mode hard \
+  --include-taxonomy-web-constraints
+```
+
+详见 [LexBench 自动化评测体系](docs/lexbench-automated-evaluation-system.md)、
+[rerun check rules](docs/result-rerun-check-rules.md) 和
+[12-model rerun rule validation](docs/rerun-rule-validation-12-models.md)。
+
 ## 数据加载
 
 通过 `--data-source` 控制数据来源：
