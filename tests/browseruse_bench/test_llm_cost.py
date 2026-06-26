@@ -358,6 +358,71 @@ def test_enrich_result_usage_cost_if_needed_missing_model_id_is_safe(
     assert usage["total_cost"] == 0.0
 
 
+# Model ids that must always price to a non-zero cost from the shipped
+# configs/pricing/model_pricing.yaml. Covers the LexBench tech report (0624)
+# model lineup plus model_ids used by config.example.yaml / past runs.
+SHIPPED_PRICED_MODEL_IDS = (
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5-mini",
+    "claude-opus-4-8",
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
+    "gemini-3.1-pro-preview",
+    "gemini-3.5-flash",
+    "gemini-2.5-pro",
+    "glm-5.2",
+    "glm-5.1",
+    "doubao-seed-2-0-pro",
+    "qwen3.7-max",
+    "qwen3.5-plus",
+    "kimi-k2.6",
+    "MiniMax-M3",
+    "MiniMax-M2.5",
+    "deepseek-v4-pro",
+    "bu-2-0",
+)
+
+
+@pytest.mark.parametrize("model_id", SHIPPED_PRICED_MODEL_IDS)
+def test_shipped_pricing_table_resolves_nonzero_cost(model_id: str) -> None:
+    """The shipped custom pricing table must price every covered model."""
+    usage = {"prompt_tokens": 1000, "completion_tokens": 1000, "total_tokens": 2000}
+    enriched = enrich_usage_with_litellm_pricing(
+        usage=usage,
+        model_name=model_id,
+        price_table={},
+    )
+
+    assert enriched["total_prompt_cost"] > 0.0, model_id
+    assert enriched["total_completion_cost"] > 0.0, model_id
+    assert enriched["total_cost"] > 0.0, model_id
+
+
+def test_shipped_pricing_recomputes_zero_cost_record_for_real_model() -> None:
+    """Regression: a complete-but-zero-cost usage record (the upstream-cost bug)
+    is re-priced once the model exists in the shipped table."""
+    result = {
+        "model_id": "deepseek-v4-pro",
+        "metrics": {
+            "usage": {
+                "total_prompt_tokens": 83689,
+                "total_prompt_cost": 0.0,
+                "total_completion_tokens": 3950,
+                "total_completion_cost": 0.0,
+                "total_tokens": 87639,
+                "total_cost": 0.0,
+            }
+        },
+    }
+
+    usage = enrich_result_usage_cost_if_needed(result)["metrics"]["usage"]
+    assert usage["total_cost"] > 0.0
+    assert usage["total_prompt_cost"] > 0.0
+    assert usage["total_completion_cost"] > 0.0
+
+
 def test_load_litellm_price_table_uses_browseruse_bench_cache_dir(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
