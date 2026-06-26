@@ -123,6 +123,29 @@ glm-5:
 # =====================================================================
 # Doubao / Volcengine (official CNY list price -> USD @ 0.145)
 # =====================================================================
+# Doubao 2.1 Pro (released 2026-06-23). Official model id doubao-seed-2.1-pro;
+# the dashed alias matches the repo's doubao-seed-2-0-pro convention.
+doubao-seed-2.1-pro:
+  input_cost_per_million_tokens: 0.87    # CNY 6
+  output_cost_per_million_tokens: 4.35   # CNY 30
+  cache_read_input_cost_per_million_tokens: 0.174  # CNY 1.2
+
+doubao-seed-2-1-pro:
+  input_cost_per_million_tokens: 0.87    # CNY 6
+  output_cost_per_million_tokens: 4.35   # CNY 30
+  cache_read_input_cost_per_million_tokens: 0.174  # CNY 1.2
+
+# Doubao 2.1 Turbo (deep-thinking, half the Pro price).
+doubao-seed-2.1-turbo:
+  input_cost_per_million_tokens: 0.435   # CNY 3
+  output_cost_per_million_tokens: 2.175  # CNY 15
+  cache_read_input_cost_per_million_tokens: 0.087  # CNY 0.6
+
+doubao-seed-2-1-turbo:
+  input_cost_per_million_tokens: 0.435   # CNY 3
+  output_cost_per_million_tokens: 2.175  # CNY 15
+  cache_read_input_cost_per_million_tokens: 0.087  # CNY 0.6
+
 doubao-seed-2-0-pro:
   input_cost_per_million_tokens: 0.464    # CNY 3.2
   output_cost_per_million_tokens: 2.32    # CNY 16
