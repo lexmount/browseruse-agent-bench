@@ -425,6 +425,43 @@ code, pre, .cell-mono {
   border-radius: 4px;
   border: 1px solid var(--border);
 }
+.efficiency-fig {
+  max-width: 900px;
+  margin: 24px auto 32px;
+}
+.efficiency-pdf-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 247.274 / 178.011;
+  overflow: hidden;
+  background: #fff;
+  padding: 18px;
+}
+.efficiency-pdf-frame::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 8px;
+  background: #fff;
+  pointer-events: none;
+}
+.efficiency-pdf {
+  display: block;
+  width: calc(100% + 80px);
+  height: calc(100% + 80px);
+  margin: -40px;
+  border: 0;
+  background: #fff;
+}
+.efficiency-fig img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #fff;
+  padding: 18px;
+}
 
 /* ==== muted-card ==== */
 

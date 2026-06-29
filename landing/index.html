@@ -67,8 +67,8 @@
           <a class="btn btn-secondary" href="https://docs.bubench.lexmount.io/" target="_blank" rel="noopener">
             <span class="btn-icon">📄</span> Docs
           </a>
-          <a class="btn btn-secondary" href="https://github.com/lexmount/browseruse-agent-bench/issues" target="_blank" rel="noopener">
-            <span class="btn-icon">✦</span> Issues
+          <a class="btn btn-secondary" href="assets/reports/LexBench_Browser.pdf" target="_blank" rel="noopener">
+            <span class="btn-icon">📕</span> Technical Report
           </a>
         </div>
       </div>
@@ -157,7 +157,7 @@
         <div class="stat-sub">294 information retrieval · 83 task execution</div>
       </div>
       <div class="stat-card">
-        <div class="stat-num">10</div>
+        <div class="stat-num">11</div>
         <div class="stat-label">Models evaluated</div>
         <div class="stat-sub">BU · GLM · GPT · Claude · Gemini · Doubao · Kimi · Qwen · MiniMax</div>
       </div>
@@ -332,14 +332,17 @@
   <div class="container">
     <h2 class="section-title">Leaderboard</h2>
     <p class="section-lede">
-      Snapshot results for browser-use on LexBench-Browser across 10 models. Click any header to
-      sort. Showing all 10 entries by success rate.
+      Snapshot results for browser-use on LexBench-Browser across 11 models. Click any header to
+      sort. Showing all 11 entries by success rate.
     </p>
-    <div class="lb-meta">
-      <span class="lb-pill">benchmark · LexBench-Browser</span>
-      <span class="lb-pill">judge · gpt-5.4 (per-task threshold)</span>
-      <span class="lb-pill">snapshot · 2026-06-16</span>
-    </div>
+    <figure class="wide-fig efficiency-fig">
+      <div class="efficiency-pdf-frame">
+        <object class="efficiency-pdf" data="assets/img/steps-success-tradeoff.pdf#toolbar=0&amp;navpanes=0&amp;scrollbar=0&amp;view=Fit" type="application/pdf" aria-label="Step-efficiency scatter plot comparing model success rate and average steps">
+          <img src="assets/img/steps-success-tradeoff.png" alt="Step-efficiency scatter plot comparing model success rate and average steps" loading="lazy">
+        </object>
+      </div>
+      <figcaption>Model efficiency view: success rate versus average browser-agent steps.</figcaption>
+    </figure>
     <div class="lb-wrap">
       <table class="lb-table" id="lb-table">
         <thead>
@@ -390,8 +393,17 @@
             <td class="num">22.0</td>
             <td class="num">589.7</td>
           </tr>
-          <tr data-rank="5" data-agent="browser-use" data-model="qwen3.7-max" data-browser="Lexmount" data-success="65.8" data-steps="18.80" data-e2e="487.6">
+          <tr data-rank="5" data-agent="browser-use" data-model="glm-5.2" data-browser="Lexmount" data-success="66.2" data-steps="22.27" data-e2e="697.9">
             <td class="num">5</td>
+            <td><span class="cell-strong">browser-use</span></td>
+            <td><code class="cell-mono">glm-5.2</code></td>
+            <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num"><strong>66.2</strong></td>
+            <td class="num">22.3</td>
+            <td class="num">697.9</td>
+          </tr>
+          <tr data-rank="6" data-agent="browser-use" data-model="qwen3.7-max" data-browser="Lexmount" data-success="65.8" data-steps="18.80" data-e2e="487.6">
+            <td class="num">6</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">qwen3.7-max</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
@@ -399,8 +411,8 @@
             <td class="num">18.8</td>
             <td class="num">487.6</td>
           </tr>
-          <tr data-rank="6" data-agent="browser-use" data-model="gemini-3.1-pro-preview" data-browser="Lexmount" data-success="63.9" data-steps="12.60" data-e2e="368.6">
-            <td class="num">6</td>
+          <tr data-rank="7" data-agent="browser-use" data-model="gemini-3.1-pro-preview" data-browser="Lexmount" data-success="63.9" data-steps="12.60" data-e2e="368.6">
+            <td class="num">7</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">gemini-3.1-pro-preview</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
@@ -408,8 +420,8 @@
             <td class="num">12.6</td>
             <td class="num">368.6</td>
           </tr>
-          <tr data-rank="7" data-agent="browser-use" data-model="doubao-seed-2-0-pro" data-browser="Lexmount" data-success="61.8" data-steps="17.70" data-e2e="595.3">
-            <td class="num">7</td>
+          <tr data-rank="8" data-agent="browser-use" data-model="doubao-seed-2-0-pro" data-browser="Lexmount" data-success="61.8" data-steps="17.70" data-e2e="595.3">
+            <td class="num">8</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">doubao-seed-2-0-pro</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
@@ -417,8 +429,8 @@
             <td class="num">17.7</td>
             <td class="num">595.3</td>
           </tr>
-          <tr data-rank="8" data-agent="browser-use" data-model="gemini-3.5-flash" data-browser="Lexmount" data-success="58.6" data-steps="26.90" data-e2e="376.4">
-            <td class="num">8</td>
+          <tr data-rank="9" data-agent="browser-use" data-model="gemini-3.5-flash" data-browser="Lexmount" data-success="58.6" data-steps="26.90" data-e2e="376.4">
+            <td class="num">9</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">gemini-3.5-flash</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
@@ -426,8 +438,8 @@
             <td class="num">26.9</td>
             <td class="num">376.4</td>
           </tr>
-          <tr data-rank="9" data-agent="browser-use" data-model="kimi-k2.6" data-browser="Lexmount" data-success="53.3" data-steps="23.60" data-e2e="433.4">
-            <td class="num">9</td>
+          <tr data-rank="10" data-agent="browser-use" data-model="kimi-k2.6" data-browser="Lexmount" data-success="53.3" data-steps="23.60" data-e2e="433.4">
+            <td class="num">10</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">kimi-k2.6</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
@@ -435,8 +447,8 @@
             <td class="num">23.6</td>
             <td class="num">433.4</td>
           </tr>
-          <tr data-rank="10" data-agent="browser-use" data-model="MiniMax-M3" data-browser="Lexmount" data-success="40.1" data-steps="20.10" data-e2e="584.5">
-            <td class="num">10</td>
+          <tr data-rank="11" data-agent="browser-use" data-model="MiniMax-M3" data-browser="Lexmount" data-success="40.1" data-steps="20.10" data-e2e="584.5">
+            <td class="num">11</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">MiniMax-M3</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
@@ -447,10 +459,6 @@
         </tbody>
       </table>
     </div>
-    <p class="muted small">
-      Snapshot source:
-      <code>experiments/{benchmark}/{split}/{agent}/{model_id}/{ts}/</code> run dirs.
-    </p>
   </div>
 </section>
 
@@ -481,6 +489,7 @@
       <ul class="tight">
         <li><a href="#leaderboard">Leaderboard</a></li>
         <li><a href="#evaluation">Evaluation methodology</a></li>
+        <li><a href="assets/reports/LexBench_Browser.pdf" target="_blank" rel="noopener">Technical report</a></li>
       </ul>
     </div>
   </div>
