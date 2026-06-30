@@ -48,6 +48,7 @@ from browseruse_bench.utils import (
     setup_logger,
 )
 from browseruse_bench.utils.llm_cost import enrich_result_usage_cost_if_needed
+from browseruse_bench.utils.run_identity import load_machine_identity_from_env
 
 # Load environment variables from root .env
 load_env_file(REPO_ROOT / ".env")
@@ -123,6 +124,14 @@ def _save_result(workspace: Path, result_data: dict[str, Any]) -> None:
         logger.error("Failed to write result.json at %s: %s", result_path, exc)
 
 
+def _attach_run_metadata(result_data: dict[str, Any], run_metadata: dict[str, Any]) -> dict[str, Any]:
+    existing = result_data.get("run_metadata")
+    merged = dict(existing) if isinstance(existing, dict) else {}
+    merged.update(run_metadata)
+    result_data["run_metadata"] = merged
+    return result_data
+
+
 def main() -> int:
     signal.signal(signal.SIGTERM, _signal_handler)
     signal.signal(signal.SIGINT, _signal_handler)
@@ -147,6 +156,7 @@ def main() -> int:
     # Resolve timeout
     timeout = resolve_timeout_value(args.timeout, agent_config)
     agent_config["timeout_seconds"] = timeout
+    run_metadata = {"machine": load_machine_identity_from_env()}
 
     # Ensure workspace exists
     workspace = args.workspace
@@ -198,6 +208,7 @@ def main() -> int:
             result_data,
             model_name=result_data.get("model_id"),
         )
+        result_data = _attach_run_metadata(result_data, run_metadata)
 
         _save_result(workspace, result_data)
 
@@ -217,12 +228,14 @@ def main() -> int:
             env_status="interrupted",
             agent_done="interrupted",
         )
+        error_result = _attach_run_metadata(error_result, run_metadata)
         _save_result(workspace, error_result)
         return ExitCode.INTERRUPTED
 
     except (ImportError, OSError, RuntimeError, ValueError, TypeError, KeyError) as exc:
         logger.exception("[FAILED] Task execution error: %s", exc)
         error_result = _build_error_result(task_info, str(exc), traceback.format_exc())
+        error_result = _attach_run_metadata(error_result, run_metadata)
         _save_result(workspace, error_result)
         return ExitCode.FAILURE
 

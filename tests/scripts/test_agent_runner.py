@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from browseruse_bench.utils import llm_cost
+from browseruse_bench.utils.run_identity import MACHINE_IDENTITY_ENV_KEY
 from browseruse_bench.runner import agent_runner
 
 TEST_PRICE_TABLE = {
@@ -69,6 +70,10 @@ def test_agent_runner_enriches_usage_cost_before_result_write(
     monkeypatch.setattr(agent_runner, "resolve_timeout_value", lambda _timeout, _config: 300)
     monkeypatch.setattr(agent_runner.signal, "signal", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(llm_cost, "load_litellm_price_table", lambda: TEST_PRICE_TABLE)
+    monkeypatch.setenv(
+        MACHINE_IDENTITY_ENV_KEY,
+        json.dumps({"machine_id": "worker-a", "hostname": "host-a"}),
+    )
 
     exit_code = agent_runner.main()
     assert exit_code == 0
@@ -80,6 +85,8 @@ def test_agent_runner_enriches_usage_cost_before_result_write(
     assert usage["total_completion_tokens"] == 100
     assert usage["total_tokens"] == 1100
     assert usage["total_cost"] == pytest.approx(0.0028)
+    assert saved_result["run_metadata"]["machine"]["machine_id"] == "worker-a"
+    assert saved_result["run_metadata"]["machine"]["hostname"] == "host-a"
 
 
 def test_agent_runner_marks_interrupts_as_interrupted(
@@ -103,6 +110,10 @@ def test_agent_runner_marks_interrupts_as_interrupted(
     monkeypatch.setattr(agent_runner, "load_agent_config_from_path", lambda _path: {})
     monkeypatch.setattr(agent_runner, "resolve_timeout_value", lambda _timeout, _config: 300)
     monkeypatch.setattr(agent_runner.signal, "signal", lambda *_args, **_kwargs: None)
+    monkeypatch.setenv(
+        MACHINE_IDENTITY_ENV_KEY,
+        json.dumps({"machine_id": "worker-b", "hostname": "host-b"}),
+    )
 
     exit_code = agent_runner.main()
     assert exit_code == 130
@@ -111,3 +122,4 @@ def test_agent_runner_marks_interrupts_as_interrupted(
     saved_result = json.loads(result_path.read_text(encoding="utf-8"))
     assert saved_result["env_status"] == "interrupted"
     assert saved_result["agent_done"] == "interrupted"
+    assert saved_result["run_metadata"]["machine"]["machine_id"] == "worker-b"

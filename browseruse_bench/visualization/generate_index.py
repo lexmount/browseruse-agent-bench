@@ -391,6 +391,7 @@ def scan_task(task_dir: Path, run_path_rel: str) -> Optional[Dict]:
         "action_history": result.get("action_history", []),
         "metrics": result.get("metrics") or {},
         "config": result.get("config", {}),
+        "run_metadata": result.get("run_metadata", {}),
         "screenshots": screenshots,
         "api_logs": api_logs,
         "has_gif": has_gif,
@@ -527,6 +528,13 @@ def scan_run(benchmark: str, split: str, agent: str, timestamp_dir: Path, model:
     first = next(iter(tasks.values()))
     model_id = first.get("model_id", "unknown")
     config = first.get("config", {})
+    config_snapshot = _read_json(timestamp_dir / "config_snapshot.json") or {}
+    machine = config_snapshot.get("machine")
+    if not isinstance(machine, dict):
+        run_metadata = first.get("run_metadata", {})
+        machine = run_metadata.get("machine") if isinstance(run_metadata, dict) else {}
+    if not isinstance(machine, dict):
+        machine = {}
 
     # Aggregate browser_id across all tasks. Picking the dominant value
     # (rather than only first task) is robust to synthetic / reconstructed
@@ -585,6 +593,8 @@ def scan_run(benchmark: str, split: str, agent: str, timestamp_dir: Path, model:
         "agent": agent,
         "model": model,
         "model_id": model_id,
+        "machine_id": machine.get("machine_id", ""),
+        "machine": machine,
         "config": config,
         "browser": browser_kind,
         "browser_label": browser_label,

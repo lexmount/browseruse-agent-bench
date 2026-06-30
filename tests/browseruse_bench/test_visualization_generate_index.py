@@ -141,6 +141,24 @@ class TestScanRunModelField:
             },
         ]
 
+    def test_scan_run_includes_machine_identity(self, tmp_path, patch_repo_root):
+        run_dir = make_run_dir(tmp_path)
+        (run_dir / "config_snapshot.json").write_text(
+            json.dumps({
+                "machine": {
+                    "machine_id": "worker-a",
+                    "hostname": "host-a",
+                }
+            }),
+            encoding="utf-8",
+        )
+
+        result = gi.scan_run("bench", "split", "agent", run_dir)
+
+        assert result is not None
+        assert result["machine_id"] == "worker-a"
+        assert result["machine"]["hostname"] == "host-a"
+
 
 class TestRepoRootMissing:
     """Regression: import must succeed and generate_index() must fail cleanly when REPO_ROOT is unresolved."""

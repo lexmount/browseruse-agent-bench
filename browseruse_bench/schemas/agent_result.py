@@ -99,6 +99,9 @@ class AgentResult(BaseModel):
     # Agent-specific opaque data (eval scripts must not read this)
     agent_metadata: dict[str, Any] = Field(default_factory=dict)
 
+    # Run-level metadata injected by the runner (machine id, orchestration info)
+    run_metadata: dict[str, Any] = Field(default_factory=dict)
+
     # Prompt snapshot
     system_prompt: PromptSnapshot | None = None
 

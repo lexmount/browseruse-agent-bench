@@ -30,16 +30,23 @@ def test_write_run_manifest_redacts_secrets(tmp_path: Path) -> None:
             "benchmark": "LexBench-Browser",
             "model_id": "gpt-5.4",
         },
+        machine_identity={
+            "machine_id": "worker-a",
+            "hostname": "host-a",
+            "machine_id_source": "test",
+        },
     )
 
     snapshot = json.loads((tmp_path / "config_snapshot.json").read_text(encoding="utf-8"))
 
-    assert sorted(snapshot.keys()) == ["run", "runtime_config"]
+    assert sorted(snapshot.keys()) == ["machine", "run", "runtime_config"]
     assert "models" not in snapshot
     assert "browsers" not in snapshot
     assert "agents" not in snapshot
     assert snapshot["run"]["agent"] == "browser-use"
     assert snapshot["run"]["benchmark"] == "LexBench-Browser"
+    assert snapshot["machine"]["machine_id"] == "worker-a"
+    assert snapshot["machine"]["hostname"] == "host-a"
     assert snapshot["runtime_config"]["use_vision"] is False
     assert snapshot["runtime_config"]["max_steps"] == 3
     assert snapshot["runtime_config"]["model_id"] == "gpt-5.4"

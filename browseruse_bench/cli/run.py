@@ -57,6 +57,12 @@ from browseruse_bench.utils import (
     resolve_split,
     setup_logger,
 )
+from browseruse_bench.utils.run_identity import (
+    INCLUDE_RAW_MACHINE_IDENTIFIERS_ENV_KEY,
+    MACHINE_ID_ENV_KEY,
+    MACHINE_IDENTITY_ENV_KEY,
+    collect_machine_identity,
+)
 
 CONFIG_PATH = REPO_ROOT / "config.yaml"
 
@@ -314,12 +320,14 @@ def _write_run_manifest(
     agent_config: dict[str, Any] | None = None,
     resolved_agent_config: dict[str, Any] | None = None,
     run_context: dict[str, Any] | None = None,
+    machine_identity: dict[str, Any] | None = None,
 ) -> None:
     """Write a redacted config snapshot for reproducibility."""
     try:
         runtime_config = resolved_agent_config or agent_config or config or {}
         snapshot = {
             "run": _redact_config_secrets(run_context or {}),
+            "machine": machine_identity or collect_machine_identity(),
             "runtime_config": _redact_config_secrets(runtime_config),
         }
         config_snapshot_path = output_dir / "config_snapshot.json"
@@ -552,6 +560,23 @@ def configure_run_parser(parser: argparse.ArgumentParser, config: dict[str, Any]
         help="Number of tasks to run in parallel (default: 1 = sequential).",
     )
     parser.add_argument(
+        "--machine-id",
+        default=None,
+        help=(
+            "Optional stable label for the machine running this experiment. "
+            f"Defaults to ${MACHINE_ID_ENV_KEY} or hostname."
+        ),
+    )
+    parser.add_argument(
+        "--include-raw-machine-identifiers",
+        action="store_true",
+        help=(
+            "Include raw hardware identifiers such as MAC address in run outputs. "
+            f"By default only hashed identifiers are recorded; can also be enabled "
+            f"with ${INCLUDE_RAW_MACHINE_IDENTIFIERS_ENV_KEY}=1."
+        ),
+    )
+    parser.add_argument(
         "--write-output-dir",
         dest="write_output_dir",
         default=None,
@@ -652,6 +677,20 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
 
     logger.info("Running %s on %s", agent_name, benchmark_name)
     logger.info("   Output: %s", output_dir)
+    include_raw_machine_identifiers = bool(
+        getattr(args, "include_raw_machine_identifiers", False)
+        or str(os.getenv(INCLUDE_RAW_MACHINE_IDENTIFIERS_ENV_KEY) or "").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+    machine_identity = collect_machine_identity(
+        getattr(args, "machine_id", None),
+        include_raw_identifiers=include_raw_machine_identifiers,
+    )
+    logger.info(
+        "   Machine: %s (host=%s)",
+        machine_identity.get("machine_id"),
+        machine_identity.get("hostname"),
+    )
 
     # Load tasks
     default_task_url = config.get("default", {}).get("task_start_url")
@@ -729,6 +768,7 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     env["BROWSERUSE_BENCH_LOG_FORMAT"] = "plain"
+    env[MACHINE_IDENTITY_ENV_KEY] = json.dumps(machine_identity, ensure_ascii=False)
     repo_root_str = str(REPO_ROOT)
     old_pythonpath = env.get("PYTHONPATH", "")
     if old_pythonpath:
@@ -961,6 +1001,7 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
                     "benchmark": benchmark_name,
                     "split": args.split,
                     "model_id": model_id,
+                    "machine_id": machine_identity.get("machine_id"),
                     "timestamp": timestamp,
                     "model_name_override": getattr(args, "model_name", None),
                     "browser_id_override": getattr(args, "browser_id", None),
@@ -972,6 +1013,7 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
                     "concurrency": getattr(args, "concurrency", None),
                     "agent_config_path": str(getattr(args, "agent_config", None) or ""),
                 },
+                machine_identity=machine_identity,
             )
         except (OSError, KeyError, AttributeError, TypeError) as exc:
             logger.warning("Failed to finalize run manifest: %s", exc)
