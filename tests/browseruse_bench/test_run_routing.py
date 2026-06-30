@@ -10,7 +10,9 @@ import pytest
 from browseruse_bench.browsers import login_contexts as lc
 from browseruse_bench.cli.run import (
     _canonicalize_cli_browser_id,
+    _classify_js_code_for_log,
     _claim_unique_run_dir,
+    _clarify_agent_stdout_line,
     resolve_lexmount_routing_for_task,
 )
 
@@ -168,3 +170,34 @@ def test_claim_unique_run_dir_exhaustion_raises(tmp_path: Path) -> None:
     base = tmp_path / "model"
     with pytest.raises(SystemExit, match="unique run output directory"):
         _claim_unique_run_dir(base, max_seconds=0)
+
+
+def test_clarify_agent_stdout_line_renames_browser_evaluate_code() -> None:
+    line = "INFO     [Agent]   ▶️   evaluate: code: document.querySelectorAll('h2')"
+
+    assert _clarify_agent_stdout_line(line) == (
+        "INFO     [Agent]   ▶️   execute_js(read_dom): code: document.querySelectorAll('h2')"
+    )
+
+
+def test_clarify_agent_stdout_line_keeps_other_tools_unchanged() -> None:
+    line = "INFO     [Agent]   ▶️   click: index: 8695"
+
+    assert _clarify_agent_stdout_line(line) == line
+
+
+@pytest.mark.parametrize(
+    ("code", "category"),
+    [
+        ("[...document.querySelectorAll('a')].map(a=>a.href)", "extract_links"),
+        ("document.querySelectorAll('h1,h2').length", "read_dom"),
+        ("Array.from(document.querySelectorAll('input')).map(i=>i.value)", "form_state"),
+        ("localStorage.getItem('city')", "storage"),
+        ("document.title + location.href + document.readyState", "page_state"),
+        ("performance.getEntries().map(e=>e.name)", "network"),
+        ("document.querySelector('#x').click()", "modify_page"),
+        ("(() => 42)()", "custom"),
+    ],
+)
+def test_classify_js_code_for_log(code: str, category: str) -> None:
+    assert _classify_js_code_for_log(code) == category

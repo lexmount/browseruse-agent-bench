@@ -265,6 +265,55 @@ _RE_STATUS = re.compile(r"^\[(RUNNING|SUCCESS|FAILED|TIMING)\]")
 _RE_FINAL = re.compile(r"Final Result:")
 
 
+def _classify_js_code_for_log(code: str) -> str:
+    lowered = code.lower()
+    if any(token in lowered for token in ("localstorage", "sessionstorage", "document.cookie", "indexeddb")):
+        return "storage"
+    if any(token in lowered for token in ("fetch(", "xmlhttprequest", "performance.getentries")):
+        return "network"
+    if any(token in lowered for token in (
+        ".click(",
+        "dispatchevent",
+        "setattribute",
+        "appendchild",
+        "removechild",
+        "createelement",
+    )):
+        return "modify_page"
+    if any(token in lowered for token in ("location.", "document.title", "document.readystate", "window.inner")):
+        return "page_state"
+    if (
+        re.search(r"queryselectorall\(\s*['\"]a(?:[\\.\\[#:'\"]|$)", lowered)
+        or (".href" in lowered and "location.href" not in lowered)
+    ):
+        return "extract_links"
+    if (
+        re.search(r"queryselector(?:all)?\(\s*['\"][^'\"]*(?:input|textarea|select)", lowered)
+        or any(token in lowered for token in (".value", ".checked"))
+    ):
+        return "form_state"
+    if any(token in lowered for token in (
+        "queryselector",
+        "getelement",
+        "innertext",
+        "textcontent",
+        "innerhtml",
+        "document.body",
+    )):
+        return "read_dom"
+    return "custom"
+
+
+def _clarify_agent_stdout_line(line: str) -> str:
+    """Make third-party agent tool names clearer in run logs."""
+    marker = "evaluate: code:"
+    if marker not in line:
+        return line
+    prefix, _, code = line.partition(marker)
+    category = _classify_js_code_for_log(code)
+    return f"{prefix}execute_js({category}): code:{code}"
+
+
 class _TaskBriefWriter:
     """Extract key event lines from subprocess output into task_brief.log."""
 
@@ -892,11 +941,12 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
             if proc.stdout:
                 for line in iter(proc.stdout.readline, ""):
                     if line:
+                        display_line = _clarify_agent_stdout_line(line.rstrip("\n"))
                         # Prefix each output line with task id when concurrent.
                         if concurrency > 1:
-                            logger.info("[%s] %s", current_task_id, line.rstrip("\n"))
+                            logger.info("[%s] %s", current_task_id, display_line)
                         else:
-                            logger.info(line.rstrip("\n"))
+                            logger.info(display_line)
 
             returncode = proc.wait()
 
