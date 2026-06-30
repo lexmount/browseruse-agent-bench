@@ -5,13 +5,18 @@
     "task_all": "task_all.jsonl",
     "lexmount": "task_lexmount.jsonl",
     "global": "task_global.jsonl",
-    "sample50": "task_sample50.jsonl"
+    "sample50": "task_sample50.jsonl",
+    "rpa": "task_rpa.jsonl",
+    "im": "task_im.jsonl",
+    "cross_system": "task_cross_system.jsonl",
+    "email": "task_email.jsonl",
+    "login_required": "task_login_required.jsonl"
   },
   "version_info": {
     "LexBench-Browser": {
       "total_tasks": 210,
       "version": "1.0",
-      "description": "v1.0 - Initial public release: 210 tasks across 107 distinct websites, no login required. Slice the data via the `login_required`, `domain`, or `risk_control` fields.",
+      "description": "v1.0 - Initial public release: 210 tasks across 107 distinct websites, no login required.",
       "robustness_tags": {
         "categories": 6,
         "tag_count": 16,
@@ -22,8 +27,7 @@
           "anti_crawl": ["captcha_verification", "anti_bot", "rate_limiting"],
           "localization": ["chinese_rendering", "cross_language"],
           "complex_interaction": ["filter_sort", "data_extraction"]
-        },
-        "notes": "拒绝场景任务的鲁棒性标签仅保留语言相关项（chinese_rendering / cross_language）。"
+        }
       },
       "label_system": {
         "task_type": ["T1", "T2"],
@@ -61,6 +65,52 @@
         "支持按 login_required / domain / risk_control / robustness_tags 多维度切片"
       ],
       "last_updated": "2026-04-30"
+    },
+    "RPA-Tasks-RealWorld": {
+      "total_tasks": 22,
+      "version": "1.0",
+      "description": "v1.0 - 16 RPA tasks on real-world public systems: Odoo Demo (6), Trello (2), Wikipedia (2), Hacker News (2), Amazon (1), Trip.com (1), GitHub (1), Yahoo Finance (1), npm+GitHub (1). All public-access, no login required.",
+      "target_systems": {
+        "odoo_demo": {"count": 6, "url": "demo.odoo.com"},
+        "amazon": {"count": 1, "url": "www.amazon.com"},
+        "trip": {"count": 1, "url": "www.trip.com"},
+        "github": {"count": 1, "url": "github.com"},
+        "yahoo_finance": {"count": 1, "url": "finance.yahoo.com"},
+        "npm_github": {"count": 1, "url": "npmjs.com, github.com"}
+      },
+      "difficulty_distribution": {"easy": 0, "medium": 6, "hard": 4},
+      "last_updated": "2026-05-20"
+    },
+    "IM-Tasks-Zulip": {
+      "total_tasks": 10,
+      "version": "1.0",
+      "description": "v1.0 - 10 IM-RPA tasks on Zulip Community (chat.zulip.org), public view no login required. Covers channel monitoring, topic aggregation, emoji sentiment, cross-channel search, contributor tracking, activity ranking, mention tracking, link collection, topic lifecycle, trending topics.",
+      "target_systems": {
+        "zulip": {"count": 10, "url": "chat.zulip.org"}
+      },
+      "difficulty_distribution": {"easy": 0, "medium": 0, "hard": 10},
+      "last_updated": "2026-06-04"
+    },
+    "Cross-System-Tasks": {
+      "total_tasks": 10,
+      "version": "1.0",
+      "description": "v1.0 - 10 cross-system tasks bridging Zulip (chat.zulip.org) and Odoo (demo.odoo.com). Covers bug→CRM, order→Sales, leave→HR, invoice→Accounting, meeting→Project, stockout→Inventory, onboard→Employees, purchase→Purchase, complaint→CRM, event→Calendar.",
+      "target_systems": {
+        "zulip_odoo": {"count": 10, "url": "chat.zulip.org, demo.odoo.com"}
+      },
+      "difficulty_distribution": {"easy": 0, "medium": 2, "hard": 8},
+      "last_updated": "2026-06-04"
+    },
+    "Email-Tasks": {
+      "total_tasks": 10,
+      "version": "1.0",
+      "description": "v1.0 - 10 email-based tasks: 5 YOPmail-only inbox monitoring/OTP/aggregation/link/search tasks + 5 YOPmail→Odoo cross-system tasks (order email→Sales, invoice email→Accounting, registration email→Contacts, support email→CRM, shipping email→Inventory).",
+      "target_systems": {
+        "yopmail": {"count": 5, "url": "yopmail.com"},
+        "yopmail_odoo": {"count": 5, "url": "yopmail.com, demo.odoo.com"}
+      },
+      "difficulty_distribution": {"easy": 0, "medium": 4, "hard": 6},
+      "last_updated": "2026-06-04"
     }
   },
   "huggingface": {

@@ -9,13 +9,18 @@ __pycache__/
 # Distribution / packaging
 
 # experiments directory
-experiments/
+experiments/*
 experiments/**/tasks/
 experiments/**/videos/
 experiments/**/docs/
 experiments/**/tasks_eval_result/**
 # experiments/**/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9]/
 experiments/.gitkeep
+!experiments/LexBench-Browser/
+experiments/LexBench-Browser/*
+!experiments/LexBench-Browser/README.md
+!experiments/LexBench-Browser/step_debugger_server.py
+!experiments/LexBench-Browser/rpa_login_step_debugger.html
 
 # Root config contains API keys - git ignored
 config.yaml

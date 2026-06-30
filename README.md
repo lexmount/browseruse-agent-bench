@@ -309,6 +309,8 @@ bubench viz --watch-interval 5       # poll interval in seconds (default: 3)
 
 For remote sharing with tmux and firewall configuration, see [Visualization Documentation](https://docs.bubench.lexmount.io/en/leaderboard/visualization#remote--intranet-sharing).
 
+For step-level replay/debugging of LexBench-Browser API logs, see [experiments/LexBench-Browser/README.md](/Users/sherry/Documents/sherry/my-agent/workspace/browseruse-bench-staging/experiments/LexBench-Browser/README.md). The debugger is a lightweight local server that reads existing experiment artifacts and lets you inspect or replay one step at a time.
+
 ## Acknowledgements
 
 Some code in this project is cited and modified from [Online-Mind2Web](https://github.com/OSU-NLP-Group/Online-Mind2Web) and [simple-evals](https://github.com/openai/simple-evals).

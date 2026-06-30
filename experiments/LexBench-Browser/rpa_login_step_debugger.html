@@ -1,0 +1,964 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LexBench RPA Step Debugger</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --ink: #17202a;
+    --muted: #657282;
+    --line: #d8dee6;
+    --line-strong: #b7c0ca;
+    --blue: #1f5f99;
+    --blue-soft: #e8f1fa;
+    --green: #1f7a4d;
+    --green-soft: #e8f6ee;
+    --red: #b42318;
+    --red-soft: #fae8e6;
+    --amber: #9a5b12;
+    --amber-soft: #fff2d9;
+    --code: #101828;
+    --code-bg: #f0f3f7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    color: var(--ink);
+    background: var(--bg);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  }
+  header {
+    min-height: 76px;
+    padding: 16px 22px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  h1 {
+    margin: 0;
+    font-size: 22px;
+    line-height: 1.2;
+    letter-spacing: 0;
+  }
+  .subtitle {
+    color: var(--muted);
+    margin-top: 4px;
+    max-width: 840px;
+  }
+  .status-pill {
+    min-width: 86px;
+    text-align: center;
+    border: 1px solid var(--line);
+    background: #f8fafc;
+    color: var(--muted);
+    border-radius: 999px;
+    padding: 6px 10px;
+    white-space: nowrap;
+  }
+  .status-pill.ok { color: var(--green); border-color: #9bd4b3; background: var(--green-soft); }
+  .status-pill.bad { color: var(--red); border-color: #efaaa3; background: var(--red-soft); }
+  .app {
+    min-height: calc(100vh - 76px);
+    display: grid;
+    grid-template-columns: minmax(260px, 330px) minmax(320px, 0.85fr) minmax(520px, 1.35fr);
+  }
+  aside, .timeline, .detail {
+    min-width: 0;
+    border-right: 1px solid var(--line);
+    background: var(--panel);
+  }
+  aside {
+    padding: 16px;
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    gap: 14px;
+  }
+  .timeline {
+    padding: 16px;
+    background: #fbfcfd;
+  }
+  .detail {
+    padding: 16px;
+    border-right: 0;
+    overflow: auto;
+  }
+  label {
+    display: grid;
+    gap: 5px;
+    color: #344054;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  select, input, textarea {
+    width: 100%;
+    color: var(--ink);
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    background: #fff;
+    padding: 8px 10px;
+    font: inherit;
+    letter-spacing: 0;
+  }
+  textarea {
+    min-height: 160px;
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  button {
+    border: 1px solid var(--line-strong);
+    background: #fff;
+    color: var(--ink);
+    border-radius: 6px;
+    min-height: 34px;
+    padding: 7px 11px;
+    font: inherit;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--blue); color: var(--blue); }
+  button.primary {
+    background: var(--blue);
+    color: #fff;
+    border-color: var(--blue);
+  }
+  button.primary:hover { color: #fff; filter: brightness(0.96); }
+  button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .stack { display: grid; gap: 10px; }
+  .facts {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #fff;
+    padding: 10px;
+    display: grid;
+    gap: 8px;
+  }
+  .fact-row {
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    gap: 8px;
+    align-items: baseline;
+  }
+  .fact-row span:first-child { color: var(--muted); }
+  .fact-row b { font-weight: 700; overflow-wrap: anywhere; }
+  .metric-strip {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .metric {
+    border: 1px solid var(--line);
+    background: #fff;
+    border-radius: 6px;
+    padding: 9px;
+    min-height: 58px;
+  }
+  .metric span {
+    color: var(--muted);
+    display: block;
+    font-size: 12px;
+  }
+  .metric b {
+    display: block;
+    margin-top: 2px;
+    font-size: 17px;
+  }
+  .section-title {
+    margin: 0 0 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .section-title h2 {
+    margin: 0;
+    font-size: 16px;
+    letter-spacing: 0;
+  }
+  .step-list {
+    display: grid;
+    gap: 8px;
+    max-height: calc(100vh - 178px);
+    overflow: auto;
+    padding-right: 2px;
+  }
+  .step-item {
+    width: 100%;
+    text-align: left;
+    border-color: var(--line);
+    background: #fff;
+    min-height: 82px;
+    padding: 10px;
+  }
+  .step-item.active {
+    border-color: var(--blue);
+    box-shadow: inset 3px 0 0 var(--blue);
+    background: var(--blue-soft);
+  }
+  .step-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+  .step-no {
+    font-weight: 800;
+    color: var(--ink);
+  }
+  .step-model {
+    color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .step-action {
+    color: var(--blue);
+    font-weight: 700;
+    overflow-wrap: anywhere;
+  }
+  .step-url, .step-memory {
+    color: var(--muted);
+    font-size: 12px;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .detail-head {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    align-items: start;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+  }
+  .detail-head h2 {
+    margin: 0 0 5px;
+    font-size: 18px;
+    letter-spacing: 0;
+  }
+  .badges {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .badge {
+    border: 1px solid var(--line);
+    background: #fff;
+    border-radius: 999px;
+    padding: 4px 8px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .badge.green { color: var(--green); background: var(--green-soft); border-color: #9bd4b3; }
+  .badge.red { color: var(--red); background: var(--red-soft); border-color: #efaaa3; }
+  .badge.amber { color: var(--amber); background: var(--amber-soft); border-color: #e6c27a; }
+  .screenshot {
+    border: 1px solid var(--line);
+    background: #fff;
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+  .screenshot img {
+    display: block;
+    width: 100%;
+    max-height: 360px;
+    object-fit: contain;
+    background: #111827;
+  }
+  .tabs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .tab {
+    min-height: 32px;
+    padding: 6px 10px;
+  }
+  .tab.active {
+    background: var(--blue);
+    color: #fff;
+    border-color: var(--blue);
+  }
+  .content-grid {
+    display: grid;
+    gap: 12px;
+  }
+  .two-col {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 12px;
+  }
+  .block {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #fff;
+    min-width: 0;
+  }
+  .block h3 {
+    margin: 0;
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+    letter-spacing: 0;
+    color: #344054;
+    background: #f8fafc;
+  }
+  pre {
+    margin: 0;
+    padding: 10px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow: auto;
+    max-height: 360px;
+    color: var(--code);
+    background: var(--code-bg);
+    font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .block.tall pre { max-height: 560px; }
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .form-grid .wide { grid-column: span 2; }
+  .form-grid .full { grid-column: 1 / -1; }
+  .check-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    color: #344054;
+    font-size: 13px;
+  }
+  .check-row input {
+    width: 16px;
+    height: 16px;
+  }
+  .run-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .compare {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 10px;
+    display: grid;
+    gap: 8px;
+    background: #fff;
+  }
+  .empty {
+    border: 1px dashed var(--line-strong);
+    border-radius: 6px;
+    color: var(--muted);
+    padding: 22px;
+    text-align: center;
+    background: #fff;
+  }
+  .error-box {
+    border: 1px solid #efaaa3;
+    background: var(--red-soft);
+    color: var(--red);
+    border-radius: 6px;
+    padding: 10px;
+    overflow-wrap: anywhere;
+  }
+  .hidden { display: none !important; }
+  @media (max-width: 1180px) {
+    .app {
+      grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+    }
+    .detail {
+      grid-column: 1 / -1;
+      border-top: 1px solid var(--line);
+    }
+  }
+  @media (max-width: 760px) {
+    header { align-items: flex-start; flex-direction: column; }
+    .app { display: block; }
+    aside, .timeline, .detail { border-right: 0; border-bottom: 1px solid var(--line); }
+    .metric-strip, .two-col, .form-grid { grid-template-columns: 1fr; }
+    .form-grid .wide, .form-grid .full { grid-column: auto; }
+    .step-list { max-height: 420px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>LexBench RPA 单步输入输出调试器</h1>
+    <div class="subtitle">查看每个实验 run、task、step 的输入状态、模型输出和执行结果；在调试页里复用某一步输入，横向测试不同 OpenAI-compatible 模型的下一步决策。</div>
+  </div>
+  <div id="serverStatus" class="status-pill">连接中</div>
+</header>
+
+<main class="app">
+  <aside>
+    <div class="stack">
+      <label>实验 run
+        <select id="runSelect"></select>
+      </label>
+      <label>任务 task
+        <select id="taskSelect"></select>
+      </label>
+    </div>
+    <div id="runFacts" class="facts"></div>
+    <div class="stack">
+      <div class="metric-strip" id="metricStrip"></div>
+      <label>步骤过滤
+        <input id="stepFilter" placeholder="step / action / url / memory">
+      </label>
+    </div>
+  </aside>
+
+  <section class="timeline">
+    <div class="section-title">
+      <h2>步骤时间线</h2>
+      <span id="stepCount" class="badge">0 steps</span>
+    </div>
+    <div id="stepList" class="step-list"></div>
+  </section>
+
+  <section class="detail">
+    <div id="detailEmpty" class="empty">选择一个 run 和 step 后，这里会显示该步的输入、输出、截图和单步调试工具。</div>
+    <div id="detailBody" class="hidden">
+      <div id="detailHead" class="detail-head"></div>
+      <div id="screenshotBox" class="screenshot hidden"></div>
+      <div class="tabs" id="tabs"></div>
+      <div id="tabContent" class="content-grid"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const state = {
+  runs: [],
+  models: [],
+  selectedRun: "",
+  selectedTask: "",
+  selectedStep: 0,
+  taskData: null,
+  stepData: null,
+  currentTab: "input",
+  replayModelKey: ""
+};
+
+const tabs = [
+  ["input", "输入"],
+  ["output", "输出"],
+  ["browser", "Browser State"],
+  ["raw", "Raw JSON"],
+  ["replay", "单步调试"]
+];
+
+function el(id) {
+  return document.getElementById(id);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function formatNumber(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "number") return value.toLocaleString();
+  return String(value);
+}
+
+function formatCost(value) {
+  if (typeof value !== "number") return "-";
+  return `$${value.toFixed(4)}`;
+}
+
+function setStatus(text, mode) {
+  const node = el("serverStatus");
+  node.textContent = text;
+  node.className = `status-pill ${mode || ""}`.trim();
+}
+
+async function apiGet(path) {
+  const response = await fetch(path);
+  const data = await response.json();
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.error || response.statusText);
+  }
+  return data;
+}
+
+async function apiPost(path, payload) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json();
+  if (!response.ok || data.ok === false) {
+    const details = data.details ? `\n${typeof data.details === "string" ? data.details : JSON.stringify(data.details, null, 2)}` : "";
+    throw new Error(`${data.error || response.statusText}${details}`);
+  }
+  return data;
+}
+
+function optionLabel(run) {
+  return `${run.label} (${run.task_count} tasks, ${run.step_count} steps)`;
+}
+
+function renderRuns(defaultRun) {
+  const select = el("runSelect");
+  select.innerHTML = "";
+  for (const run of state.runs) {
+    const option = document.createElement("option");
+    option.value = run.run;
+    option.textContent = optionLabel(run);
+    select.appendChild(option);
+  }
+  select.value = defaultRun || state.runs[0]?.run || "";
+  state.selectedRun = select.value;
+}
+
+function renderTaskOptions(tasks, selectedTask) {
+  const select = el("taskSelect");
+  select.innerHTML = "";
+  for (const task of tasks) {
+    const option = document.createElement("option");
+    const status = task.agent_success === true ? "pass" : task.agent_success === false ? "fail" : task.agent_done || "unknown";
+    option.value = task.task_id;
+    option.textContent = `${task.task_id} · ${status} · ${task.step_count} steps`;
+    select.appendChild(option);
+  }
+  select.value = selectedTask;
+}
+
+function renderFacts() {
+  const run = state.runs.find(item => item.run === state.selectedRun) || {};
+  const result = state.taskData?.selected_result || {};
+  el("runFacts").innerHTML = `
+    <div class="fact-row"><span>split</span><b>${escapeHtml(run.split || "-")}</b></div>
+    <div class="fact-row"><span>model</span><b>${escapeHtml(run.model || "-")}</b></div>
+    <div class="fact-row"><span>timestamp</span><b>${escapeHtml(run.timestamp || "-")}</b></div>
+    <div class="fact-row"><span>task</span><b>${escapeHtml(state.selectedTask || "-")}</b></div>
+    <div class="fact-row"><span>status</span><b>${escapeHtml(result.agent_success === true ? "pass" : result.agent_success === false ? "fail" : result.agent_done || "-")}</b></div>
+  `;
+  el("metricStrip").innerHTML = `
+    <div class="metric"><span>steps</span><b>${formatNumber(result.steps || state.taskData?.steps?.length)}</b></div>
+    <div class="metric"><span>tokens</span><b>${formatNumber(result.total_tokens)}</b></div>
+    <div class="metric"><span>cost</span><b>${formatCost(result.total_cost)}</b></div>
+  `;
+}
+
+function renderStepList() {
+  const steps = state.taskData?.steps || [];
+  const query = el("stepFilter").value.trim().toLowerCase();
+  const filtered = steps.filter(step => {
+    if (!query) return true;
+    const haystack = [
+      step.step_number,
+      step.action_label,
+      step.url,
+      step.memory_excerpt,
+      step.result_excerpt
+    ].join(" ").toLowerCase();
+    return haystack.includes(query);
+  });
+  el("stepCount").textContent = `${filtered.length} / ${steps.length} steps`;
+  el("stepList").innerHTML = filtered.map(step => `
+    <button class="step-item ${step.step_number === state.selectedStep ? "active" : ""}" data-step="${step.step_number}">
+      <div class="step-top">
+        <span class="step-no">Step ${String(step.step_number).padStart(3, "0")}</span>
+        <span class="step-model">${escapeHtml(step.model_id || "")}</span>
+      </div>
+      <div class="step-action">${escapeHtml(step.action_label || "no action")}</div>
+      <div class="step-url">${escapeHtml(step.url || "")}</div>
+      <div class="step-memory">${escapeHtml(step.memory_excerpt || step.result_excerpt || "")}</div>
+    </button>
+  `).join("");
+  for (const button of el("stepList").querySelectorAll("button[data-step]")) {
+    button.addEventListener("click", () => loadStep(Number(button.dataset.step)));
+  }
+}
+
+async function loadTask(taskId) {
+  if (!state.selectedRun) return;
+  setStatus("加载中", "");
+  const params = new URLSearchParams({ run: state.selectedRun });
+  if (taskId) params.set("task", taskId);
+  state.taskData = await apiGet(`/api/task?${params.toString()}`);
+  state.selectedTask = state.taskData.selected_task_id;
+  state.selectedStep = 0;
+  renderTaskOptions(state.taskData.tasks, state.selectedTask);
+  renderFacts();
+  renderStepList();
+  const firstStep = state.taskData.steps[0]?.step_number;
+  if (firstStep) {
+    await loadStep(firstStep);
+  } else {
+    el("detailBody").classList.add("hidden");
+    el("detailEmpty").classList.remove("hidden");
+  }
+  setStatus("已连接", "ok");
+}
+
+async function loadStep(stepNumber) {
+  state.selectedStep = stepNumber;
+  renderStepList();
+  const params = new URLSearchParams({
+    run: state.selectedRun,
+    task: state.selectedTask,
+    step: String(stepNumber)
+  });
+  state.stepData = await apiGet(`/api/step?${params.toString()}`);
+  el("detailEmpty").classList.add("hidden");
+  el("detailBody").classList.remove("hidden");
+  renderDetail();
+}
+
+function renderDetail() {
+  const data = state.stepData;
+  const log = data.log || {};
+  const input = log.input || {};
+  const output = log.output || {};
+  const actionCount = Array.isArray(output.actions) ? output.actions.length : 0;
+  el("detailHead").innerHTML = `
+    <div>
+      <h2>Task ${escapeHtml(data.task_id)} · Step ${String(data.step_number).padStart(3, "0")}</h2>
+      <div class="subtitle">${escapeHtml(input.url || "")}</div>
+    </div>
+    <div class="badges">
+      <span class="badge">${escapeHtml(log.metadata?.model_id || "-")}</span>
+      <span class="badge">${formatNumber((input.state_message || "").length)} chars</span>
+      <span class="badge">${actionCount} actions</span>
+      ${data.screenshot_exists ? '<span class="badge green">screenshot</span>' : '<span class="badge amber">no screenshot</span>'}
+    </div>
+  `;
+  const screenshot = el("screenshotBox");
+  if (data.screenshot_url) {
+    screenshot.classList.remove("hidden");
+    screenshot.innerHTML = `<img alt="Step ${data.step_number} screenshot" src="${escapeHtml(data.screenshot_url)}">`;
+  } else {
+    screenshot.classList.add("hidden");
+    screenshot.innerHTML = "";
+  }
+  renderTabs();
+  renderTabContent();
+}
+
+function renderTabs() {
+  el("tabs").innerHTML = tabs.map(([key, label]) => `
+    <button class="tab ${state.currentTab === key ? "active" : ""}" data-tab="${key}">${escapeHtml(label)}</button>
+  `).join("");
+  for (const button of el("tabs").querySelectorAll("button[data-tab]")) {
+    button.addEventListener("click", () => {
+      state.currentTab = button.dataset.tab;
+      renderTabs();
+      renderTabContent();
+    });
+  }
+}
+
+function block(title, content, tall = false) {
+  return `<div class="block ${tall ? "tall" : ""}"><h3>${escapeHtml(title)}</h3><pre>${escapeHtml(content || "")}</pre></div>`;
+}
+
+function renderTabContent() {
+  const data = state.stepData;
+  const log = data.log || {};
+  const input = log.input || {};
+  const output = log.output || {};
+  const sections = data.sections || {};
+
+  if (state.currentTab === "input") {
+    el("tabContent").innerHTML = `
+      ${block("完整 state_message", input.state_message || "", true)}
+      <div class="two-col">
+        ${block("agent_history", sections.agent_history || "")}
+        ${block("agent_state", sections.agent_state || "")}
+      </div>
+    `;
+  } else if (state.currentTab === "output") {
+    el("tabContent").innerHTML = `
+      <div class="two-col">
+        ${block("memory", output.memory || "")}
+        ${block("next_goal", output.next_goal || "")}
+      </div>
+      <div class="two-col">
+        ${block("actions", JSON.stringify(output.actions || [], null, 2))}
+        ${block("action_results", JSON.stringify(log.action_results || [], null, 2))}
+      </div>
+    `;
+  } else if (state.currentTab === "browser") {
+    el("tabContent").innerHTML = `
+      ${block("browser_state", sections.browser_state || "", true)}
+    `;
+  } else if (state.currentTab === "raw") {
+    el("tabContent").innerHTML = `
+      ${block("system_prompt.txt", data.system_prompt || "", true)}
+      ${block("step raw JSON", JSON.stringify(log, null, 2), true)}
+    `;
+  } else if (state.currentTab === "replay") {
+    renderReplayPanel();
+  }
+}
+
+function renderModelOptions(select) {
+  select.innerHTML = "";
+  for (const model of state.models) {
+    const option = document.createElement("option");
+    option.value = model.key;
+    option.textContent = `${model.alias} · ${model.model_id}${model.supports_replay ? "" : " · unsupported"}`;
+    option.disabled = !model.supports_replay;
+    select.appendChild(option);
+  }
+  const custom = document.createElement("option");
+  custom.value = "__custom__";
+  custom.textContent = "自定义 OpenAI-compatible";
+  select.appendChild(custom);
+  const preferred = state.replayModelKey && [...select.options].some(option => option.value === state.replayModelKey && !option.disabled)
+    ? state.replayModelKey
+    : [...select.options].find(option => !option.disabled)?.value;
+  select.value = preferred || "__custom__";
+  state.replayModelKey = select.value;
+}
+
+function renderReplayPanel() {
+  const data = state.stepData;
+  const log = data.log || {};
+  const input = log.input || {};
+  el("tabContent").innerHTML = `
+    <div class="block">
+      <h3>调试请求</h3>
+      <div class="content-grid" style="padding:10px">
+        <div class="form-grid">
+          <label class="wide">模型
+            <select id="modelSelect"></select>
+          </label>
+          <label>temperature
+            <input id="temperatureInput" type="number" placeholder="omit" min="0" max="2" step="0.1">
+          </label>
+          <label>max_tokens
+            <input id="maxTokensInput" type="number" value="1200" min="1" step="100">
+          </label>
+          <label>timeout
+            <input id="timeoutInput" type="number" value="120" min="10" step="10">
+          </label>
+          <label class="check-row">
+            <input id="responseFormatInput" type="checkbox" checked>
+            response_format=json_object
+          </label>
+          <label class="full">额外调试指令
+            <input id="extraInstructionInput" placeholder="例如：只输出 JSON；重点判断下一步 action 是否应点击某个元素">
+          </label>
+          <div id="customFields" class="form-grid full hidden">
+            <label>model_id
+              <input id="customModelId" placeholder="gpt-5.5">
+            </label>
+            <label>base_url
+              <input id="customBaseUrl" placeholder="https://.../v1">
+            </label>
+            <label>api_key
+              <input id="customApiKey" type="password" placeholder="只在本次请求使用">
+            </label>
+            <label>model_type
+              <select id="customModelType">
+                <option value="OPENAI">OPENAI</option>
+                <option value="AZURE">AZURE</option>
+              </select>
+            </label>
+          </div>
+          <label class="full">system prompt
+            <textarea id="systemPromptInput">${escapeHtml(data.system_prompt || "")}</textarea>
+          </label>
+          <label class="full">state_message
+            <textarea id="stateMessageInput" style="min-height:260px">${escapeHtml(input.state_message || "")}</textarea>
+          </label>
+        </div>
+        <div class="run-row">
+          <button id="runReplayButton" class="primary">运行单步</button>
+          <span id="replayStatus" class="badge">ready</span>
+        </div>
+      </div>
+    </div>
+    <div id="replayResult" class="content-grid"></div>
+  `;
+  const modelSelect = el("modelSelect");
+  renderModelOptions(modelSelect);
+  modelSelect.addEventListener("change", () => {
+    state.replayModelKey = modelSelect.value;
+    el("customFields").classList.toggle("hidden", modelSelect.value !== "__custom__");
+  });
+  el("customFields").classList.toggle("hidden", modelSelect.value !== "__custom__");
+  el("runReplayButton").addEventListener("click", runReplay);
+}
+
+async function runReplay() {
+  const button = el("runReplayButton");
+  const status = el("replayStatus");
+  const result = el("replayResult");
+  button.disabled = true;
+  status.textContent = "running";
+  status.className = "badge amber";
+  result.innerHTML = "";
+  const modelKey = el("modelSelect").value;
+  const numericOrNull = id => {
+    const raw = el(id).value.trim();
+    return raw === "" ? null : Number(raw);
+  };
+  const payload = {
+    run: state.selectedRun,
+    task_id: state.selectedTask,
+    step_number: state.selectedStep,
+    model_key: modelKey,
+    temperature: numericOrNull("temperatureInput"),
+    max_tokens: numericOrNull("maxTokensInput"),
+    timeout_seconds: numericOrNull("timeoutInput"),
+    response_format: el("responseFormatInput").checked,
+    extra_instruction: el("extraInstructionInput").value,
+    system_prompt: el("systemPromptInput").value,
+    state_message: el("stateMessageInput").value,
+    custom: {
+      model_id: el("customModelId")?.value || "",
+      base_url: el("customBaseUrl")?.value || "",
+      api_key: el("customApiKey")?.value || "",
+      model_type: el("customModelType")?.value || "OPENAI"
+    }
+  };
+  try {
+    const data = await apiPost("/api/replay", payload);
+    status.textContent = `${data.latency_ms} ms`;
+    status.className = "badge green";
+    renderReplayResult(data);
+  } catch (error) {
+    status.textContent = "failed";
+    status.className = "badge red";
+    result.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function stripJsonFence(text) {
+  const trimmed = String(text || "").trim();
+  if (trimmed.startsWith("```")) {
+    return trimmed.replace(/^```[a-zA-Z0-9_-]*\s*/, "").replace(/\s*```$/, "").trim();
+  }
+  return trimmed;
+}
+
+function parseLooseJson(text) {
+  const stripped = stripJsonFence(text);
+  try {
+    return JSON.parse(stripped);
+  } catch {
+    const start = stripped.indexOf("{");
+    const end = stripped.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(stripped.slice(start, end + 1));
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function normalizeActions(value) {
+  if (!value) return [];
+  const actions = Array.isArray(value) ? value : [value];
+  return actions.map(action => {
+    if (action && typeof action === "object" && action.actions) return action.actions;
+    if (action && typeof action === "object" && action.action) return action.action;
+    return action;
+  }).flat();
+}
+
+function renderReplayResult(data) {
+  const parsed = parseLooseJson(data.content);
+  const originalActions = normalizeActions(state.stepData?.log?.output?.actions);
+  const replayActions = normalizeActions(parsed?.actions || parsed?.action);
+  const originalSig = stableStringify(originalActions);
+  const replaySig = replayActions.length ? stableStringify(replayActions) : "";
+  const same = Boolean(replaySig) && originalSig === replaySig;
+  const badge = !parsed
+    ? '<span class="badge amber">未解析为 JSON</span>'
+    : same
+      ? '<span class="badge green">动作一致</span>'
+      : '<span class="badge red">动作不同</span>';
+  el("replayResult").innerHTML = `
+    <div class="compare">
+      <div class="badges">
+        ${badge}
+        <span class="badge">${escapeHtml(data.alias || "")}</span>
+        <span class="badge">${escapeHtml(data.model || "")}</span>
+        <span class="badge">${formatNumber(data.usage?.total_tokens)} tokens</span>
+      </div>
+      <div class="two-col">
+        ${block("原始 step actions", JSON.stringify(originalActions, null, 2))}
+        ${block("重放模型 actions", replayActions.length ? JSON.stringify(replayActions, null, 2) : "no parsed actions")}
+      </div>
+    </div>
+    ${block("模型输出 content", data.content || "", true)}
+    ${block("parsed JSON", parsed ? JSON.stringify(parsed, null, 2) : "not JSON")}
+    ${block("完整响应", JSON.stringify(data.response, null, 2), true)}
+  `;
+}
+
+async function init() {
+  try {
+    const [runsData, modelsData] = await Promise.all([
+      apiGet("/api/runs"),
+      apiGet("/api/models")
+    ]);
+    state.runs = runsData.runs || [];
+    state.models = modelsData.models || [];
+    renderRuns(runsData.default_run);
+    await loadTask();
+  } catch (error) {
+    setStatus("失败", "bad");
+    el("detailEmpty").innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+el("runSelect").addEventListener("change", async event => {
+  state.selectedRun = event.target.value;
+  await loadTask();
+});
+
+el("taskSelect").addEventListener("change", async event => {
+  await loadTask(event.target.value);
+});
+
+el("stepFilter").addEventListener("input", renderStepList);
+
+init();
+</script>
+</body>
+</html>

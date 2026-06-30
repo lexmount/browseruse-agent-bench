@@ -312,6 +312,8 @@ bubench viz --watch-interval 5       # 轮询间隔秒数（默认 3）
 
 远程服务器 tmux 部署及防火墙配置，参见[可视化工具文档](https://docs.bubench.lexmount.io/zh/leaderboard/visualization#内网共享)。
 
+如果要对 LexBench-Browser 的 API 日志做逐步回放和单步调试，可参见 [experiments/LexBench-Browser/README.md](/Users/sherry/Documents/sherry/my-agent/workspace/browseruse-bench-staging/experiments/LexBench-Browser/README.md)。这个 debugger 是一个轻量本地服务，直接读取已有实验产物，按 step 查看或重放模型决策。
+
 ## 致谢
 
 本项目引用并修改了来自 [Online-Mind2Web](https://github.com/OSU-NLP-Group/Online-Mind2Web) 和 [simple-evals](https://github.com/openai/simple-evals) 的部分代码。
