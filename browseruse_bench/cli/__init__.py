@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from browseruse_bench.cli.eval import configure_eval_parser, eval_command
 from browseruse_bench.cli.leaderboard import configure_leaderboard_parser, leaderboard_command
+from browseruse_bench.cli.list_cmd import configure_list_parser, list_command
 from browseruse_bench.cli.login import configure_login_parser, login_command
 from browseruse_bench.cli.run import configure_run_parser, run_command
 from browseruse_bench.cli.server import configure_server_parser, server_command
@@ -45,6 +46,7 @@ def _build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
         epilog=textwrap.dedent(
             """
             Examples:
+              bubench list
               bubench submit --agent browser-use --data LexBench-Browser --mode first_n --count 1
               bubench leaderboard
               bubench server --host 0.0.0.0 --port 8000
@@ -76,6 +78,12 @@ def _build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
     eval_parser = subparsers.add_parser("eval", help="Evaluate benchmark results")
     configure_eval_parser(eval_parser, config)
     eval_parser.set_defaults(handler=eval_command)
+
+    list_parser = subparsers.add_parser(
+        "list", help="List available benchmarks, agents, and browser backends"
+    )
+    configure_list_parser(list_parser, config)
+    list_parser.set_defaults(handler=list_command)
 
     leaderboard_parser = subparsers.add_parser("leaderboard", help="Generate leaderboard HTML")
     configure_leaderboard_parser(leaderboard_parser, config)

@@ -135,7 +135,9 @@ def setup_logger(
         announce_log_file = "skills" not in sys.argv
 
     if console_output:
-        console_handler = logging.StreamHandler(sys.stdout)
+        # Logs go to stderr so that machine-readable stdout (e.g. `bubench
+        # list --json`, `bubench login list --json`) stays pipeable.
+        console_handler = logging.StreamHandler(sys.stderr)
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
         handlers.append(console_handler)
