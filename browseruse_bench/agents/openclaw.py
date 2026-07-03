@@ -10,8 +10,6 @@ browser profile with `cdpUrl` + `attachOnly`.
 
 from __future__ import annotations
 
-import base64
-import binascii
 import json
 import logging
 import os
@@ -34,6 +32,7 @@ from browseruse_bench.browsers import open_browser_session
 from browseruse_bench.browsers.providers.local import warn_if_local_proxy_unsupported
 from browseruse_bench.schemas import AgentMetrics, AgentResult, AgentUsage
 from browseruse_bench.utils import IS_WINDOWS
+from browseruse_bench.utils.image_utils import decode_base64_to_file
 from browseruse_bench.utils.parse_utils import safe_int
 
 logger = logging.getLogger(__name__)
@@ -58,22 +57,24 @@ _MEDIA_PATH_RE = re.compile(r"MEDIA:(\S+)")
 
 _MEDIA_MIME_EXT = {"image/png": ".png", "image/jpeg": ".jpeg", "image/jpg": ".jpg"}
 
-# Non-*_API_KEY env vars that also trigger OpenClaw provider auto-detection.
-_PROVIDER_ENV_EXTRAS = ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN")
+# OpenClaw also resolves Anthropic credentials/endpoints from non-*_API_KEY
+# vars (ANTHROPIC_OAUTH_TOKEN, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL, ...),
+# so the whole prefix is scrubbed.
+_PROVIDER_ENV_PREFIX = "ANTHROPIC_"
 
 
 def _subprocess_env(state_dir: Path) -> dict[str, str]:
     """Build the OpenClaw subprocess env without provider-autodetect vars.
 
     The bench provider's credentials are delivered via the written
-    openclaw.json; any *_API_KEY (or Anthropic base-url/auth-token) inherited
-    from the parent env makes OpenClaw auto-detect an extra provider and route
-    media understanding through it, which fails on the bench gateway.
+    openclaw.json; any *_API_KEY (or ANTHROPIC_* credential/endpoint var)
+    inherited from the parent env makes OpenClaw auto-detect an extra provider
+    and route media understanding through it, which fails on the bench gateway.
     """
     env = {
         key: value
         for key, value in os.environ.items()
-        if not key.endswith("_API_KEY") and key not in _PROVIDER_ENV_EXTRAS
+        if not key.endswith("_API_KEY") and not key.startswith(_PROVIDER_ENV_PREFIX)
     }
     env["OPENCLAW_STATE_DIR"] = str(state_dir)
     env["OPENCLAW_CONFIG_PATH"] = str(state_dir / "openclaw.json")
@@ -254,19 +255,16 @@ def _collect_media_screenshots(items: list[dict[str, Any]], trajectory_dir: Path
 def _save_inline_media(mime: str, data: str, trajectory_dir: Path, saved: list[str]) -> None:
     ext = _MEDIA_MIME_EXT.get(mime.lower())
     if ext is None:
-        return
-    try:
-        raw = base64.b64decode(data, validate=True)
-    except binascii.Error as exc:
-        logger.warning("Failed to decode inline screenshot (%s): %s", mime, exc)
+        logger.debug("Skipping inline media with unsupported mime type: %s", mime)
         return
     fname = f"screenshot-{len(saved) + 1}{ext}"
     try:
         trajectory_dir.mkdir(parents=True, exist_ok=True)
-        (trajectory_dir / fname).write_bytes(raw)
-        saved.append(fname)
     except OSError as exc:
-        logger.warning("Failed to save screenshot %s: %s", fname, exc)
+        logger.warning("Failed to create trajectory dir for %s: %s", fname, exc)
+        return
+    if decode_base64_to_file(data, trajectory_dir / fname):
+        saved.append(fname)
 
 
 def _copy_media_paths(text: str, trajectory_dir: Path, saved: list[str]) -> None:
@@ -528,6 +526,8 @@ class OpenClawAgent(CLIAgent):
             answer = f"[Task Failed: {error_message or 'No result JSON from OpenClaw'}]"
 
         items = self._session_items(result_obj, task_workspace)
+        # Must run before write_api_logs: it pops inline base64 blobs off the
+        # items so they never reach the api_logs artifacts.
         saved_screenshots = _collect_media_screenshots(items, trajectory_dir)
         steps = sum(1 for item in items if item.get("type") in STEP_ITEM_TYPES)
         if items:

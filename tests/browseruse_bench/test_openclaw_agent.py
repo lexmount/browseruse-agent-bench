@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 from typing import Any
@@ -131,8 +132,6 @@ class TestInlineBase64Screenshots:
     def test_inline_base64_image_saved_to_trajectory(self, tmp_path: Path) -> None:
         # OpenClaw returns screenshots as inline base64 blocks (no path key);
         # they must be decoded into trajectory/ like path-based media.
-        import base64
-
         payload = b"png-bytes"
         session = tmp_path / "session.jsonl"
         self._session_with_inline_image(session, base64.b64encode(payload).decode())
@@ -150,8 +149,6 @@ class TestInlineBase64Screenshots:
         assert _collect_media_screenshots(items, tmp_path / "trajectory") == []
 
     def test_non_image_mime_skipped(self, tmp_path: Path) -> None:
-        import base64
-
         session = tmp_path / "session.jsonl"
         self._session_with_inline_image(
             session, base64.b64encode(b"pdf").decode(), mime="application/pdf"
@@ -162,8 +159,6 @@ class TestInlineBase64Screenshots:
     def test_run_task_reports_inline_screenshots(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        import base64
-
         session = tmp_path / "session.jsonl"
         self._session_with_inline_image(session, base64.b64encode(b"shot").decode())
         agent = OpenClawAgent()
@@ -282,6 +277,7 @@ class TestOpenClawAgentRunTask:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-leak")
         monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://gateway.local")
         monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-leak")
+        monkeypatch.setenv("ANTHROPIC_OAUTH_TOKEN", "oauth-leak")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-leak")
         monkeypatch.setenv("BENCH_HARMLESS_VAR", "keep-me")
         agent = OpenClawAgent()
@@ -297,6 +293,7 @@ class TestOpenClawAgentRunTask:
         assert "ANTHROPIC_API_KEY" not in captured_env
         assert "ANTHROPIC_BASE_URL" not in captured_env
         assert "ANTHROPIC_AUTH_TOKEN" not in captured_env
+        assert "ANTHROPIC_OAUTH_TOKEN" not in captured_env
         assert "OPENAI_API_KEY" not in captured_env
         assert captured_env["BENCH_HARMLESS_VAR"] == "keep-me"
         assert captured_env["OPENCLAW_STATE_DIR"] == str(tmp_path / ".openclaw-state")
