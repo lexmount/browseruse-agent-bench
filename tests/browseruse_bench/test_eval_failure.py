@@ -22,7 +22,7 @@ class _CapturingModel:
         return json.dumps(
             {
                 "reasoning": "stub",
-                "codes": ["E1", "H3"],
+                "codes": ["E1", "M4"],
                 "primary_code": "E1",
                 "other_phrase": None,
             }
@@ -48,7 +48,7 @@ def test_classifier_multilabel_primary_and_legacy(tmp_path: Path) -> None:
 
     assert record["failure_category"] == "E1"
     fc = record["evaluation_details"]["failure_classification"]
-    assert fc["codes"] == ["E1", "H3"]
+    assert fc["codes"] == ["E1", "M4"]
     assert fc["legacy_category"] == "B1"
 
 
@@ -66,8 +66,10 @@ def test_classifier_drops_invalid_codes_and_falls_back_to_u(tmp_path: Path) -> N
 
 def test_legacy_mapping_table() -> None:
     assert legacy_category("M2") == "A1"
-    assert legacy_category("H3") == "A4"
-    assert legacy_category("M4") == "A3"
+    assert legacy_category("M4") == "A1"
+    assert legacy_category("M5") == "A2"
+    assert legacy_category("M6") == "A3"
+    assert legacy_category("H2") == "A4"
     assert legacy_category("E3") == "C2"
     assert legacy_category("H1") == "A2"
     assert legacy_category("U") == "U"
@@ -136,14 +138,14 @@ def test_classifier_prefers_record_fields_over_result_json(tmp_path: Path) -> No
     assert "fallback action" not in prompt
 
 
-class _M4Model(_CapturingModel):
+class _M6Model(_CapturingModel):
     def generate(self, messages: list[Any], **_kwargs: Any) -> str:
         self.captured_messages = messages
         return json.dumps(
             {
                 "reasoning": "LLM API timed out repeatedly during the run",
-                "codes": ["M4"],
-                "primary_code": "M4",
+                "codes": ["M6"],
+                "primary_code": "M6",
                 "other_phrase": None,
             }
         )
@@ -157,9 +159,9 @@ class _FailingModel(_CapturingModel):
 def test_classifier_accepts_model_service_error_code(tmp_path: Path) -> None:
     record = {"task_id": "1", "task": "some task", "predicted_label": 0, "evaluation_details": {}}
 
-    classify_failure_case(record, tmp_path, _M4Model())
+    classify_failure_case(record, tmp_path, _M6Model())
 
-    assert record["failure_category"] == "M4"
+    assert record["failure_category"] == "M6"
     assert record["evaluation_details"]["failure_classification"]["legacy_category"] == "A3"
 
 

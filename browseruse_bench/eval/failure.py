@@ -45,13 +45,14 @@ MODEL_GENERATE_EXCEPTIONS: tuple[type[BaseException], ...] = tuple(
 # ============================================================================
 
 FAILURE_TAXONOMY: dict[str, tuple[str, str]] = {
-    "H1": ("Harness", "Protocol/Artifact Breakdown"),
-    "H2": ("Harness", "Interaction Execution Failure"),
-    "H3": ("Harness", "Orchestration Breakdown"),
-    "M1": ("Model", "Requirement Following"),
-    "M2": ("Model", "Target Selection"),
-    "M3": ("Model", "Evidence Grounding"),
-    "M4": ("Model", "Model Service Error"),
+    "H1": ("Harness", "Execution Defect"),
+    "H2": ("Harness", "Orchestration Guard Absence"),
+    "M1": ("Model", "Task Planning"),
+    "M2": ("Model", "Page Understanding & Grounding"),
+    "M3": ("Model", "Evidence Fidelity"),
+    "M4": ("Model", "Error Recovery"),
+    "M5": ("Model", "Tool/Structured Output"),
+    "M6": ("Model", "Model Service Error"),
     "E1": ("Environment", "Bot Defense"),
     "E2": ("Environment", "Access Barrier"),
     "E3": ("Environment", "Site Limitation"),
@@ -63,12 +64,13 @@ FAILURE_TAXONOMY: dict[str, tuple[str, str]] = {
 # and is never selectable by the judge.
 LEGACY_CATEGORY_MAP: dict[str, str] = {
     "H1": "A2",
-    "H2": "A2",
-    "H3": "A4",
+    "H2": "A4",
     "M1": "A1",
     "M2": "A1",
     "M3": "A1",
-    "M4": "A3",
+    "M4": "A1",
+    "M5": "A2",
+    "M6": "A3",
     "E1": "B1",
     "E2": "B2",
     "E3": "C2",
@@ -90,16 +92,17 @@ Use the supplied task description, agent action history, agent final answer (inc
 
 ### H: Harness causes (the agent framework/scaffolding around the model)
 
-- **H1 Protocol/Artifact Breakdown**: Malformed action output the framework could not execute, invalid tool-call structure, parser failures, missing final response, failed file saving, corrupted artifacts, or required output files not produced.
-- **H2 Interaction Execution Failure**: The agent DECIDED on the right interaction but the execution layer failed mechanically: coordinate mismatch, click landing on the wrong element, text typed into the wrong field, dropdown/date-picker manipulation failing despite correct intent, element-locating defects.
-- **H3 Orchestration Breakdown**: The framework fails to detect and recover from stuck states: the SAME action repeated with no page-state change, no strategy switch after repeated identical failures, step/timeout budget exhausted while looping, or a long multi-item task abandoned because the loop never scheduled the remaining items.
+- **H1 Execution Defect**: The framework mishandles a VALID model decision: fails to parse or execute well-formed model output, coordinate-mapping defects (click lands on a different element than the model selected), artifact/file write failures, session plumbing bugs.
+- **H2 Orchestration Guard Absence**: The framework withholds information or guards the model needs: an action failure is never surfaced back to the model, no stuck-state detection despite the model being misled about page state, budget mismanagement. Only use when the framework side is provable from the trajectory.
 
-### M: Model causes (the LLM's own reasoning or service)
+### M: Model causes (the LLM's own capability or service)
 
-- **M1 Requirement Following**: An EXPLICIT stated requirement was ignored: the required website, required fields, required output format, required item count, or the required safety/legal response. Only use M1 when you can point to the specific stated requirement that was violated. Do NOT use M1 merely because the task is incomplete - attribute the incompleteness to its cause instead.
-- **M2 Target Selection**: Wrong scope, entity, date, city, item, channel, season, product, ranking criterion, filter, sort order, or comparison logic; or a futile overall strategy where actions keep VARYING but never approach the goal. Use this when pages are usable but the agent pursues the wrong target or path.
-- **M3 Evidence Grounding**: Fails to extract available information, extracts wrong fields, mixes fields across items, fabricates or hallucinates values, reports unverifiable data, or answers without enough evidence.
-- **M4 Model Service Error**: The LLM service itself fails: no response, API timeout, provider rate limiting, context length exceeded, parameter error, or content-filter rejection of the agent's own model calls. Infrastructure failure, not reasoning quality.
+- **M1 Task Planning**: Bad task decomposition or path planning; an EXPLICIT stated requirement ignored (required website, fields, output format, item count, safety/legal response). For requirement violations, point to the specific stated requirement. Do NOT use M1 merely because the task is incomplete - attribute the incompleteness to its cause.
+- **M2 Page Understanding & Grounding**: Misreads the page, DOM, or screenshot; selects the wrong element, entity, item, date, filter, or sort; fails to enforce "latest", "highest", "most viewed", "top N", date windows, or comparison criteria on usable pages.
+- **M3 Evidence Fidelity**: Fails to extract available information, extracts wrong fields, mixes fields across items, fabricates or hallucinates values, reports unverifiable data, or answers without enough evidence.
+- **M4 Error Recovery**: The failure signal was visible in the model's context, yet it repeats the same or equivalently futile actions, never switches strategy, wastes the step/time budget, or abandons remaining sub-items. Stuck loops belong here unless the framework provably hid the error (then H2).
+- **M5 Tool/Structured Output**: The model emits malformed action JSON or invalid tool calls, produces a final answer or required file in the wrong structure/format, or omits the final response.
+- **M6 Model Service Error**: The LLM service itself fails: no response, API timeout, provider rate limiting, context length exceeded, parameter error, or content-filter rejection of the agent's own model calls. Infrastructure failure, not reasoning quality.
 
 ### E: Environment causes (the external web environment)
 
@@ -113,12 +116,13 @@ Use OTHER only when none of the categories captures the core failure; then provi
 ## Decision order (apply in this order)
 
 1. **Environment first**: Did the site/environment block or break the needed path (E1/E2/E3)? Include the E code whenever an external obstacle substantially contributed, even if the agent also made mistakes afterwards.
-2. **Harness second**: Did the agent ATTEMPT the right operation and fail mechanically (H2), break protocol/artifacts (H1), or repeat the SAME ineffective action without recovery (H3)? The attempt criterion is objective: the intended interaction is visible in the action history.
-3. **Model last**: Only if the page was usable and execution worked, attribute to reasoning: violated explicit requirement (M1), wrong/futile target or strategy (M2), bad evidence use (M3). Service-level LLM failures are M4 regardless of order.
+2. **Harness second**: Did the framework mishandle a valid model decision (H1) or provably withhold needed feedback/guards (H2)? The criterion is objective: the model's intended action is visible in the action history and correct, yet the executed effect differs.
+3. **Model last**: Otherwise attribute to the model capability that failed: planning/requirements (M1), page understanding and grounding (M2), evidence fidelity (M3), error recovery (M4), tool/structured output (M5). Service-level failures are M6 regardless of order.
 
 Additional tie-breakers:
-- Stuck behavior: identical action repeated with no state change -> H3; varied actions under a wrong strategy -> M2.
-- Never attempted the needed interaction -> M (reasoning); attempted it and it failed mechanically -> H2.
+- Stuck behavior: the failure was visible to the model yet behavior did not adapt -> M4; the framework hid the failure from the model -> H2.
+- Wrong element clicked: the model selected the wrong element -> M2; the model selected the right element but the click landed elsewhere -> H1.
+- Malformed output: emitted by the model -> M5; valid output mishandled by the framework -> H1.
 - "Task incomplete" is an outcome, not a category: code its cause.
 
 ## Multi-label rules
@@ -311,7 +315,7 @@ def classify_single_failure(
         logger.error("   [FAILED] Classification failed: %s", exc)
         return {
             # "U" (unclassified) keeps classification-pipeline failures out of
-            # the H/M/E buckets; M4 is reserved for LLM service errors that
+            # the H/M/E buckets; M6 is reserved for LLM service errors that
             # happened during the agent run itself.
             "category": "U",
             "codes": [],
@@ -346,9 +350,9 @@ def _parse_classification_response(response: str) -> dict[str, Any]:
     if primary not in FAILURE_TAXONOMY:
         # Recover from a max_tokens-truncated JSON response: grab the
         # (possibly unterminated) primary_code or first codes entry directly.
-        match = re.search(r'"primary_code"\s*:\s*"?(H[1-3]|M[1-4]|E[1-3]|OTHER)', response)
+        match = re.search(r'"primary_code"\s*:\s*"?(H[12]|M[1-6]|E[1-3]|OTHER)', response)
         if not match:
-            match = re.search(r'"codes"\s*:\s*\[\s*"(H[1-3]|M[1-4]|E[1-3]|OTHER)', response)
+            match = re.search(r'"codes"\s*:\s*\[\s*"(H[12]|M[1-6]|E[1-3]|OTHER)', response)
         primary = match.group(1) if match else None
 
     if primary not in FAILURE_TAXONOMY and codes:
