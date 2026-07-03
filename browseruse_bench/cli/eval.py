@@ -10,6 +10,7 @@ from typing import Any
 from browseruse_bench.eval.base import EvaluatorArgs
 from browseruse_bench.eval.model import TaskIdLogFilter
 from browseruse_bench.eval.registry import get_evaluator_class
+from browseruse_bench.utils.stats import calculate_failure_category_stats
 from browseruse_bench.utils import (
     REPO_ROOT,
     DataSource,
@@ -100,6 +101,26 @@ def run_failure_classification(
             handle.write(json.dumps(result, ensure_ascii=False) + "\n")
 
     return 0
+
+
+def refresh_summary_failure_stats(results_file: Path) -> None:
+    """Recompute failure_category_statistics in the summary next to results_file."""
+    summary_path = results_file.with_name(
+        results_file.name.replace("_eval_results.json", "_summary.json")
+    )
+    if summary_path == results_file or not summary_path.exists():
+        logger.warning("Summary file not found for %s, skipping stats refresh", results_file)
+        return
+    records: list[dict[str, Any]] = []
+    with open(results_file, encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                records.append(json.loads(line))
+    with open(summary_path, encoding="utf-8") as handle:
+        summary = json.load(handle)
+    summary["failure_category_statistics"] = calculate_failure_category_stats(records)
+    with open(summary_path, "w", encoding="utf-8") as handle:
+        json.dump(summary, handle, ensure_ascii=False, indent=2)
 
 
 def _merge_manifest_into_summary(
@@ -392,6 +413,9 @@ def run_evaluation(
         base_url,
         temperature=temperature,
     ) if results_file else 0
+
+    if results_file and classification_exit == 0:
+        refresh_summary_failure_stats(results_file)
 
     _merge_manifest_into_summary(
         evaluator.summary_path(),
