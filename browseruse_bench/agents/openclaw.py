@@ -54,6 +54,27 @@ _DEFAULT_RULES = (
 
 _MEDIA_PATH_RE = re.compile(r"MEDIA:(\S+)")
 
+# Non-*_API_KEY env vars that also trigger OpenClaw provider auto-detection.
+_PROVIDER_ENV_EXTRAS = ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN")
+
+
+def _subprocess_env(state_dir: Path) -> dict[str, str]:
+    """Build the OpenClaw subprocess env without provider-autodetect vars.
+
+    The bench provider's credentials are delivered via the written
+    openclaw.json; any *_API_KEY (or Anthropic base-url/auth-token) inherited
+    from the parent env makes OpenClaw auto-detect an extra provider and route
+    media understanding through it, which fails on the bench gateway.
+    """
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.endswith("_API_KEY") and key not in _PROVIDER_ENV_EXTRAS
+    }
+    env["OPENCLAW_STATE_DIR"] = str(state_dir)
+    env["OPENCLAW_CONFIG_PATH"] = str(state_dir / "openclaw.json")
+    return env
+
 
 def _stdout_json(stdout_lines: list[str]) -> dict[str, Any] | None:
     """Parse the accumulated stdout as one JSON object, or None when incomplete."""
@@ -297,9 +318,7 @@ class OpenClawAgent(CLIAgent):
         self._write_state_config(agent_config, task_workspace, state_dir, model, cdp_url)
         cmd = self._build_command(f"{rules}\n\n{prompt}", task_id, timeout)
 
-        env = {**os.environ}
-        env["OPENCLAW_STATE_DIR"] = str(state_dir)
-        env["OPENCLAW_CONFIG_PATH"] = str(state_dir / "openclaw.json")
+        env = _subprocess_env(state_dir)
 
         logger.info(
             "Executing OpenClaw for task %s (model=%s, timeout=%ds)", task_id, model, timeout

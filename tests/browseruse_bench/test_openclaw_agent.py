@@ -202,6 +202,34 @@ class TestOpenClawAgentRunTask:
         # include_usage to custom providers, so token usage is all zeros.
         assert provider["models"][0]["compat"] == {"supportsUsageInStreaming": True}
 
+    def test_provider_autodetect_vars_scrubbed_from_subprocess_env(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # OpenClaw auto-detects providers from *_API_KEY / ANTHROPIC_* env vars
+        # and routes media understanding through them; the bench provider gets
+        # its credentials via the written openclaw.json, so none may leak.
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-leak")
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://gateway.local")
+        monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-leak")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-leak")
+        monkeypatch.setenv("BENCH_HARMLESS_VAR", "keep-me")
+        agent = OpenClawAgent()
+        captured_env: dict[str, str] = {}
+
+        def fake_run(cmd: list[str], **kw: Any) -> tuple[int, list[str], None]:
+            captured_env.update(kw.get("env") or {})
+            return 0, _result_stdout(), None
+
+        monkeypatch.setattr(agent, "_run_subprocess", fake_run)
+        agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+
+        assert "ANTHROPIC_API_KEY" not in captured_env
+        assert "ANTHROPIC_BASE_URL" not in captured_env
+        assert "ANTHROPIC_AUTH_TOKEN" not in captured_env
+        assert "OPENAI_API_KEY" not in captured_env
+        assert captured_env["BENCH_HARMLESS_VAR"] == "keep-me"
+        assert captured_env["OPENCLAW_STATE_DIR"] == str(tmp_path / ".openclaw-state")
+
     def test_cdp_url_written_as_attach_profile(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
