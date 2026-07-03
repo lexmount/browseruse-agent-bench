@@ -188,7 +188,7 @@ class BaseEvaluator(ABC):
             usage = details.get("eval_usage")
             if usage:
                 usages.append(usage)
-        cost_summary = aggregate_evaluation_costs(usages)
+        cost_summary = aggregate_evaluation_costs(usages, model_name=self.args.model)
         if cost_summary:
             summary["evaluation_cost"] = cost_summary
         summary["evaluation_config"] = {

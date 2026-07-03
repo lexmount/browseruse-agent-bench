@@ -134,9 +134,44 @@ class TestOpenClawAgentRunTask:
         assert result.agent_done == "done"
         assert result.metrics.steps == 2
         assert result.metrics.usage is not None
-        assert result.metrics.usage.total_prompt_tokens == 100
+        # lastCallUsage fallback; pi-ai `input` excludes cacheRead/cacheWrite,
+        # so the normalized prompt count folds them back in (100 + 40 + 0).
+        assert result.metrics.usage.total_prompt_tokens == 140
+        assert result.metrics.usage.total_prompt_cached_tokens == 40
         assert result.screenshots == ["screenshot-1.png"]
         assert result.action_history[0] == "browser_open"
+
+    def test_usage_aggregates_across_session_messages(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Session log carries per-call usage: aggregate it instead of trusting
+        # lastCallUsage (which covers only the final LLM call).
+        session = tmp_path / "session.jsonl"
+        lines = [
+            {"type": "message", "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "step 1"}],
+                "usage": {"input": 10, "output": 5, "cacheRead": 100, "cacheWrite": 30},
+            }},
+            {"type": "message", "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "step 2"}],
+                "usage": {"input": 20, "output": 7, "cacheRead": 200, "cacheWrite": 0},
+            }},
+        ]
+        session.write_text("\n".join(json.dumps(line) for line in lines), encoding="utf-8")
+        agent = OpenClawAgent()
+        monkeypatch.setattr(
+            agent, "_run_subprocess", lambda *a, **kw: (0, _result_stdout(session), None)
+        )
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        usage = result.metrics.usage
+        assert usage is not None
+        assert usage.total_prompt_tokens == 360  # 10+100+30 + 20+200+0
+        assert usage.total_prompt_cached_tokens == 300
+        assert usage.total_prompt_cache_creation_tokens == 30
+        assert usage.total_completion_tokens == 12
+        assert usage.entry_count == 2
 
     def test_state_config_written(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -163,6 +198,9 @@ class TestOpenClawAgentRunTask:
         assert cfg["models"]["providers"]["bench"]["timeoutSeconds"] == 300
         # The api key written for the run must be scrubbed from the artifact.
         assert provider["apiKey"] == "***"
+        # Without this compat flag OpenClaw never sends stream_options
+        # include_usage to custom providers, so token usage is all zeros.
+        assert provider["models"][0]["compat"] == {"supportsUsageInStreaming": True}
 
     def test_cdp_url_written_as_attach_profile(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -303,3 +341,15 @@ class TestStopPredicate:
         assert error is None
         assert _stdout_json(lines) == {"done": True}
         assert elapsed < 15
+
+
+class TestUsageFromTotalOnly:
+    def test_total_only_last_call_usage_preserved(self) -> None:
+        from browseruse_bench.agents.openclaw import OpenClawAgent
+
+        result_obj = {
+            "meta": {"agentMeta": {"lastCallUsage": {"total": 5000}}},
+        }
+        usage = OpenClawAgent._usage_from(result_obj)
+        assert usage is not None
+        assert usage.total_tokens == 5000
