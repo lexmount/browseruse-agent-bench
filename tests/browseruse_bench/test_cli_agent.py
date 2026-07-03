@@ -9,7 +9,6 @@ import pytest
 
 from browseruse_bench.agents.cli_agent import CLIAgent
 
-
 # ---------------------------------------------------------------------------
 # Concrete minimal subclass (CLIAgent is abstract via BaseAgent)
 # ---------------------------------------------------------------------------
@@ -183,3 +182,56 @@ class TestRunSubprocess:
             cwd=cwd_dir,
         )
         assert any(str(cwd_dir) in l for l in lines)
+
+    def test_stderr_collected_as_stdout_feeds_stop_predicate(self, tmp_path: Path) -> None:
+        # CLIs (e.g. openclaw) may emit the machine-readable result on stderr;
+        # with collect_stderr_as_stdout the predicate must see it and stop early.
+        import time as time_module
+
+        agent = self._agent()
+        code = (
+            "import sys, time\n"
+            "sys.stderr.write('RESULT_ON_STDERR\\n')\n"
+            "sys.stderr.flush()\n"
+            "time.sleep(60)\n"
+        )
+        t0 = time_module.monotonic()
+        rc, lines, err = agent._run_subprocess(
+            [sys.executable, "-u", "-c", code],
+            timeout=20,
+            task_workspace=tmp_path,
+            collect_stderr_as_stdout=True,
+            stop_predicate=lambda seen: any("RESULT_ON_STDERR" in line for line in seen),
+        )
+        elapsed = time_module.monotonic() - t0
+        assert rc == 0
+        assert err is None
+        assert any("RESULT_ON_STDERR" in line for line in lines)
+        assert elapsed < 10
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="process-group semantics differ on Windows")
+    def test_stop_predicate_terminates_process_group_children(self, tmp_path: Path) -> None:
+        import time as time_module
+
+        agent = self._agent()
+        code = (
+            "import subprocess, sys, time\n"
+            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+            "print('RESULT_READY', flush=True)\n"
+            "time.sleep(60)\n"
+        )
+        t0 = time_module.monotonic()
+        rc, lines, err = agent._run_subprocess(
+            [sys.executable, "-u", "-c", code],
+            timeout=20,
+            task_workspace=tmp_path,
+            stop_predicate=lambda seen: any("RESULT_READY" in line for line in seen),
+            terminate_process_group=True,
+            early_stop_grace_seconds=0.5,
+            kill_grace_seconds=2,
+        )
+        elapsed = time_module.monotonic() - t0
+        assert rc == 0
+        assert err is None
+        assert any("RESULT_READY" in line for line in lines)
+        assert elapsed < 5

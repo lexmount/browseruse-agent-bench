@@ -48,6 +48,41 @@ def _result_stdout(session_file: Path | None = None, answer: str = "The price is
     return [line + "\n" for line in text.split("\n")]
 
 
+_GATEWAY_TIMEOUT_TEXT = (
+    '{\n  "status": "error",\n  "tool": "browser",\n'
+    '  "error": "timed out. Restart the OpenClaw gateway (OpenClaw.app menubar, or '
+    "`openclaw --profile dev gateway`). Do NOT retry the browser tool — it will keep "
+    'failing. Use an alternative approach or inform the user that the browser is '
+    'currently unavailable."\n}'
+)
+
+
+def _write_gateway_timeout_session(path: Path, extra_ok_calls: int = 0) -> None:
+    """Session where a browser call fails with the gateway-timeout signature.
+
+    With extra_ok_calls > 0 the failing call comes after that many successful
+    browser calls (late failure, not a first-call failure).
+    """
+    rows: list[dict[str, Any]] = []
+    for i in range(extra_ok_calls):
+        rows.append({"type": "message", "message": {"role": "assistant", "content": [
+            {"type": "toolCall", "id": f"ok{i}", "name": "browser",
+             "arguments": {"action": "snapshot"}},
+        ]}})
+        rows.append({"type": "message", "message": {"role": "toolResult",
+            "toolCallId": f"ok{i}", "content": [{"type": "text", "text": "ok"}]}})
+    rows.append({"type": "message", "message": {"role": "assistant", "content": [
+        {"type": "toolCall", "id": "c1", "name": "browser",
+         "arguments": {"action": "open", "url": "https://example.com", "target": "host"}},
+    ]}})
+    rows.append({"type": "message", "message": {"role": "toolResult", "toolCallId": "c1",
+        "content": [{"type": "text", "text": _GATEWAY_TIMEOUT_TEXT}]}})
+    rows.append({"type": "message", "message": {"role": "assistant", "content": [
+        {"type": "text", "text": "The browser is currently unavailable."},
+    ]}})
+    path.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+
+
 def _write_session(path: Path) -> None:
     lines = [
         {"type": "message", "message": {"role": "user", "content": [{"type": "text", "text": "go"}]}},
@@ -77,6 +112,37 @@ class TestStdoutJson:
     def test_non_json_returns_none(self) -> None:
         assert _stdout_json(["warning: something\n"]) is None
         assert _stdout_json([]) is None
+
+    def test_json_embedded_in_noise_parsed(self) -> None:
+        # OpenClaw mixes log lines with the result object (sometimes on stderr).
+        lines = [
+            "npm warn Unknown env config\n",
+            '{"other": 1} {"payloads": [{"text": "hi"}], "meta": {}}\n',
+            "trailing log\n",
+        ]
+        assert _stdout_json(lines)["payloads"][0]["text"] == "hi"
+
+    def test_json_without_result_keys_ignored(self) -> None:
+        assert _stdout_json(['{"done": true}\n']) is None
+
+
+class TestBuildCommand:
+    def test_agent_and_session_id_flags(self) -> None:
+        cmd = OpenClawAgent._build_command("prompt", "t1", 60, {})
+        assert cmd[cmd.index("--agent") + 1] == "main"
+        assert cmd[cmd.index("--session-id") + 1] == "bench-t1"
+        assert "--session-key" not in cmd
+        assert "--thinking" not in cmd
+
+    def test_thinking_passthrough(self) -> None:
+        cmd = OpenClawAgent._build_command("prompt", "t1", 60, {"thinking": "medium"})
+        assert cmd[cmd.index("--thinking") + 1] == "medium"
+
+    def test_thinking_normalized_from_reasoning_effort(self) -> None:
+        cmd = OpenClawAgent._build_command(
+            "prompt", "t1", 60, {"reasoning_effort": "Extra-High"}
+        )
+        assert cmd[cmd.index("--thinking") + 1] == "xhigh"
 
 
 class TestNormalizeSessionItems:
@@ -195,12 +261,41 @@ class TestOpenClawAgentRunTask:
         assert cfg["agents"]["defaults"]["model"]["primary"] == "bench/gpt-test"
         assert cfg["agents"]["defaults"]["workspace"] == str(tmp_path / ".openclaw-workspace")
         assert cfg["agents"]["list"][0]["tools"]["allow"] == ["browser", "read"]
-        assert cfg["models"]["providers"]["bench"]["timeoutSeconds"] == 300
+        # Without this, a browser call with no explicit target consults
+        # gateway node.list, which fails without gateway credentials.
+        assert cfg["gateway"]["nodes"]["browser"]["mode"] == "off"
+        # Current OpenClaw CLI rejects timeoutSeconds in the provider schema.
+        assert "timeoutSeconds" not in provider
+        assert provider["api"] == "openai-completions"
         # The api key written for the run must be scrubbed from the artifact.
         assert provider["apiKey"] == "***"
         # Without this compat flag OpenClaw never sends stream_options
         # include_usage to custom providers, so token usage is all zeros.
         assert provider["models"][0]["compat"] == {"supportsUsageInStreaming": True}
+
+    def test_provider_api_and_reasoning_from_config(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        agent = OpenClawAgent()
+        monkeypatch.setattr(agent, "_run_subprocess", lambda *a, **kw: (0, _result_stdout(), None))
+        config = {
+            **AGENT_CONFIG,
+            "api": "openai-responses",
+            "reasoning": True,
+            "supports_reasoning_effort": True,
+        }
+        agent.run_task(TASK_INFO, config, tmp_path)
+
+        cfg = json.loads((tmp_path / ".openclaw-state" / "openclaw.json").read_text())
+        provider = cfg["models"]["providers"]["bench"]
+        model_def = provider["models"][0]
+        assert provider["api"] == "openai-responses"
+        assert model_def["api"] == "openai-responses"
+        assert model_def["reasoning"] is True
+        assert model_def["compat"] == {
+            "supportsUsageInStreaming": True,
+            "supportsReasoningEffort": True,
+        }
 
     def test_cdp_url_written_as_attach_profile(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -227,6 +322,13 @@ class TestOpenClawAgentRunTask:
         assert profile["cdpUrl"] == "wss://cdp.example/1"
         assert profile["attachOnly"] is True
         assert cfg["browser"]["defaultProfile"] == "bench"
+        # OpenClaw injects built-in "user" (attach local Chrome) and
+        # "openclaw" (managed local Chrome) profiles unless the config defines
+        # them; the model sometimes passes profile=user/openclaw explicitly,
+        # escaping the bench browser. Pin both names to the bench CDP.
+        for alias in ("user", "openclaw"):
+            assert cfg["browser"]["profiles"][alias]["cdpUrl"] == "wss://cdp.example/1"
+            assert cfg["browser"]["profiles"][alias]["attachOnly"] is True
         assert result.env_status == "success"
 
     def test_non_cdp_backend_fails_fast(
@@ -251,6 +353,60 @@ class TestOpenClawAgentRunTask:
         result = agent.run_task(TASK_INFO, config, tmp_path)
         assert result.env_status == "failed"
         assert "browser-use-cloud" in (result.error or "")
+
+    def test_result_json_recovered_from_stderr_file(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # OpenClaw sometimes emits the result JSON on stderr only; the adapter
+        # must recover it from the drained stderr.txt.
+        agent = OpenClawAgent()
+
+        def fake_run(cmd: list[str], **kw: Any) -> tuple[int, list[str], None]:
+            (tmp_path / "stderr.txt").write_text(
+                "some log\n" + "".join(_result_stdout()), encoding="utf-8"
+            )
+            return 0, [], None
+
+        monkeypatch.setattr(agent, "_run_subprocess", fake_run)
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        assert result.env_status == "success"
+        assert result.answer == "The price is $42"
+
+    def test_final_answer_recovered_from_session_jsonl(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Some runs finish the turn and persist the assistant answer in the
+        # session file without ever emitting the --json payload.
+        agent = OpenClawAgent()
+
+        def fake_run(cmd: list[str], **kw: Any) -> tuple[int, list[str], None]:
+            session_dir = tmp_path / ".openclaw-state" / "agents" / "main" / "sessions"
+            session_dir.mkdir(parents=True)
+            rows = [
+                {"type": "message", "message": {"role": "assistant", "content": [
+                    {"type": "toolCall", "id": "c1", "name": "browser",
+                     "arguments": {"action": "open"}},
+                ]}},
+                {"type": "message", "message": {"role": "toolResult", "toolCallId": "c1",
+                    "content": [{"type": "text", "text": "opened"}]}},
+                {"type": "message", "message": {"role": "assistant", "content": [
+                    {"type": "text", "text": "最终答案：测试成功"},
+                ], "usage": {"input": 11, "output": 7, "cacheRead": 3, "total": 21}}},
+            ]
+            (session_dir / "bench-t1.jsonl").write_text(
+                "\n".join(json.dumps(row) for row in rows), encoding="utf-8"
+            )
+            return 0, [], None
+
+        monkeypatch.setattr(agent, "_run_subprocess", fake_run)
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        assert result.env_status == "success"
+        assert result.agent_done == "done"
+        assert result.answer == "最终答案：测试成功"
+        usage = result.metrics.usage
+        assert usage is not None
+        assert usage.total_prompt_tokens == 14  # 11 + 3 cacheRead folded in
+        assert usage.total_completion_tokens == 7
 
     def test_no_result_json_is_error(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -318,6 +474,114 @@ class TestOpenClawAgentRunTask:
         assert "not found" in (result.error or "").lower()
 
 
+class TestGatewayTimeoutRetry:
+    def _fake_run_with_sessions(
+        self, tmp_path: Path, sessions: list[str], calls: list[list[str]]
+    ) -> Any:
+        """Build a fake _run_subprocess emitting one prepared session per call."""
+
+        def fake_run(cmd: list[str], **kw: Any) -> tuple[int, list[str], None]:
+            calls.append(cmd)
+            attempt = len(calls)
+            session = tmp_path / f"session-attempt{attempt}.jsonl"
+            kind = sessions[attempt - 1]
+            if kind == "gateway_timeout":
+                _write_gateway_timeout_session(session)
+                answer = "The browser is currently unavailable."
+            elif kind == "late_gateway_timeout":
+                _write_gateway_timeout_session(session, extra_ok_calls=3)
+                answer = "Partial answer."
+            else:
+                _write_session(session)
+                answer = "The price is $42"
+            return 0, _result_stdout(session, answer=answer), None
+
+        return fake_run
+
+    def test_first_call_gateway_timeout_retries_once_and_succeeds(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        agent = OpenClawAgent()
+        calls: list[list[str]] = []
+        monkeypatch.setattr(
+            agent, "_run_subprocess",
+            self._fake_run_with_sessions(tmp_path, ["gateway_timeout", "ok"], calls),
+        )
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        assert len(calls) == 2
+        assert result.env_status == "success"
+        assert result.agent_done == "done"
+        assert result.answer == "The price is $42"
+
+    def test_gateway_timeout_on_both_attempts_is_env_failure(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        agent = OpenClawAgent()
+        calls: list[list[str]] = []
+        monkeypatch.setattr(
+            agent, "_run_subprocess",
+            self._fake_run_with_sessions(
+                tmp_path, ["gateway_timeout", "gateway_timeout"], calls
+            ),
+        )
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        assert len(calls) == 2  # exactly one retry
+        assert result.env_status == "failed"
+        assert result.agent_done == "error"
+        assert "gateway" in (result.error or "").lower()
+
+    def test_late_gateway_timeout_not_retried(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # A timeout after several successful browser calls is not the
+        # first-call transient signature; keep the single attempt.
+        agent = OpenClawAgent()
+        calls: list[list[str]] = []
+        monkeypatch.setattr(
+            agent, "_run_subprocess",
+            self._fake_run_with_sessions(tmp_path, ["late_gateway_timeout"], calls),
+        )
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        assert len(calls) == 1
+        assert result.env_status == "success"
+
+    def test_retry_opens_fresh_browser_session(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import contextlib
+
+        from browseruse_bench.agents import openclaw as openclaw_module
+        from browseruse_bench.browsers.types import BrowserSessionContext
+
+        session_count = 0
+
+        @contextlib.contextmanager
+        def fake_session(browser_id: str, agent_name: str, agent_config: dict[str, Any]):
+            nonlocal session_count
+            session_count += 1
+            yield BrowserSessionContext(
+                backend_id=browser_id, transport="cdp",
+                cdp_url=f"wss://cdp.example/{session_count}",
+            )
+
+        monkeypatch.setattr(openclaw_module, "open_browser_session", fake_session)
+        agent = OpenClawAgent()
+        calls: list[list[str]] = []
+        seen_cdp_urls: list[str] = []
+        inner = self._fake_run_with_sessions(tmp_path, ["gateway_timeout", "ok"], calls)
+
+        def fake_run(cmd: list[str], **kw: Any) -> tuple[int, list[str], None]:
+            cfg = json.loads((tmp_path / ".openclaw-state" / "openclaw.json").read_text())
+            seen_cdp_urls.append(cfg["browser"]["profiles"]["bench"]["cdpUrl"])
+            return inner(cmd, **kw)
+
+        monkeypatch.setattr(agent, "_run_subprocess", fake_run)
+        config = {**AGENT_CONFIG, "browser_id": "lexmount"}
+        result = agent.run_task(TASK_INFO, config, tmp_path)
+        assert result.env_status == "success"
+        assert seen_cdp_urls == ["wss://cdp.example/1", "wss://cdp.example/2"]
+
+
 class TestStopPredicate:
     def test_run_subprocess_stops_early_on_predicate(self, tmp_path: Path) -> None:
         # A process that prints JSON then sleeps forever must be terminated as
@@ -327,7 +591,8 @@ class TestStopPredicate:
         agent = OpenClawAgent()
         cmd = [
             "python3", "-u", "-c",
-            "import time, sys; print('{\"done\": true}'); sys.stdout.flush(); time.sleep(60)",
+            "import time, sys; print('{\"payloads\":[{\"text\":\"done\"}]}'); "
+            "sys.stdout.flush(); time.sleep(60)",
         ]
         t0 = time_module.monotonic()
         returncode, lines, error = agent._run_subprocess(
@@ -339,7 +604,7 @@ class TestStopPredicate:
         elapsed = time_module.monotonic() - t0
         assert returncode == 0
         assert error is None
-        assert _stdout_json(lines) == {"done": True}
+        assert _stdout_json(lines) == {"payloads": [{"text": "done"}]}
         assert elapsed < 15
 
 

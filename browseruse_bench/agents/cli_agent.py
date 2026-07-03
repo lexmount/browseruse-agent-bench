@@ -10,13 +10,18 @@ from this class instead of BaseAgent directly. It provides:
 
 from __future__ import annotations
 
+import os
+import signal
 import subprocess
+import time
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from threading import Thread
 from typing import TextIO
 
 from browseruse_bench.agents.base import BaseAgent
+from browseruse_bench.utils import IS_WINDOWS
 
 
 class CLIAgent(BaseAgent):
@@ -36,9 +41,13 @@ class CLIAgent(BaseAgent):
         cwd: Path | None = None,
         env: dict[str, str] | None = None,
         collect_stdout: bool = True,
+        collect_stderr_as_stdout: bool = False,
         stdout_line_hook: Callable[[str], None] | None = None,
         stderr_line_hook: Callable[[str], None] | None = None,
         stop_predicate: Callable[[list[str]], bool] | None = None,
+        terminate_process_group: bool = False,
+        early_stop_grace_seconds: float = 5.0,
+        kill_grace_seconds: float = 5.0,
     ) -> tuple[int, list[str], str | None]:
         """Launch *cmd*, draining stdout/stderr to files in *task_workspace*.
 
@@ -54,6 +63,10 @@ class CLIAgent(BaseAgent):
             collect_stdout: Whether to accumulate stdout lines and return them.
                             Set False when output is written to disk by the
                             child process and parsed later (e.g. Agent-TARS).
+            collect_stderr_as_stdout: Whether to append stderr lines to the
+                            returned line buffer and evaluate stop_predicate on
+                            them. Use only for CLIs that emit their machine
+                            readable result on stderr.
             stdout_line_hook: Called with each raw stdout line for live logging.
             stderr_line_hook: Called with each raw stderr line for live logging.
             stop_predicate: Called with the collected stdout lines after each
@@ -62,6 +75,13 @@ class CLIAgent(BaseAgent):
                             output is complete before the process exits (e.g.
                             a child service keeps it alive). Requires
                             collect_stdout=True.
+            terminate_process_group: Start the subprocess in its own process
+                            group/session and terminate the whole group on
+                            timeout or early stop. Use for CLIs that spawn
+                            long-lived helper processes.
+            early_stop_grace_seconds: Seconds to wait after stop_predicate
+                            matches before force-killing.
+            kill_grace_seconds: Seconds to wait after force-killing.
 
         Returns:
             ``(returncode, stdout_lines, execution_error)``
@@ -87,17 +107,39 @@ class CLIAgent(BaseAgent):
                 open(stderr_file, "w", encoding="utf-8") as f_err,
             ):
                 # FileNotFoundError propagates to caller if exe not found
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    bufsize=1,
-                    cwd=str(cwd) if cwd is not None else None,
-                    env=env,
-                )
+                popen_kwargs: dict[str, object] = {
+                    "stdout": subprocess.PIPE,
+                    "stderr": subprocess.PIPE,
+                    "text": True,
+                    "encoding": "utf-8",
+                    "errors": "replace",
+                    "bufsize": 1,
+                    "cwd": str(cwd) if cwd is not None else None,
+                    "env": env,
+                }
+                if terminate_process_group:
+                    if IS_WINDOWS:
+                        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+                    else:
+                        popen_kwargs["start_new_session"] = True
+
+                process = subprocess.Popen(cmd, **popen_kwargs)
+
+                def _signal_process_group(sig: int) -> None:
+                    if terminate_process_group and not IS_WINDOWS:
+                        try:
+                            os.killpg(process.pid, sig)
+                            return
+                        except ProcessLookupError:
+                            return
+                        except OSError:
+                            pass
+                    with suppress(ProcessLookupError, OSError):
+                        kill_signal = getattr(signal, "SIGKILL", None)
+                        if kill_signal is not None and sig == kill_signal:
+                            process.kill()
+                        else:
+                            process.terminate()
 
                 def _drain_stdout(stream: TextIO, fh: TextIO) -> None:
                     nonlocal stopped_early
@@ -112,36 +154,62 @@ class CLIAgent(BaseAgent):
                             stdout_line_hook(line)
                         if stop_predicate and not stopped_early and stop_predicate(stdout_lines):
                             stopped_early = True
-                            process.terminate()
+                            _signal_process_group(signal.SIGTERM)
                             return
 
                 def _drain_stderr(stream: TextIO, fh: TextIO) -> None:
+                    nonlocal stopped_early
                     for line in iter(stream.readline, ""):
                         if not line:
                             continue
                         fh.write(line)
                         fh.flush()
+                        if collect_stdout and collect_stderr_as_stdout:
+                            stdout_lines.append(line)
                         if stderr_line_hook:
                             stderr_line_hook(line)
+                        if stop_predicate and not stopped_early and stop_predicate(stdout_lines):
+                            stopped_early = True
+                            _signal_process_group(signal.SIGTERM)
+                            return
 
                 t_out = Thread(target=_drain_stdout, args=(process.stdout, f_out))
                 t_err = Thread(target=_drain_stderr, args=(process.stderr, f_err))
                 t_out.start()
                 t_err.start()
 
-                try:
-                    returncode = process.wait(timeout=timeout)
-                except subprocess.TimeoutExpired:
-                    process.terminate()
+                deadline = time.monotonic() + timeout
+                while True:
+                    if stopped_early:
+                        try:
+                            returncode = process.wait(timeout=early_stop_grace_seconds)
+                        except subprocess.TimeoutExpired:
+                            _signal_process_group(getattr(signal, "SIGKILL", signal.SIGTERM))
+                            returncode = process.wait(timeout=kill_grace_seconds)
+                        break
+                    if stop_predicate and not stopped_early and stop_predicate(stdout_lines):
+                        stopped_early = True
+                        _signal_process_group(signal.SIGTERM)
+                        continue
                     try:
-                        process.wait(timeout=5)
+                        returncode = process.wait(timeout=0.25)
+                        break
                     except subprocess.TimeoutExpired:
-                        process.kill()
-                    execution_error = f"Timeout after {timeout} seconds"
-                    returncode = -1
+                        if time.monotonic() < deadline:
+                            continue
+                        _signal_process_group(signal.SIGTERM)
+                        try:
+                            process.wait(timeout=early_stop_grace_seconds)
+                        except subprocess.TimeoutExpired:
+                            _signal_process_group(getattr(signal, "SIGKILL", signal.SIGTERM))
+                            with suppress(subprocess.TimeoutExpired):
+                                process.wait(timeout=kill_grace_seconds)
+                        execution_error = f"Timeout after {timeout} seconds"
+                        returncode = -1
+                        break
 
-                t_out.join(timeout=5)
-                t_err.join(timeout=5)
+                t_out.join(timeout=kill_grace_seconds)
+                t_err.join(timeout=kill_grace_seconds)
 
                 if stopped_early:
                     returncode = 0

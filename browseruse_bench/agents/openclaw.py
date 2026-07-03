@@ -54,17 +54,50 @@ _DEFAULT_RULES = (
 
 _MEDIA_PATH_RE = re.compile(r"MEDIA:(\S+)")
 
+# Failure signature of a transient OpenClaw browser-control outage: the very
+# first browser tool call errors with this text after ~30s and the agent gives
+# up. Adjacent tasks succeed, so one retry on a fresh browser session recovers.
+_GATEWAY_TIMEOUT_SNIPPET = "Restart the OpenClaw gateway"
+_GATEWAY_TIMEOUT_ERROR = "OpenClaw gateway timed out on the first browser tool call"
+_GATEWAY_TIMEOUT_MAX_STEPS = 2
+
+
+def _first_browser_call_gateway_timeout(items: list[dict[str, Any]]) -> bool:
+    """True when the first browser tool call failed with the gateway-timeout signature."""
+    for item in items:
+        if item.get("type") != "mcp_tool_call":
+            continue
+        if not str(item.get("tool", "")).startswith("browser"):
+            continue
+        result = item.get("result")
+        if not isinstance(result, dict):
+            return False
+        texts = [
+            str(block.get("text", ""))
+            for block in result.get("content", [])
+            if isinstance(block, dict)
+        ]
+        return _GATEWAY_TIMEOUT_SNIPPET in "\n".join(texts)
+    return False
+
 
 def _stdout_json(stdout_lines: list[str]) -> dict[str, Any] | None:
-    """Parse the accumulated stdout as one JSON object, or None when incomplete."""
+    """Find the CLI result JSON object in the accumulated output, or None.
+
+    OpenClaw interleaves log lines with the result object and sometimes emits
+    it on stderr, so scan the combined text for the first JSON object that
+    looks like a result payload instead of requiring clean stdout.
+    """
     text = "".join(stdout_lines).strip()
-    if not text.startswith("{"):
-        return None
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"{", text):
+        try:
+            parsed, _ = decoder.raw_decode(text[match.start():])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict) and ("payloads" in parsed or "meta" in parsed):
+            return parsed
+    return None
 
 
 def _normalize_session_items(session_file: Path) -> list[dict[str, Any]]:
@@ -154,6 +187,13 @@ def _fold_message(
         media_path = _image_block_path(block)
         if media_path:
             texts.append(f"MEDIA:{media_path}")
+    details = message.get("details")
+    if isinstance(details, dict):
+        media = details.get("media")
+        if isinstance(media, dict) and isinstance(media.get("mediaUrl"), str):
+            texts.append(f"MEDIA:{media['mediaUrl']}")
+        elif isinstance(details.get("path"), str):
+            texts.append(f"MEDIA:{details['path']}")
     item["status"] = "completed"
     item["result"] = {"content": [{"type": "text", "text": "\n".join(texts)}]}
 
@@ -221,6 +261,16 @@ def _copy_media_paths(text: str, trajectory_dir: Path, saved: list[str]) -> None
             logger.warning("Failed to copy screenshot %s: %s", source, exc)
 
 
+def _normalize_thinking_level(value: Any) -> str | None:
+    """Map config reasoning-effort spellings to OpenClaw --thinking levels."""
+    if not value:
+        return None
+    level = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    if level in ("extra_high", "extrahigh"):
+        return "xhigh"
+    return level
+
+
 @register_agent
 class OpenClawAgent(CLIAgent):
     """
@@ -244,7 +294,36 @@ class OpenClawAgent(CLIAgent):
         agent_config: dict[str, Any],
         task_workspace: Path,
     ) -> AgentResult | dict[str, Any]:
-        """Execute a browser automation task using OpenClaw CLI."""
+        """Execute a browser automation task using OpenClaw CLI.
+
+        A first-browser-call gateway timeout is a transient infrastructure
+        failure, not an agent outcome: retry once on a fresh browser session
+        with a clean per-task OpenClaw state.
+        """
+        result = self._run_once(task_info, agent_config, task_workspace)
+        if not self._is_first_call_gateway_timeout(result):
+            return result
+        logger.warning(
+            "OpenClaw gateway timed out on the first browser call for task %s; "
+            "retrying once with a fresh browser session",
+            task_info["task_id"],
+        )
+        shutil.rmtree(task_workspace / ".openclaw-state", ignore_errors=True)
+        return self._run_once(task_info, agent_config, task_workspace)
+
+    @staticmethod
+    def _is_first_call_gateway_timeout(result: AgentResult | dict[str, Any]) -> bool:
+        if not isinstance(result, AgentResult):
+            return False
+        return bool(result.error and _GATEWAY_TIMEOUT_ERROR in result.error)
+
+    def _run_once(
+        self,
+        task_info: dict[str, Any],
+        agent_config: dict[str, Any],
+        task_workspace: Path,
+    ) -> AgentResult | dict[str, Any]:
+        """One OpenClaw attempt on its own browser session."""
         browser_id = str(agent_config.get("browser_id") or "")
         if browser_id in SELF_LAUNCH_BROWSER_IDS:
             warn_if_local_proxy_unsupported(agent_config, self.name)
@@ -295,7 +374,7 @@ class OpenClawAgent(CLIAgent):
         trajectory_dir.mkdir(parents=True, exist_ok=True)
         state_dir = task_workspace / ".openclaw-state"
         self._write_state_config(agent_config, task_workspace, state_dir, model, cdp_url)
-        cmd = self._build_command(f"{rules}\n\n{prompt}", task_id, timeout)
+        cmd = self._build_command(f"{rules}\n\n{prompt}", task_id, timeout, agent_config)
 
         env = {**os.environ}
         env["OPENCLAW_STATE_DIR"] = str(state_dir)
@@ -305,6 +384,14 @@ class OpenClawAgent(CLIAgent):
             "Executing OpenClaw for task %s (model=%s, timeout=%ds)", task_id, model, timeout
         )
         t_start = time.monotonic()
+
+        def _has_result(lines: list[str]) -> bool:
+            return (
+                _stdout_json(lines) is not None
+                or self._workspace_json(task_workspace) is not None
+                or self._session_result(task_workspace, task_id) is not None
+            )
+
         try:
             returncode, stdout_lines, execution_error = self._run_subprocess(
                 cmd,
@@ -313,10 +400,18 @@ class OpenClawAgent(CLIAgent):
                 cwd=task_workspace,
                 env=env,
                 collect_stdout=True,
+                # The result JSON is sometimes emitted on stderr only.
+                collect_stderr_as_stdout=True,
                 stderr_line_hook=_stderr_hook,
                 # The CLI keeps running after the turn (embedded browser
                 # service); terminate as soon as the result JSON is complete.
-                stop_predicate=lambda lines: _stdout_json(lines) is not None,
+                stop_predicate=_has_result,
+                # OpenClaw spawns openclaw-agent and browser/gateway helpers.
+                # Kill the whole group once the result exists, otherwise those
+                # helpers can keep the benchmark runner alive.
+                terminate_process_group=True,
+                early_stop_grace_seconds=float(agent_config.get("early_stop_grace_seconds", 2)),
+                kill_grace_seconds=float(agent_config.get("kill_grace_seconds", 5)),
             )
         except FileNotFoundError:
             return AgentResult(
@@ -367,6 +462,24 @@ class OpenClawAgent(CLIAgent):
     ) -> None:
         """Write the per-task openclaw.json (provider, workspace, tools, browser)."""
         state_dir.mkdir(parents=True, exist_ok=True)
+        provider_api = str(agent_config.get("api") or "openai-completions")
+        # OpenClaw's auto-detection disables streaming usage for custom
+        # providers, which zeroes all token accounting; the bench gateway
+        # supports stream_options.include_usage, so opt in.
+        compat: dict[str, Any] = {"supportsUsageInStreaming": True}
+        if agent_config.get("supports_reasoning_effort") is not None:
+            compat["supportsReasoningEffort"] = bool(agent_config.get("supports_reasoning_effort"))
+        model_def: dict[str, Any] = {
+            "id": model,
+            "name": model,
+            "api": provider_api,
+            "reasoning": bool(agent_config.get("reasoning", False)),
+            "input": ["text"],
+            "contextWindow": int(agent_config.get("context_window", 195000)),
+            "maxTokens": int(agent_config.get("max_tokens", 16000)),
+            "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+            "compat": compat,
+        }
         config: dict[str, Any] = {
             "models": {
                 "mode": "merge",
@@ -374,21 +487,10 @@ class OpenClawAgent(CLIAgent):
                     "bench": {
                         "baseUrl": agent_config.get("base_url", ""),
                         "apiKey": agent_config.get("api_key", ""),
-                        "api": "openai-completions",
-                        "timeoutSeconds": int(agent_config.get("llm_timeout", 300)),
-                        "models": [{
-                            "id": model,
-                            "name": model,
-                            "input": ["text"],
-                            "contextWindow": int(agent_config.get("context_window", 195000)),
-                            "maxTokens": int(agent_config.get("max_tokens", 16000)),
-                            "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                            # OpenClaw's auto-detection disables streaming usage
-                            # for custom providers, which zeroes all token
-                            # accounting; the bench gateway supports
-                            # stream_options.include_usage, so opt in.
-                            "compat": {"supportsUsageInStreaming": True},
-                        }],
+                        # No timeoutSeconds: the current OpenClaw CLI rejects
+                        # it in the provider config schema.
+                        "api": provider_api,
+                        "models": [model_def],
                     }
                 },
             },
@@ -404,13 +506,24 @@ class OpenClawAgent(CLIAgent):
                 "list": [{"id": "main", "tools": {"allow": ["browser", "read"]}}],
             },
             "browser": {"enabled": True},
+            # Never route browser calls through gateway node proxies: a call
+            # with no explicit target otherwise consults gateway node.list,
+            # which fails on machines without gateway credentials.
+            "gateway": {"nodes": {"browser": {"mode": "off"}}},
         }
         if cdp_url:
+            bench_profile = {"cdpUrl": cdp_url, "attachOnly": True, "color": "#00AA00"}
             config["browser"] = {
                 "enabled": True,
                 "defaultProfile": "bench",
+                # Also pin the built-in profile names: OpenClaw otherwise
+                # injects "user" (attach the operator's local Chrome) and
+                # "openclaw" (managed local Chrome), and the model sometimes
+                # requests them explicitly, escaping the bench browser.
                 "profiles": {
-                    "bench": {"cdpUrl": cdp_url, "attachOnly": True, "color": "#00AA00"},
+                    "bench": bench_profile,
+                    "user": dict(bench_profile),
+                    "openclaw": dict(bench_profile),
                 },
             }
         (state_dir / "openclaw.json").write_text(
@@ -418,16 +531,33 @@ class OpenClawAgent(CLIAgent):
         )
 
     @staticmethod
-    def _build_command(full_prompt: str, task_id: str, timeout: int) -> list[str]:
+    def _build_command(
+        full_prompt: str,
+        task_id: str,
+        timeout: int,
+        agent_config: dict[str, Any],
+    ) -> list[str]:
         exe = "openclaw.cmd" if IS_WINDOWS else "openclaw"
-        return [
-            exe, "agent",
+        cmd = [
+            # --dev keeps the embedded gateway/browser-control ports off the
+            # defaults, so bench runs never collide with an operator's own
+            # OpenClaw app; state still goes to OPENCLAW_STATE_DIR.
+            exe, "--dev", "agent",
             "--local",   # embedded agent turn, no Gateway service required
             "--json",
-            "--session-key", f"agent:main:bench-{task_id}",
+            "--agent", "main",
+            "--session-id", f"bench-{task_id}",
             "-m", full_prompt,
             "--timeout", str(timeout),
         ]
+        thinking = _normalize_thinking_level(
+            agent_config.get("thinking")
+            or agent_config.get("reasoning_effort")
+            or agent_config.get("thinking_effort")
+        )
+        if thinking:
+            cmd += ["--thinking", thinking]
+        return cmd
 
     def _finalize_result(
         self,
@@ -441,7 +571,12 @@ class OpenClawAgent(CLIAgent):
         task_workspace: Path,
         trajectory_dir: Path,
     ) -> AgentResult:
-        result_obj = _stdout_json(stdout_lines) or {}
+        result_obj = (
+            _stdout_json(stdout_lines)
+            or self._workspace_json(task_workspace)
+            or self._session_result(task_workspace, task_id)
+            or {}
+        )
         payloads = result_obj.get("payloads")
         answer = ""
         if isinstance(payloads, list):
@@ -466,6 +601,11 @@ class OpenClawAgent(CLIAgent):
         items = self._session_items(result_obj, task_workspace)
         saved_screenshots = _collect_media_screenshots(items, trajectory_dir)
         steps = sum(1 for item in items if item.get("type") in STEP_ITEM_TYPES)
+        if steps <= _GATEWAY_TIMEOUT_MAX_STEPS and _first_browser_call_gateway_timeout(items):
+            # The agent only wrapped the outage into a text answer; this is an
+            # environment failure, never env_status=success.
+            env_status, agent_done = "failed", "error"
+            error_message = _GATEWAY_TIMEOUT_ERROR
         if items:
             try:
                 write_api_logs(task_id, model, rules, items, task_workspace / "api_logs")
@@ -505,6 +645,85 @@ class OpenClawAgent(CLIAgent):
             logger.warning("Failed to scrub state config secrets: %s", exc)
 
     @staticmethod
+    def _workspace_json(task_workspace: Path) -> dict[str, Any] | None:
+        """Recover the result JSON from the drained stdout.txt / stderr.txt."""
+        lines: list[str] = []
+        for name in ("stdout.txt", "stderr.txt"):
+            path = task_workspace / name
+            if not path.is_file():
+                continue
+            try:
+                lines.append(path.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                continue
+        return _stdout_json(lines)
+
+    @staticmethod
+    def _session_result(task_workspace: Path, task_id: str) -> dict[str, Any] | None:
+        """Recover a completed answer from OpenClaw's session JSONL.
+
+        Some OpenClaw CLI runs finish the agent turn and write the final
+        assistant text to the session file, but never emit the ``--json``
+        payload to stdout or exit. Treat the last assistant text-only message
+        as the terminal answer so the benchmark can terminate the lingering
+        process group and continue.
+        """
+        session_id = f"bench-{task_id}"
+        session_file = (
+            task_workspace / ".openclaw-state" / "agents" / "main" / "sessions"
+            / f"{session_id}.jsonl"
+        )
+        if not session_file.is_file():
+            return None
+        try:
+            raw_lines = session_file.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return None
+
+        answer = ""
+        usage: dict[str, Any] = {}
+        for raw_line in raw_lines:
+            try:
+                obj = json.loads(raw_line)
+            except json.JSONDecodeError:
+                continue
+            message = obj.get("message")
+            if not isinstance(message, dict) or message.get("role") != "assistant":
+                continue
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            has_tool_call = any(
+                isinstance(block, dict) and block.get("type") == "toolCall" for block in content
+            )
+            texts = [
+                str(block.get("text", ""))
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text" and block.get("text")
+            ]
+            if texts and not has_tool_call:
+                answer = "\n".join(texts).strip()
+                raw_usage = message.get("usage")
+                usage = raw_usage if isinstance(raw_usage, dict) else {}
+        if not answer:
+            return None
+
+        agent_meta: dict[str, Any] = {
+            "sessionId": session_id,
+            "sessionFile": str(session_file),
+        }
+        total_tokens = safe_int(usage.get("total") or usage.get("totalTokens"))
+        if total_tokens:
+            agent_meta["lastCallUsage"] = {
+                "input": safe_int(usage.get("input")),
+                "output": safe_int(usage.get("output")),
+                "cacheRead": safe_int(usage.get("cacheRead")),
+                "cacheWrite": safe_int(usage.get("cacheWrite")),
+                "total": total_tokens,
+            }
+        return {"payloads": [{"text": answer}], "meta": {"agentMeta": agent_meta}}
+
+    @staticmethod
     def _agent_meta(result_obj: dict[str, Any]) -> dict[str, Any] | None:
         meta = result_obj.get("meta")
         agent_meta = meta.get("agentMeta") if isinstance(meta, dict) else None
@@ -519,9 +738,17 @@ class OpenClawAgent(CLIAgent):
     @staticmethod
     def _session_items(result_obj: dict[str, Any], task_workspace: Path) -> list[dict[str, Any]]:
         session_file = OpenClawAgent._session_file_from(result_obj)
-        if session_file is None:
+        if session_file is not None:
+            return _normalize_session_items(session_file)
+        agent_meta = OpenClawAgent._agent_meta(result_obj)
+        session_id = agent_meta.get("sessionId") if agent_meta else None
+        if not session_id:
             return []
-        return _normalize_session_items(session_file)
+        fallback = (
+            task_workspace / ".openclaw-state" / "agents" / "main" / "sessions"
+            / f"{session_id}.jsonl"
+        )
+        return _normalize_session_items(fallback)
 
     @staticmethod
     def _usage_from(result_obj: dict[str, Any]) -> AgentUsage | None:
