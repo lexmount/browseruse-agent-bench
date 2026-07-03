@@ -101,6 +101,16 @@ from browseruse_bench.utils.config_loader import canonicalize_skyvern_model_name
 
 logger = logging.getLogger(__name__)
 
+# Browser backends whose runs leave Skyvern's per-step artifacts on the local
+# filesystem (cloud-managed Skyvern browsers keep artifacts remote).
+_LOCAL_ARTIFACT_BROWSERS = ("local", "lexmount", "cdp")
+
+# Exception classes tolerated by best-effort screenshot capture; empty when
+# no TargetClosedError could be imported (then nothing extra is caught).
+_TARGET_CLOSED_ERRORS: tuple[type[BaseException], ...] = (
+    (TargetClosedError,) if TargetClosedError is not None else ()
+)
+
 Skyvern: type[Any] | None = None
 RunEngine: type[Any] | None = None
 RunStatus: type[Any] | None = None
@@ -611,12 +621,20 @@ def _normalize_answer_text(value: Any) -> tuple[str, Any | None]:
     return str(value), value
 
 
+def _task_dir_numeric_id(name: str) -> int:
+    suffix = name.removeprefix("tsk_")
+    if suffix.isdigit():
+        return int(suffix)
+    return 0
+
+
 def _resolve_artifact_task_dirs(
     start_time: float,
     end_time: float,
     org_id: str | None,
     existing_dirs_before_task: set[str] | None,
     task_prompt: str | None,
+    include_sibling_dirs: bool = False,
 ) -> list[Path]:
     artifacts_base = _get_skyvern_artifacts_base()
     if artifacts_base is None:
@@ -653,6 +671,21 @@ def _resolve_artifact_task_dirs(
         matched_task = _find_task_dir_by_prompt(
             artifacts_org_dir, task_prompt, candidate_dirs, start_time
         )
+        if matched_task and include_sibling_dirs:
+            # A task_v2 run spreads its steps across several tsk_ dirs
+            # (planner task + per-goal child tasks); the children never embed
+            # the user prompt, so once the prompt anchors one dir, every new
+            # in-window dir belongs to this run. Caveat: with concurrent
+            # skyvern tasks sharing this artifact store (run --concurrency
+            # > 1), attribution is best-effort and may claim a concurrent
+            # run's dirs.
+            ordered = sorted(candidate_dirs, key=_task_dir_numeric_id)
+            if len(ordered) > 1:
+                logger.info(
+                    f"Prompt anchored {matched_task}; attributing "
+                    f"{len(ordered)} sibling artifact dirs to this run"
+                )
+            return [artifacts_org_dir / name for name in ordered]
         if matched_task:
             return [artifacts_org_dir / matched_task]
         logger.warning(
@@ -678,9 +711,15 @@ def copy_screenshots_from_skyvern_artifacts(
     org_id: str | None = None,
     existing_dirs_before_task: set[str] | None = None,
     task_prompt: str | None = None,
+    include_sibling_dirs: bool = False,
 ) -> tuple[int, int, list[Path]]:
     task_dirs = _resolve_artifact_task_dirs(
-        start_time, end_time, org_id, existing_dirs_before_task, task_prompt
+        start_time,
+        end_time,
+        org_id,
+        existing_dirs_before_task,
+        task_prompt,
+        include_sibling_dirs=include_sibling_dirs,
     )
     if not task_dirs:
         return 0, 0, []
@@ -718,6 +757,57 @@ def copy_screenshots_from_skyvern_artifacts(
             logger.error(f"Failed to copy screenshot {src_file}: {exc}")
 
     return screenshot_count, total_steps, task_dirs
+
+
+def _collect_run_artifacts(
+    trajectory_dir: Path,
+    start_time: float,
+    end_time: float,
+    org_id: str | None,
+    existing_dirs_before_task: set[str] | None,
+    task_prompt: str | None,
+    include_sibling_dirs: bool,
+) -> tuple[int, int, list[str], dict[str, Any]]:
+    """Copy screenshots and aggregate steps, actions, and usage from local artifacts.
+
+    Shared by the normal completion path and the client-side timeout path so a
+    timed-out run still reports the work Skyvern actually did.
+    """
+    screenshot_count, steps, task_dirs = copy_screenshots_from_skyvern_artifacts(
+        trajectory_dir,
+        start_time,
+        end_time,
+        org_id=org_id,
+        existing_dirs_before_task=existing_dirs_before_task,
+        task_prompt=task_prompt,
+        include_sibling_dirs=include_sibling_dirs,
+    )
+    if not task_dirs:
+        return screenshot_count, steps, [], {}
+    return (
+        screenshot_count,
+        steps,
+        _collect_action_history(task_dirs),
+        collect_usage_from_skyvern_artifacts(task_dirs),
+    )
+
+
+async def _capture_page_screenshot(page: Any, screenshot_path: Path, label: str) -> bool:
+    """Best-effort page screenshot; tolerates a dead page/context.
+
+    A closed page (common when the remote browser session died or the task
+    timed out) must not turn a soft failure into a subprocess-level
+    exception. Returns True when a screenshot file was written.
+    """
+    try:
+        await page.screenshot(path=str(screenshot_path))
+        return True
+    except (OSError, RuntimeError) as exc:
+        logger.error(f"Failed to capture {label} screenshot: {exc}")
+        return False
+    except _TARGET_CLOSED_ERRORS as exc:
+        logger.warning("Skipped %s screenshot; page/context closed: %s", label, exc)
+        return False
 
 
 @register_agent
@@ -907,6 +997,9 @@ class SkyvernAgent(BaseAgent):
             "skyvern_v2": RunEngine.skyvern_v2,
         }
         engine = ENGINE_MAP.get(engine_str, RunEngine.skyvern_v2)
+        # task_v2 runs spread their artifacts across multiple tsk_ dirs
+        # (planner + child tasks), so artifact matching must claim siblings.
+        include_sibling_dirs = engine == RunEngine.skyvern_v2
 
         config_info = {
             "timeout_seconds": timeout,
@@ -1099,26 +1192,33 @@ class SkyvernAgent(BaseAgent):
             except TimeoutError:
                 error_msg = f"Timeout after {timeout} seconds"
                 logger.error(f"Task {task_id} timed out after {timeout} seconds")
-                end_to_end_ms = int((time.time() - start_time) * 1000)
+                timeout_end = time.time()
+                end_to_end_ms = int((timeout_end - start_time) * 1000)
 
-                if page:
-                    try:
-                        timeout_screenshot_path = trajectory_dir / "screenshot-1.png"
-                        await page.screenshot(path=str(timeout_screenshot_path))
+                # Skyvern already wrote per-step artifacts for the work done
+                # before the deadline; collect them so a timed-out run still
+                # reports steps, actions, screenshots, and token usage.
+                timeout_screenshots = 0
+                timeout_steps = 0
+                timeout_actions: list[str] = []
+                timeout_usage: dict[str, Any] = {}
+                if browser_id in _LOCAL_ARTIFACT_BROWSERS:
+                    timeout_screenshots, timeout_steps, timeout_actions, timeout_usage = (
+                        _collect_run_artifacts(
+                            trajectory_dir,
+                            start_time,
+                            timeout_end,
+                            org_id=org_id,
+                            existing_dirs_before_task=existing_artifact_dirs,
+                            task_prompt=task_prompt,
+                            include_sibling_dirs=include_sibling_dirs,
+                        )
+                    )
 
-                    except (OSError, RuntimeError) as exc:
-                        logger.error(f"Failed to capture timeout screenshot: {exc}")
-                    except Exception as exc:
-                        # Same reasoning as the final-screenshot path below —
-                        # a dead page/context on a timeout path shouldn't
-                        # turn the timeout into a subprocess-level exception.
-                        if TargetClosedError is not None and isinstance(exc, TargetClosedError):
-                            logger.warning(
-                                "Timeout screenshot skipped; page/context closed: %s",
-                                exc,
-                            )
-                        else:
-                            raise
+                if timeout_screenshots == 0 and page:
+                    await _capture_page_screenshot(
+                        page, trajectory_dir / "screenshot-1.png", "timeout"
+                    )
 
                 return AgentResult(
                     task_id=task_id,
@@ -1129,8 +1229,12 @@ class SkyvernAgent(BaseAgent):
                     agent_done="timeout",  # type: ignore[arg-type]
                     model_id=model_id,
                     browser_id=browser_id,
-                    action_history=[],
-                    metrics=AgentMetrics(end_to_end_ms=end_to_end_ms, steps=0),
+                    action_history=timeout_actions,
+                    metrics=AgentMetrics(
+                        end_to_end_ms=end_to_end_ms,
+                        steps=timeout_steps,
+                        usage=AgentUsage(**timeout_usage) if timeout_usage else None,
+                    ),
                     config=config_info,
                     error=error_msg,
                 )
@@ -1194,7 +1298,7 @@ class SkyvernAgent(BaseAgent):
                     except (OSError, urllib.error.URLError) as exc:
                         logger.error(f"Failed to download screenshot {i}: {exc}")
 
-            if screenshot_count == 0 and browser_id in ("local", "lexmount", "cdp"):
+            if screenshot_count == 0 and browser_id in _LOCAL_ARTIFACT_BROWSERS:
                 screenshot_count, actual_steps, matched_task_dirs = (
                     copy_screenshots_from_skyvern_artifacts(
                         trajectory_dir,
@@ -1203,6 +1307,7 @@ class SkyvernAgent(BaseAgent):
                         org_id=org_id,
                         existing_dirs_before_task=existing_artifact_dirs,
                         task_prompt=task_prompt,
+                        include_sibling_dirs=include_sibling_dirs,
                     )
                 )
 
@@ -1211,35 +1316,22 @@ class SkyvernAgent(BaseAgent):
             # LLM payloads to the *local* artifact dir regardless of where
             # screenshots come from. Skip for skyvern-cloud browsers since
             # those runs don't produce local artifacts at all.
-            if not matched_task_dirs and browser_id in ("local", "lexmount", "cdp"):
+            if not matched_task_dirs and browser_id in _LOCAL_ARTIFACT_BROWSERS:
                 matched_task_dirs = _resolve_artifact_task_dirs(
                     start_time,
                     end_time,
                     org_id=org_id,
                     existing_dirs_before_task=existing_artifact_dirs,
                     task_prompt=task_prompt,
+                    include_sibling_dirs=include_sibling_dirs,
                 )
 
             if screenshot_count == 0 and page:
-                try:
-                    final_screenshot_path = trajectory_dir / "screenshot-1.png"
-                    await page.screenshot(path=str(final_screenshot_path))
-
+                captured = await _capture_page_screenshot(
+                    page, trajectory_dir / "screenshot-1.png", "final"
+                )
+                if captured:
                     screenshot_count = 1
-                except (OSError, RuntimeError) as exc:
-                    logger.error(f"Failed to capture final screenshot: {exc}")
-                except Exception as exc:
-                    # Page/context may be closed (common when task failed
-                    # because the remote browser session died). Don't let a
-                    # best-effort screenshot attempt turn a soft failure into
-                    # an unhandled exception bubbling up to the subprocess.
-                    if TargetClosedError is not None and isinstance(exc, TargetClosedError):
-                        logger.warning(
-                            "Final screenshot skipped; page/context was already closed: %s",
-                            exc,
-                        )
-                    else:
-                        raise
 
             action_history = _collect_action_history(matched_task_dirs) if matched_task_dirs else []
 
