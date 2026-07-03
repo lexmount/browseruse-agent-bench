@@ -15,7 +15,14 @@ from browseruse_bench.schemas.prompt import PromptSnapshot
 
 
 class AgentUsage(BaseModel):
-    """Token usage statistics from the agent's LLM calls."""
+    """Token usage statistics from the agent's LLM calls.
+
+    Convention (OpenAI-style): ``total_prompt_tokens`` INCLUDES cache reads and
+    cache-creation tokens; ``total_prompt_cached_tokens`` and
+    ``total_prompt_cache_creation_tokens`` are disjoint subsets of it.
+    Anthropic-style sources (where input_tokens excludes cache reads/writes)
+    must fold the cache counters into the prompt count before building this.
+    """
 
     model_config = ConfigDict(extra="allow")
 
@@ -23,11 +30,13 @@ class AgentUsage(BaseModel):
     total_prompt_tokens: int = 0
     total_completion_tokens: int = 0
     total_prompt_cached_tokens: int = 0
+    total_prompt_cache_creation_tokens: int = 0
     total_tokens: int = 0
 
     # Cost breakdown
     total_prompt_cost: float = 0.0
     total_prompt_cached_cost: float = 0.0
+    total_prompt_cache_creation_cost: float = 0.0
     total_completion_cost: float = 0.0
     total_cost: float = 0.0
 

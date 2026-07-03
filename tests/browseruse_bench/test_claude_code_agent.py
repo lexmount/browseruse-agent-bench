@@ -321,6 +321,116 @@ class TestClaudeCodeAgentRunTask:
         assert result.agent_done == "error"
 
 
+class TestClaudeCodeAgentUsage:
+    """Token counts must survive into AgentUsage, not just total_cost_usd."""
+
+    def _agent(self) -> ClaudeCodeAgent:
+        return ClaudeCodeAgent()
+
+    def test_usage_tokens_from_result_event(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Anthropic semantics: input_tokens EXCLUDES cache reads/writes.
+        stream = [
+            _line({"type": "assistant", "message": {"content": [{"type": "text", "text": "ok"}]}}),
+            _line({
+                "type": "result", "result": "done", "num_turns": 2, "duration_ms": 100,
+                "total_cost_usd": 0.0123,
+                "usage": {
+                    "input_tokens": 100,
+                    "cache_creation_input_tokens": 50,
+                    "cache_read_input_tokens": 400,
+                    "output_tokens": 20,
+                },
+            }),
+        ]
+        agent = self._agent()
+        monkeypatch.setattr(agent, "_run_subprocess", lambda *a, **kw: (0, stream, None))
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        usage = result.metrics.usage
+        assert usage is not None
+        assert usage.total_prompt_tokens == 550
+        assert usage.total_prompt_cached_tokens == 400
+        assert usage.total_prompt_cache_creation_tokens == 50
+        assert usage.total_completion_tokens == 20
+        assert usage.total_tokens == 570
+        assert usage.total_cost == pytest.approx(0.0123)
+        assert usage.entry_count == 2
+
+    def test_usage_fallback_sums_assistant_messages_on_timeout(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        stream = [
+            _line({"type": "assistant", "message": {
+                "content": [{"type": "text", "text": "step 1"}],
+                "usage": {"input_tokens": 10, "cache_read_input_tokens": 100, "output_tokens": 5},
+            }}),
+            _line({"type": "assistant", "message": {
+                "content": [{"type": "text", "text": "step 2"}],
+                "usage": {"input_tokens": 20, "cache_read_input_tokens": 200, "output_tokens": 7},
+            }}),
+        ]
+        agent = self._agent()
+        monkeypatch.setattr(
+            agent, "_run_subprocess",
+            lambda *a, **kw: (-1, stream, "Timeout after 10 seconds"),
+        )
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        usage = result.metrics.usage
+        assert usage is not None
+        assert usage.total_prompt_tokens == 330
+        assert usage.total_prompt_cached_tokens == 300
+        assert usage.total_completion_tokens == 12
+        assert usage.entry_count == 2
+
+    def test_usage_fallback_dedups_events_of_same_message(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Claude Code emits one assistant event per content block of the same
+        # API message, each repeating the identical usage block. The fallback
+        # must count each message id once.
+        usage = {"input_tokens": 100, "cache_read_input_tokens": 400, "output_tokens": 20}
+        stream = [
+            _line({"type": "assistant", "message": {
+                "id": "msg_1",
+                "content": [{"type": "text", "text": "thinking"}],
+                "usage": usage,
+            }}),
+            _line({"type": "assistant", "message": {
+                "id": "msg_1",
+                "content": [{"type": "tool_use", "id": "tu_1", "name": "browser_click", "input": {}}],
+                "usage": usage,
+            }}),
+        ]
+        agent = self._agent()
+        monkeypatch.setattr(
+            agent, "_run_subprocess",
+            lambda *a, **kw: (-1, stream, "Timeout after 10 seconds"),
+        )
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        assert result.metrics.usage is not None
+        assert result.metrics.usage.total_prompt_tokens == 500
+        assert result.metrics.usage.entry_count == 1
+
+    def test_usage_without_cost_still_records_tokens(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        stream = [
+            _line({
+                "type": "result", "result": "done", "num_turns": 1, "duration_ms": 100,
+                "usage": {"input_tokens": 100, "output_tokens": 20},
+            }),
+        ]
+        agent = self._agent()
+        monkeypatch.setattr(agent, "_run_subprocess", lambda *a, **kw: (0, stream, None))
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        usage = result.metrics.usage
+        assert usage is not None
+        assert usage.total_prompt_tokens == 100
+        assert usage.total_completion_tokens == 20
+        assert usage.total_cost == 0.0
+
+
 # ---------------------------------------------------------------------------
 # Command-construction unit tests (no claude CLI needed)
 # ---------------------------------------------------------------------------

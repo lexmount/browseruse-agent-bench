@@ -398,23 +398,50 @@ def _extract_usage_from_response_blob(blob: Any) -> dict[str, int] | None:
         except (TypeError, ValueError):
             return 0
 
+    def _details_cached(node: dict[str, Any]) -> int:
+        # Trust a nonzero details counter first; a zero-filled details object
+        # must not mask a real top-level cache counter.
+        for details_key in ("prompt_tokens_details", "input_tokens_details"):
+            details = node.get(details_key)
+            if isinstance(details, dict):
+                cached = _safe_int(details.get("cached_tokens", 0))
+                if cached:
+                    return cached
+        fallback = node.get("cache_read_input_tokens")
+        if fallback is None:
+            fallback = node.get("cached_tokens")
+        return _safe_int(fallback) if fallback is not None else 0
+
     def _candidate_usage(node: Any) -> dict[str, int] | None:
         if not isinstance(node, dict):
             return None
-        pt = node.get("prompt_tokens") or node.get("input_tokens")
-        ct = node.get("completion_tokens") or node.get("output_tokens")
+        # A zero-filled prompt_tokens falls through to input_tokens, matching
+        # the pre-existing `or` chain semantics.
+        pt = node.get("prompt_tokens") or None
+        it = node.get("input_tokens")
+        ct = node.get("completion_tokens")
+        if ct is None:
+            ct = node.get("output_tokens")
         tt = node.get("total_tokens")
-        if pt is None and ct is None and tt is None:
+        if pt is None and it is None and ct is None and tt is None:
             return None
-        cached = 0
-        details = node.get("prompt_tokens_details")
-        if isinstance(details, dict):
-            cached = _safe_int(details.get("cached_tokens", 0))
-        cached_input = node.get("cache_read_input_tokens") or node.get("cached_tokens")
-        if cached == 0 and cached_input is not None:
-            cached = _safe_int(cached_input)
 
-        prompt = _safe_int(pt) if pt is not None else 0
+        cached = _details_cached(node)
+        creation = _safe_int(node.get("cache_creation_input_tokens", 0))
+        prompt = _safe_int(pt if pt is not None else it)
+        # Anthropic-style usage: input_tokens EXCLUDES cache reads/writes,
+        # which arrive as separate cache_*_input_tokens counters. Fold them
+        # into the prompt count so it matches the OpenAI convention used by
+        # downstream cost math (prompt includes cached). OpenAI's Responses
+        # API also uses input_tokens but reports cached via
+        # input_tokens_details, so the cache_* keys are a safe discriminator.
+        anthropic_style = pt is None and (
+            "cache_read_input_tokens" in node or "cache_creation_input_tokens" in node
+        )
+        if anthropic_style:
+            cached = _safe_int(node.get("cache_read_input_tokens", 0))
+            prompt += cached + creation
+
         completion = _safe_int(ct) if ct is not None else 0
         total = _safe_int(tt) if tt is not None else prompt + completion
         if prompt == 0 and completion == 0 and total == 0:
@@ -423,6 +450,7 @@ def _extract_usage_from_response_blob(blob: Any) -> dict[str, int] | None:
             "prompt_tokens": prompt,
             "completion_tokens": completion,
             "cached_tokens": min(cached, max(prompt, 0)),
+            "cache_creation_tokens": min(creation, max(prompt, 0)),
             "total_tokens": total if total > 0 else prompt + completion,
         }
 
@@ -485,6 +513,7 @@ def collect_usage_from_skyvern_artifacts(task_dirs: list[Path]) -> dict[str, Any
     total_prompt = 0
     total_completion = 0
     total_cached = 0
+    total_cache_creation = 0
     entry_count = 0
 
     for task_dir in task_dirs:
@@ -525,6 +554,7 @@ def collect_usage_from_skyvern_artifacts(task_dirs: list[Path]) -> dict[str, Any
                 total_prompt += usage["prompt_tokens"]
                 total_completion += usage["completion_tokens"]
                 total_cached += usage["cached_tokens"]
+                total_cache_creation += usage["cache_creation_tokens"]
                 entry_count += 1
                 # One usage block per step is enough; avoid double-counting a
                 # retry payload in the same step dir.
@@ -537,6 +567,7 @@ def collect_usage_from_skyvern_artifacts(task_dirs: list[Path]) -> dict[str, Any
         "total_prompt_tokens": total_prompt,
         "total_completion_tokens": total_completion,
         "total_prompt_cached_tokens": total_cached,
+        "total_prompt_cache_creation_tokens": total_cache_creation,
         "total_tokens": total_prompt + total_completion,
         "entry_count": entry_count,
     }
@@ -1229,6 +1260,7 @@ class SkyvernAgent(BaseAgent):
                         "total_prompt_tokens": cloud_usage["prompt_tokens"],
                         "total_completion_tokens": cloud_usage["completion_tokens"],
                         "total_prompt_cached_tokens": cloud_usage["cached_tokens"],
+                        "total_prompt_cache_creation_tokens": cloud_usage["cache_creation_tokens"],
                         "total_tokens": cloud_usage["total_tokens"],
                         "entry_count": 1,
                     }

@@ -27,6 +27,7 @@ from browseruse_bench.browsers import open_browser_session
 from browseruse_bench.browsers.providers.local import warn_if_local_proxy_unsupported
 from browseruse_bench.schemas import AgentMetrics, AgentResult, AgentUsage
 from browseruse_bench.utils import IS_WINDOWS
+from browseruse_bench.utils.parse_utils import safe_int
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,81 @@ def _parse_stream(
                         screenshot_counter += 1
 
     return result_obj, assistant_messages, saved_screenshots, turns
+
+
+def _fold_anthropic_usage(raw: Any, totals: dict[str, int]) -> bool:
+    """Accumulate one Anthropic-style usage block into *totals*.
+
+    Anthropic ``input_tokens`` EXCLUDES cache reads/writes; fold the cache
+    counters into the prompt count to match the AgentUsage convention
+    (prompt includes cached). Returns True when the block carried any tokens.
+    """
+    if not isinstance(raw, dict):
+        return False
+    input_tokens = safe_int(raw.get("input_tokens"))
+    cache_read = safe_int(raw.get("cache_read_input_tokens"))
+    cache_creation = safe_int(raw.get("cache_creation_input_tokens"))
+    output_tokens = safe_int(raw.get("output_tokens"))
+    if input_tokens + cache_read + cache_creation + output_tokens == 0:
+        return False
+    totals["prompt"] += input_tokens + cache_read + cache_creation
+    totals["cached"] += cache_read
+    totals["cache_creation"] += cache_creation
+    totals["completion"] += output_tokens
+    return True
+
+
+def _usage_totals_from_stream(
+    result_obj: dict[str, Any],
+    assistant_messages: list[dict[str, Any]],
+) -> dict[str, int]:
+    """Extract token totals from the result event, or sum assistant messages.
+
+    The result event's ``usage`` is the run-wide aggregate; when it never
+    arrived (timeout / early exit), fall back to summing the per-message
+    ``usage`` blocks so token counts are not lost. The stream emits one
+    assistant event per content block of the same API message, each repeating
+    the identical usage — dedup by message id (last event wins) so a turn is
+    counted once.
+    """
+    totals = {"prompt": 0, "cached": 0, "cache_creation": 0, "completion": 0, "entries": 0}
+    if _fold_anthropic_usage(result_obj.get("usage"), totals):
+        totals["entries"] = safe_int(result_obj.get("num_turns"))
+        return totals
+
+    usage_by_message: dict[str, Any] = {}
+    unidentified_usages: list[Any] = []
+    for message in assistant_messages:
+        raw_usage = message.get("usage")
+        if not isinstance(raw_usage, dict):
+            continue
+        message_id = message.get("id")
+        if message_id:
+            usage_by_message[message_id] = raw_usage
+        else:
+            unidentified_usages.append(raw_usage)
+    for raw_usage in [*usage_by_message.values(), *unidentified_usages]:
+        if _fold_anthropic_usage(raw_usage, totals):
+            totals["entries"] += 1
+    return totals
+
+
+def _build_agent_usage(
+    result_obj: dict[str, Any],
+    assistant_messages: list[dict[str, Any]],
+    total_cost_usd: float | None,
+) -> AgentUsage | None:
+    totals = _usage_totals_from_stream(result_obj, assistant_messages)
+    if totals["prompt"] + totals["completion"] == 0 and total_cost_usd is None:
+        return None
+    return AgentUsage(
+        total_prompt_tokens=totals["prompt"],
+        total_prompt_cached_tokens=totals["cached"],
+        total_prompt_cache_creation_tokens=totals["cache_creation"],
+        total_completion_tokens=totals["completion"],
+        total_cost=total_cost_usd or 0.0,
+        entry_count=totals["entries"],
+    )
 
 
 def _save_screenshot(
@@ -669,7 +745,7 @@ class ClaudeCodeAgent(CLIAgent):
             metrics=AgentMetrics(
                 end_to_end_ms=duration_ms,
                 steps=num_turns,
-                usage=AgentUsage(total_cost=total_cost_usd) if total_cost_usd is not None else None,
+                usage=_build_agent_usage(result_obj, assistant_messages, total_cost_usd),
             ),
             agent_metadata=agent_metadata,
         )

@@ -5,6 +5,18 @@ from math import fsum
 from typing import Any, Dict, List, Optional
 
 
+# Cost fields carry per-task USD values well below 0.01; 6 decimal places keeps
+# them meaningful while still trimming float noise on ms/step metrics.
+_STATS_PRECISION = 6
+
+
+def _median(sorted_values: List[float]) -> float:
+    mid = len(sorted_values) // 2
+    if len(sorted_values) % 2:
+        return sorted_values[mid]
+    return (sorted_values[mid - 1] + sorted_values[mid]) / 2
+
+
 def _calc_stats(values: List[float]) -> Dict[str, float]:
     """Calculate statistics for a list of values.
 
@@ -19,10 +31,10 @@ def _calc_stats(values: List[float]) -> Dict[str, float]:
     s = sorted(values)
     return {
         "count": len(s),
-        "mean": round(sum(s) / len(s), 2),
+        "mean": round(sum(s) / len(s), _STATS_PRECISION),
         "min": min(s),
         "max": max(s),
-        "median": round(s[len(s) // 2], 2)
+        "median": round(_median(s), _STATS_PRECISION)
     }
 
 
@@ -81,6 +93,8 @@ def calculate_usage_stats(tasks: List[Dict[str, Any]], path: str = "evaluation_d
         "total_prompt_cost",
         "total_prompt_cached_tokens",
         "total_prompt_cached_cost",
+        "total_prompt_cache_creation_tokens",
+        "total_prompt_cache_creation_cost",
         "total_completion_tokens",
         "total_completion_cost",
         "total_tokens",
