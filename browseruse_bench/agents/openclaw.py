@@ -89,6 +89,52 @@ def _normalize_session_items(session_file: Path) -> list[dict[str, Any]]:
     return items
 
 
+# Local fake-IP proxy clients (Clash/Surge etc.) resolve proxied domains to the
+# RFC 2544 benchmark range (198.18.0.0/15); OpenClaw's local SSRF preflight then
+# blocks navigation ("browser navigation blocked by policy") even though the
+# real navigation happens in the remote CDP browser, where local private-network
+# concerns do not apply.
+_BROWSER_SSRF_POLICY = {"dangerouslyAllowPrivateNetwork": True}
+
+# Browser-tool connection failures caused by the service startup race; a run
+# whose EVERY browser call died this way never had a browser and its answer is
+# a blocked notice, not a result.
+_BROWSER_OUTAGE_SIGNATURES = (
+    "gateway node.list requires credentials",
+    "browser endpoint blocked by policy",
+    "gateway closed (1006",
+    "timed out. Restart the OpenClaw gateway",
+)
+
+
+def _match_outage(text: str) -> str | None:
+    for signature in _BROWSER_OUTAGE_SIGNATURES:
+        if signature in text:
+            return signature
+    return None
+
+
+def _detect_browser_outage(items: list[dict[str, Any]], answer: str) -> str | None:
+    """Return the matched outage signature when the run never had a browser.
+
+    Outage means every browser tool result carries a connection-failure
+    signature (one successful call disproves it); with no browser items at
+    all, fall back to scanning the final answer text.
+    """
+    browser_matches: list[str | None] = []
+    for item in items:
+        if not str(item.get("tool", "")).startswith("browser"):
+            continue
+        content = (item.get("result") or {}).get("content") or []
+        text = " ".join(
+            str(block.get("text", "")) for block in content if isinstance(block, dict)
+        )
+        browser_matches.append(_match_outage(text))
+    if browser_matches:
+        return browser_matches[0] if all(browser_matches) else None
+    return _match_outage(answer)
+
+
 def _allocate_free_port() -> int:
     """Reserve an ephemeral TCP port for a task's private OpenClaw gateway."""
     with socket.socket() as sock:
@@ -255,7 +301,34 @@ class OpenClawAgent(CLIAgent):
         agent_config: dict[str, Any],
         task_workspace: Path,
     ) -> AgentResult | dict[str, Any]:
-        """Execute a browser automation task using OpenClaw CLI."""
+        """Execute a browser automation task using OpenClaw CLI.
+
+        Retries once on a fresh browser session when the run lost the
+        browser-service startup race (every browser call failed with a
+        connection error and the "answer" is just a blocked notice).
+        """
+        result = self._attempt_task(task_info, agent_config, task_workspace)
+        outage = (
+            result.agent_metadata.get("browser_outage")
+            if isinstance(result, AgentResult)
+            else None
+        )
+        if not outage:
+            return result
+        logger.warning(
+            "OpenClaw browser outage on task %s (%s); retrying once on a fresh browser session",
+            task_info.get("task_id"),
+            outage,
+        )
+        return self._attempt_task(task_info, agent_config, task_workspace)
+
+    def _attempt_task(
+        self,
+        task_info: dict[str, Any],
+        agent_config: dict[str, Any],
+        task_workspace: Path,
+    ) -> AgentResult | dict[str, Any]:
+        """Run one OpenClaw attempt against a freshly opened browser session."""
         browser_id = str(agent_config.get("browser_id") or "")
         if browser_id in SELF_LAUNCH_BROWSER_IDS:
             warn_if_local_proxy_unsupported(agent_config, self.name)
@@ -421,7 +494,7 @@ class OpenClawAgent(CLIAgent):
                 # Tool whitelist: browsing plus reading bundled skill files.
                 "list": [{"id": "main", "tools": {"allow": ["browser", "read"]}}],
             },
-            "browser": {"enabled": True},
+            "browser": {"enabled": True, "ssrfPolicy": dict(_BROWSER_SSRF_POLICY)},
             # Default "auto" consults gateway node.list before the in-process
             # browser service; without gateway credentials every browser call
             # fails ("gateway node.list requires credentials before opening a
@@ -432,6 +505,7 @@ class OpenClawAgent(CLIAgent):
             bench_profile = {"cdpUrl": cdp_url, "attachOnly": True, "color": "#00AA00"}
             config["browser"] = {
                 "enabled": True,
+                "ssrfPolicy": dict(_BROWSER_SSRF_POLICY),
                 "defaultProfile": "bench",
                 # OpenClaw auto-injects built-in `user`/`openclaw` profiles
                 # (operator's local Chrome) unless the config defines those
@@ -502,6 +576,15 @@ class OpenClawAgent(CLIAgent):
             except (OSError, TypeError, ValueError) as exc:
                 logger.warning("Failed to generate api_logs for task %s: %s", task_id, exc)
 
+        # A "successful" run whose browser never worked is a false success:
+        # the answer is a blocked notice, not a task result.
+        agent_metadata: dict[str, Any] = {}
+        outage = _detect_browser_outage(items, answer) if env_status == "success" else None
+        if outage:
+            env_status, agent_done = "failed", "error"
+            error_message = f"OpenClaw browser tool unavailable ({outage})"
+            agent_metadata["browser_outage"] = outage
+
         return AgentResult(
             task_id=task_id,
             timestamp=datetime.now(UTC),
@@ -512,6 +595,7 @@ class OpenClawAgent(CLIAgent):
             action_history=extract_actions(items),
             screenshots=saved_screenshots,
             model_id=model,
+            agent_metadata=agent_metadata,
             metrics=AgentMetrics(
                 end_to_end_ms=duration_ms, steps=steps, usage=self._usage_from(result_obj)
             ),
