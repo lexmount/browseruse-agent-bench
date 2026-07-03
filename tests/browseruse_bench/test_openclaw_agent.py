@@ -116,6 +116,65 @@ class TestCollectMediaScreenshots:
         assert _collect_media_screenshots(items, tmp_path / "trajectory") == []
 
 
+class TestInlineBase64Screenshots:
+    @staticmethod
+    def _session_with_inline_image(path: Path, data: str, mime: str = "image/png") -> None:
+        lines = [
+            {"type": "message", "message": {"role": "assistant", "content": [
+                {"type": "toolCall", "id": "c1", "name": "browser", "arguments": {"action": "screenshot"}},
+            ]}},
+            {"type": "message", "message": {"role": "toolResult", "toolCallId": "c1", "toolName": "browser",
+                "content": [{"type": "image", "data": data, "mimeType": mime}]}},
+        ]
+        path.write_text("\n".join(json.dumps(line) for line in lines), encoding="utf-8")
+
+    def test_inline_base64_image_saved_to_trajectory(self, tmp_path: Path) -> None:
+        # OpenClaw returns screenshots as inline base64 blocks (no path key);
+        # they must be decoded into trajectory/ like path-based media.
+        import base64
+
+        payload = b"png-bytes"
+        session = tmp_path / "session.jsonl"
+        self._session_with_inline_image(session, base64.b64encode(payload).decode())
+        items = _normalize_session_items(session)
+        saved = _collect_media_screenshots(items, tmp_path / "trajectory")
+        assert saved == ["screenshot-1.png"]
+        assert (tmp_path / "trajectory" / "screenshot-1.png").read_bytes() == payload
+        # The raw base64 must not linger on items (it would bloat api_logs).
+        assert all("inline_media" not in item for item in items)
+
+    def test_invalid_base64_skipped(self, tmp_path: Path) -> None:
+        session = tmp_path / "session.jsonl"
+        self._session_with_inline_image(session, "not-valid-base64!!!")
+        items = _normalize_session_items(session)
+        assert _collect_media_screenshots(items, tmp_path / "trajectory") == []
+
+    def test_non_image_mime_skipped(self, tmp_path: Path) -> None:
+        import base64
+
+        session = tmp_path / "session.jsonl"
+        self._session_with_inline_image(
+            session, base64.b64encode(b"pdf").decode(), mime="application/pdf"
+        )
+        items = _normalize_session_items(session)
+        assert _collect_media_screenshots(items, tmp_path / "trajectory") == []
+
+    def test_run_task_reports_inline_screenshots(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import base64
+
+        session = tmp_path / "session.jsonl"
+        self._session_with_inline_image(session, base64.b64encode(b"shot").decode())
+        agent = OpenClawAgent()
+        monkeypatch.setattr(
+            agent, "_run_subprocess", lambda *a, **kw: (0, _result_stdout(session), None)
+        )
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        assert result.screenshots == ["screenshot-1.png"]
+        assert (tmp_path / "trajectory" / "screenshot-1.png").read_bytes() == b"shot"
+
+
 class TestOpenClawAgentRunTask:
     def test_successful_run_returns_answer(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

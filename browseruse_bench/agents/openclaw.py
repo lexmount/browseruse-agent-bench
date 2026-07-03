@@ -10,6 +10,8 @@ browser profile with `cdpUrl` + `attachOnly`.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import logging
 import os
@@ -53,6 +55,8 @@ _DEFAULT_RULES = (
 )
 
 _MEDIA_PATH_RE = re.compile(r"MEDIA:(\S+)")
+
+_MEDIA_MIME_EXT = {"image/png": ".png", "image/jpeg": ".jpeg", "image/jpg": ".jpg"}
 
 # Non-*_API_KEY env vars that also trigger OpenClaw provider auto-detection.
 _PROVIDER_ENV_EXTRAS = ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN")
@@ -175,6 +179,10 @@ def _fold_message(
         media_path = _image_block_path(block)
         if media_path:
             texts.append(f"MEDIA:{media_path}")
+            continue
+        inline = _inline_image_data(block)
+        if inline:
+            item.setdefault("inline_media", []).append(inline)
     item["status"] = "completed"
     item["result"] = {"content": [{"type": "text", "text": "\n".join(texts)}]}
 
@@ -191,6 +199,16 @@ def _image_block_path(block: dict[str, Any]) -> str | None:
     if isinstance(source, dict) and isinstance(source.get("path"), str):
         return source["path"]
     return None
+
+
+def _inline_image_data(block: dict[str, Any]) -> tuple[str, str] | None:
+    """Return (mime_type, base64_data) from an inline image/media block."""
+    if block.get("type") not in ("image", "media"):
+        return None
+    data = block.get("data")
+    if not isinstance(data, str) or not data:
+        return None
+    return str(block.get("mimeType") or "image/png"), data
 
 
 def _normalize_tool_call(block: dict[str, Any]) -> dict[str, Any]:
@@ -216,16 +234,39 @@ def _normalize_tool_call(block: dict[str, Any]) -> dict[str, Any]:
 
 
 def _collect_media_screenshots(items: list[dict[str, Any]], trajectory_dir: Path) -> list[str]:
-    """Copy MEDIA:<path> screenshot files referenced by tool results into trajectory/."""
+    """Save screenshots referenced by tool results into trajectory/.
+
+    Handles both MEDIA:<path> file references and inline base64 image blocks
+    (popped off the item so the raw data never reaches api_logs).
+    """
     saved: list[str] = []
     for item in items:
         result = item.get("result")
-        if not isinstance(result, dict):
-            continue
-        for block in result.get("content", []):
-            if isinstance(block, dict):
-                _copy_media_paths(str(block.get("text", "")), trajectory_dir, saved)
+        if isinstance(result, dict):
+            for block in result.get("content", []):
+                if isinstance(block, dict):
+                    _copy_media_paths(str(block.get("text", "")), trajectory_dir, saved)
+        for mime, data in item.pop("inline_media", []):
+            _save_inline_media(mime, data, trajectory_dir, saved)
     return saved
+
+
+def _save_inline_media(mime: str, data: str, trajectory_dir: Path, saved: list[str]) -> None:
+    ext = _MEDIA_MIME_EXT.get(mime.lower())
+    if ext is None:
+        return
+    try:
+        raw = base64.b64decode(data, validate=True)
+    except binascii.Error as exc:
+        logger.warning("Failed to decode inline screenshot (%s): %s", mime, exc)
+        return
+    fname = f"screenshot-{len(saved) + 1}{ext}"
+    try:
+        trajectory_dir.mkdir(parents=True, exist_ok=True)
+        (trajectory_dir / fname).write_bytes(raw)
+        saved.append(fname)
+    except OSError as exc:
+        logger.warning("Failed to save screenshot %s: %s", fname, exc)
 
 
 def _copy_media_paths(text: str, trajectory_dir: Path, saved: list[str]) -> None:
