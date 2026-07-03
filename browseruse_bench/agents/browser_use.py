@@ -28,6 +28,7 @@ from browser_use import ChatGoogle as BrowserUseSDKChatGoogle
 from browser_use import ChatOpenAI as BrowserUseSDKChatOpenAI
 from browser_use.browser import session as browser_use_session_module
 from browser_use.browser.profile import ProxySettings as BrowserUseProxySettings
+from browser_use.llm.exceptions import ModelError as BrowserUseModelError
 from browser_use.llm.schema import SchemaOptimizer
 from pydantic import BaseModel as _PydanticBaseModel
 
@@ -238,6 +239,107 @@ def _enable_claude_thinking(llm: Any, reasoning_effort: str) -> None:
         return client
 
     llm.get_client = get_client_with_thinking  # type: ignore[method-assign]
+
+
+class _LLMFailureRecorder:
+    """
+    Keeps raw LLM completions for calls that fail browser-use parsing.
+
+    browser-use converts unparseable completions into ModelProviderError before
+    the agent sees the content, so the raw payload must be stashed at the HTTP
+    client layer and attached to the failure record here.
+    """
+
+    def __init__(self) -> None:
+        self._last_response: dict[str, Any] | None = None
+        self.failures: list[dict[str, Any]] = []
+
+    def begin_call(self) -> None:
+        self._last_response = None
+
+    def record_response(self, response: Any) -> None:
+        choices = getattr(response, "choices", None) or []
+        message = getattr(choices[0], "message", None) if choices else None
+        usage = getattr(response, "usage", None)
+        self._last_response = {
+            "raw_response": getattr(message, "content", None),
+            "usage": usage.model_dump() if hasattr(usage, "model_dump") else None,
+        }
+
+    def record_failure(self, error: Exception) -> None:
+        record: dict[str, Any] = {
+            "timestamp": time.time(),
+            "error": str(error),
+            "status_code": getattr(error, "status_code", None),
+            "raw_response": None,
+            "usage": None,
+        }
+        if self._last_response is not None:
+            record.update(self._last_response)
+        self.failures.append(record)
+
+
+def _record_raw_llm_responses(llm: Any, recorder: _LLMFailureRecorder) -> None:
+    """
+    Stash each raw chat completion so failed parses keep their payload.
+
+    Only OpenAI-compatible clients exposing chat.completions.create are covered
+    (the bench's primary gateway path). Azure responses-API mode, Anthropic, and
+    Google clients bypass this wrap; their failure records carry error and
+    timestamp but raw_response=None.
+    """
+    original_get_client = llm.get_client
+
+    def get_client_with_response_recording() -> Any:
+        client = original_get_client()
+        completions = getattr(getattr(client, "chat", None), "completions", None)
+        if completions is None:
+            return client
+        original_create = completions.create
+
+        async def create_with_response_recording(*args: Any, **kwargs: Any) -> Any:
+            response = await original_create(*args, **kwargs)
+            recorder.record_response(response)
+            return response
+
+        completions.create = create_with_response_recording
+        return client
+
+    llm.get_client = get_client_with_response_recording
+
+
+def _capture_llm_failures(llm: Any, recorder: _LLMFailureRecorder) -> None:
+    """Wrap llm.ainvoke so provider/parse failures keep raw response context."""
+    if hasattr(llm, "get_client"):
+        _record_raw_llm_responses(llm, recorder)
+
+    original_ainvoke = llm.ainvoke
+
+    async def ainvoke_with_failure_capture(*args: Any, **kwargs: Any) -> Any:
+        recorder.begin_call()
+        try:
+            return await original_ainvoke(*args, **kwargs)
+        except BrowserUseModelError as exc:
+            recorder.record_failure(exc)
+            raise
+
+    llm.ainvoke = ainvoke_with_failure_capture
+
+
+def _match_step_llm_failures(
+    pending_failures: list[dict[str, Any]],
+    hist_item: Any,
+) -> list[dict[str, Any]]:
+    """Pop failures whose timestamps fall inside this history item's step window."""
+    metadata = getattr(hist_item, "metadata", None)
+    start = getattr(metadata, "step_start_time", None)
+    end = getattr(metadata, "step_end_time", None)
+    if start is None or end is None:
+        return []
+    matched = [failure for failure in pending_failures if start <= failure["timestamp"] <= end]
+    for failure in matched:
+        pending_failures.remove(failure)
+    return matched
 
 
 def _get_config_value(agent_config: dict[str, Any], *keys: str, default: Any = None) -> Any:
@@ -464,6 +566,8 @@ class BrowserUseAgent(BaseAgent):
         # Initialize LLM based on model type, this is a BU specific implementation, and different
         # models have different SDK preferences for utilizing the inference feature in agent scene.
         llm = self._create_llm(model_type, model_id, agent_config, config_info)
+        llm_recorder = _LLMFailureRecorder()
+        _capture_llm_failures(llm, llm_recorder)
 
         # Initialize Browser
         agent = None
@@ -557,6 +661,7 @@ class BrowserUseAgent(BaseAgent):
 
                     try:
                         api_logger = APICallLogger(api_logs_dir, task_id, model_id, system_prompt)
+                        pending_llm_failures = list(llm_recorder.failures)
                         for i, hist_item in enumerate(history.history, 1):
                             api_logger.log_step(
                                 step_number=i,
@@ -564,7 +669,9 @@ class BrowserUseAgent(BaseAgent):
                                 action_results=hist_item.result,
                                 state=hist_item.state,
                                 state_message=getattr(hist_item, "state_message", None),
+                                llm_failures=_match_step_llm_failures(pending_llm_failures, hist_item),
                             )
+                        api_logger.log_unmatched_llm_failures(pending_llm_failures)
                         api_logger.finalize(usage_data)
                     except Exception as exc:
                         logger.warning(f"Failed to generate API logs for task {task_id}: {exc}")

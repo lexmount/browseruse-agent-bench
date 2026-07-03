@@ -35,6 +35,7 @@ from browseruse_bench.browsers import open_browser_session
 from browseruse_bench.browsers.providers.local import warn_if_local_proxy_unsupported
 from browseruse_bench.schemas import AgentMetrics, AgentResult, AgentUsage
 from browseruse_bench.utils import IS_WINDOWS
+from browseruse_bench.utils.image_utils import decode_base64_to_file
 from browseruse_bench.utils.parse_utils import safe_int
 
 logger = logging.getLogger(__name__)
@@ -50,15 +51,41 @@ _DEFAULT_RULES = (
     "- If you encounter a CAPTCHA, verification page, login wall, or access restriction: "
     "close that tab, return to the previous page, and use the data already collected to answer.\n"
     "- Do NOT get stuck retrying the same blocked action. One retry max, then fall back.\n"
-    "- EXCEPTION: browser tool CONNECTION errors (gateway credentials/closed/not ready) "
-    "are transient while the browser service finishes starting. Retry the same browser "
-    "call up to 5 times before concluding the browser is unavailable.\n"
+    "- EXCEPTION: browser tool CONNECTION errors (gateway credentials/closed/not ready/"
+    "timed out) are transient while the browser service finishes starting. Retry the "
+    "same browser call up to 5 times before concluding the browser is unavailable; "
+    "for open/navigate retries pass timeoutMs: 60000 to outlast startup.\n"
     "\n\nScreenshot rules:\n"
     "- Take a screenshot with the browser screenshot action after navigating to the main "
     "page and after finding the answer."
 )
 
 _MEDIA_PATH_RE = re.compile(r"MEDIA:(\S+)")
+
+_MEDIA_MIME_EXT = {"image/png": ".png", "image/jpeg": ".jpeg", "image/jpg": ".jpg"}
+
+# OpenClaw also resolves Anthropic credentials/endpoints from non-*_API_KEY
+# vars (ANTHROPIC_OAUTH_TOKEN, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL, ...),
+# so the whole prefix is scrubbed.
+_PROVIDER_ENV_PREFIX = "ANTHROPIC_"
+
+
+def _subprocess_env(state_dir: Path) -> dict[str, str]:
+    """Build the OpenClaw subprocess env without provider-autodetect vars.
+
+    The bench provider's credentials are delivered via the written
+    openclaw.json; any *_API_KEY (or ANTHROPIC_* credential/endpoint var)
+    inherited from the parent env makes OpenClaw auto-detect an extra provider
+    and route media understanding through it, which fails on the bench gateway.
+    """
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.endswith("_API_KEY") and not key.startswith(_PROVIDER_ENV_PREFIX)
+    }
+    env["OPENCLAW_STATE_DIR"] = str(state_dir)
+    env["OPENCLAW_CONFIG_PATH"] = str(state_dir / "openclaw.json")
+    return env
 
 
 def _stdout_json(stdout_lines: list[str]) -> dict[str, Any] | None:
@@ -267,6 +294,10 @@ def _fold_message(
         media_path = _image_block_path(block)
         if media_path:
             texts.append(f"MEDIA:{media_path}")
+            continue
+        inline = _inline_image_data(block)
+        if inline:
+            item.setdefault("inline_media", []).append(inline)
     details = message.get("details")
     if isinstance(details, dict):
         media = details.get("media")
@@ -292,6 +323,16 @@ def _image_block_path(block: dict[str, Any]) -> str | None:
     return None
 
 
+def _inline_image_data(block: dict[str, Any]) -> tuple[str, str] | None:
+    """Return (mime_type, base64_data) from an inline image/media block."""
+    if block.get("type") not in ("image", "media"):
+        return None
+    data = block.get("data")
+    if not isinstance(data, str) or not data:
+        return None
+    return str(block.get("mimeType") or "image/png"), data
+
+
 def _normalize_tool_call(block: dict[str, Any]) -> dict[str, Any]:
     name = str(block.get("name", ""))
     arguments = block.get("arguments")
@@ -315,16 +356,36 @@ def _normalize_tool_call(block: dict[str, Any]) -> dict[str, Any]:
 
 
 def _collect_media_screenshots(items: list[dict[str, Any]], trajectory_dir: Path) -> list[str]:
-    """Copy MEDIA:<path> screenshot files referenced by tool results into trajectory/."""
+    """Save screenshots referenced by tool results into trajectory/.
+
+    Handles both MEDIA:<path> file references and inline base64 image blocks
+    (popped off the item so the raw data never reaches api_logs).
+    """
     saved: list[str] = []
     for item in items:
         result = item.get("result")
-        if not isinstance(result, dict):
-            continue
-        for block in result.get("content", []):
-            if isinstance(block, dict):
-                _copy_media_paths(str(block.get("text", "")), trajectory_dir, saved)
+        if isinstance(result, dict):
+            for block in result.get("content", []):
+                if isinstance(block, dict):
+                    _copy_media_paths(str(block.get("text", "")), trajectory_dir, saved)
+        for mime, data in item.pop("inline_media", []):
+            _save_inline_media(mime, data, trajectory_dir, saved)
     return saved
+
+
+def _save_inline_media(mime: str, data: str, trajectory_dir: Path, saved: list[str]) -> None:
+    ext = _MEDIA_MIME_EXT.get(mime.lower())
+    if ext is None:
+        logger.debug("Skipping inline media with unsupported mime type: %s", mime)
+        return
+    fname = f"screenshot-{len(saved) + 1}{ext}"
+    try:
+        trajectory_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        logger.warning("Failed to create trajectory dir for %s: %s", fname, exc)
+        return
+    if decode_base64_to_file(data, trajectory_dir / fname):
+        saved.append(fname)
 
 
 def _copy_media_paths(text: str, trajectory_dir: Path, saved: list[str]) -> None:
@@ -538,9 +599,7 @@ class OpenClawAgent(CLIAgent):
         self._write_state_config(agent_config, task_workspace, state_dir, model, cdp_url)
         cmd = self._build_command(f"{rules}\n\n{prompt}", task_id, timeout, agent_config, attempt)
 
-        env = {**os.environ}
-        env["OPENCLAW_STATE_DIR"] = str(state_dir)
-        env["OPENCLAW_CONFIG_PATH"] = str(state_dir / "openclaw.json")
+        env = _subprocess_env(state_dir)
         # Isolate the per-process gateway: concurrent tasks sharing the
         # default port 18789 attach to each other's gateway and fail browser
         # auth ("gateway node.list requires credentials"). Do NOT pre-set
@@ -693,6 +752,10 @@ class OpenClawAgent(CLIAgent):
                 "list": [{"id": "main", "tools": {"allow": ["browser", "read"]}}],
             },
             "browser": _browser_config(cdp_url),
+            # Screenshots would otherwise trigger image understanding, which
+            # auto-detects an image model and burns a failing LLM call per
+            # image; the bench model gets no vision either way, so turn it off.
+            "tools": {"media": {"image": {"enabled": False}}},
             # Default "auto" consults gateway node.list before the in-process
             # browser service; without gateway credentials every browser call
             # fails ("gateway node.list requires credentials before opening a
@@ -783,6 +846,8 @@ class OpenClawAgent(CLIAgent):
             answer = f"[Task Failed: {error_message or 'No result JSON from OpenClaw'}]"
 
         items = self._session_items(result_obj, task_workspace)
+        # Must run before write_api_logs: it pops inline base64 blobs off the
+        # items so they never reach the api_logs artifacts.
         saved_screenshots = _collect_media_screenshots(items, trajectory_dir)
         steps = sum(1 for item in items if item.get("type") in STEP_ITEM_TYPES)
         if items:
