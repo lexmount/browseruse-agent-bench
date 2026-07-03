@@ -423,6 +423,10 @@ class OpenClawAgent(CLIAgent):
                 "list": [{"id": "main", "tools": {"allow": ["browser", "read"]}}],
             },
             "browser": {"enabled": True},
+            # Screenshots would otherwise trigger image understanding, which
+            # auto-detects an image model and burns a failing LLM call per
+            # image; the bench model gets no vision either way, so turn it off.
+            "tools": {"media": {"image": {"enabled": False}}},
         }
         if cdp_url:
             config["browser"] = {

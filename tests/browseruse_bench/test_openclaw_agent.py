@@ -202,6 +202,18 @@ class TestOpenClawAgentRunTask:
         # include_usage to custom providers, so token usage is all zeros.
         assert provider["models"][0]["compat"] == {"supportsUsageInStreaming": True}
 
+    def test_media_understanding_disabled_in_state_config(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Screenshots would otherwise trigger OpenClaw's image understanding,
+        # which auto-detects an image model and burns a failing LLM call per
+        # image; the bench model gets no vision either way, so turn it off.
+        agent = OpenClawAgent()
+        monkeypatch.setattr(agent, "_run_subprocess", lambda *a, **kw: (0, _result_stdout(), None))
+        agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        cfg = json.loads((tmp_path / ".openclaw-state" / "openclaw.json").read_text())
+        assert cfg["tools"]["media"]["image"]["enabled"] is False
+
     def test_provider_autodetect_vars_scrubbed_from_subprocess_env(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
