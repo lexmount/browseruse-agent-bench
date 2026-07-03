@@ -155,6 +155,11 @@ models:
     model_id: gpt-5.4
     api_key: $OPENAI_API_KEY
     base_url: $OPENAI_BASE_URL
+    # Optional provider tuning, forwarded into the per-task OpenClaw config:
+    # api: openai-responses          # provider wire API (default: openai-completions)
+    # reasoning: true                # mark the model as a reasoning model
+    # supports_reasoning_effort: true
+    # thinking: medium               # OpenClaw --thinking level (off|minimal|low|medium|high|xhigh)
 browsers:
   lexmount:
     browser_id: lexmount
