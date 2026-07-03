@@ -188,6 +188,15 @@ class TestOpenClawAgentRunTask:
 
         state_dir = tmp_path / ".openclaw-state"
         assert captured_env["OPENCLAW_STATE_DIR"] == str(state_dir)
+        # Each task process must get its own gateway port: concurrent tasks
+        # sharing the default 18789 attach to each other's gateway and fail
+        # browser auth ("gateway node.list requires credentials").
+        gateway_port = int(captured_env["OPENCLAW_GATEWAY_PORT"])
+        assert 1024 <= gateway_port <= 65535
+        assert gateway_port != 18789
+        # A configured gateway token makes OpenClaw treat the gateway as
+        # external and skip its in-process browser service; must NOT be set.
+        assert "OPENCLAW_GATEWAY_TOKEN" not in captured_env
         cfg = json.loads((state_dir / "openclaw.json").read_text())
         provider = cfg["models"]["providers"]["bench"]
         assert provider["baseUrl"] == "https://llm.example/v1"
@@ -227,7 +236,26 @@ class TestOpenClawAgentRunTask:
         assert profile["cdpUrl"] == "wss://cdp.example/1"
         assert profile["attachOnly"] is True
         assert cfg["browser"]["defaultProfile"] == "bench"
+        # OpenClaw auto-injects built-in `user`/`openclaw` profiles (operator's
+        # local Chrome) unless the config defines those names; models sometimes
+        # pass them explicitly and escape the bench browser. Pin both to the
+        # bench CDP endpoint.
+        for alias in ("user", "openclaw"):
+            assert cfg["browser"]["profiles"][alias]["cdpUrl"] == "wss://cdp.example/1"
+            assert cfg["browser"]["profiles"][alias]["attachOnly"] is True
         assert result.env_status == "success"
+
+    def test_gateway_browser_node_dispatch_disabled(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Default gateway.nodes.browser.mode="auto" consults gateway node.list
+        # before the in-process service; without gateway credentials every
+        # browser call fails ("gateway node.list requires credentials").
+        agent = OpenClawAgent()
+        monkeypatch.setattr(agent, "_run_subprocess", lambda *a, **kw: (0, _result_stdout(), None))
+        agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        cfg = json.loads((tmp_path / ".openclaw-state" / "openclaw.json").read_text())
+        assert cfg["gateway"]["nodes"]["browser"]["mode"] == "off"
 
     def test_non_cdp_backend_fails_fast(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

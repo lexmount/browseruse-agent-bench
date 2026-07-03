@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import shutil
+import socket
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -47,6 +48,9 @@ _DEFAULT_RULES = (
     "- If you encounter a CAPTCHA, verification page, login wall, or access restriction: "
     "close that tab, return to the previous page, and use the data already collected to answer.\n"
     "- Do NOT get stuck retrying the same blocked action. One retry max, then fall back.\n"
+    "- EXCEPTION: browser tool CONNECTION errors (gateway credentials/closed/not ready) "
+    "are transient while the browser service finishes starting. Retry the same browser "
+    "call up to 5 times before concluding the browser is unavailable.\n"
     "\n\nScreenshot rules:\n"
     "- Take a screenshot with the browser screenshot action after navigating to the main "
     "page and after finding the answer."
@@ -83,6 +87,13 @@ def _normalize_session_items(session_file: Path) -> list[dict[str, Any]]:
             continue
         _fold_message(message, items, by_call_id)
     return items
+
+
+def _allocate_free_port() -> int:
+    """Reserve an ephemeral TCP port for a task's private OpenClaw gateway."""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
 
 
 def _fold_openclaw_usage(raw: Any, totals: dict[str, int]) -> bool:
@@ -300,6 +311,13 @@ class OpenClawAgent(CLIAgent):
         env = {**os.environ}
         env["OPENCLAW_STATE_DIR"] = str(state_dir)
         env["OPENCLAW_CONFIG_PATH"] = str(state_dir / "openclaw.json")
+        # Isolate the per-process gateway: concurrent tasks sharing the
+        # default port 18789 attach to each other's gateway and fail browser
+        # auth ("gateway node.list requires credentials"). Do NOT pre-set
+        # OPENCLAW_GATEWAY_TOKEN — configured credentials make OpenClaw treat
+        # the gateway as external and skip starting its in-process browser
+        # control service entirely (calls then die with 1006 closures).
+        env["OPENCLAW_GATEWAY_PORT"] = str(_allocate_free_port())
 
         logger.info(
             "Executing OpenClaw for task %s (model=%s, timeout=%ds)", task_id, model, timeout
@@ -404,13 +422,25 @@ class OpenClawAgent(CLIAgent):
                 "list": [{"id": "main", "tools": {"allow": ["browser", "read"]}}],
             },
             "browser": {"enabled": True},
+            # Default "auto" consults gateway node.list before the in-process
+            # browser service; without gateway credentials every browser call
+            # fails ("gateway node.list requires credentials before opening a
+            # websocket"). Force local dispatch.
+            "gateway": {"nodes": {"browser": {"mode": "off"}}},
         }
         if cdp_url:
+            bench_profile = {"cdpUrl": cdp_url, "attachOnly": True, "color": "#00AA00"}
             config["browser"] = {
                 "enabled": True,
                 "defaultProfile": "bench",
+                # OpenClaw auto-injects built-in `user`/`openclaw` profiles
+                # (operator's local Chrome) unless the config defines those
+                # names; models sometimes pass them explicitly and escape the
+                # bench browser. Pin both to the bench CDP endpoint.
                 "profiles": {
-                    "bench": {"cdpUrl": cdp_url, "attachOnly": True, "color": "#00AA00"},
+                    "bench": bench_profile,
+                    "user": dict(bench_profile),
+                    "openclaw": dict(bench_profile),
                 },
             }
         (state_dir / "openclaw.json").write_text(
