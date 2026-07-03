@@ -49,19 +49,22 @@ FAILURE_CLASSIFICATION_SYSTEM_PROMPT = """You are a professional browser Agent f
 ## Classification System
 
 **A: Agent Causes**
-- **A1**: Agent capability insufficiency
-  - Model issues
-    - Environment understanding error: Visual/Page understanding error (Misreading DOM text, truncated extraction, screenshot misunderstanding)
-    - Plan error: Intent parsing/Task planning failure (Model misunderstood task, missed key conditions, unreasonable path planning or missing key steps)
-      - Leading to wrong results: Wrong input content, arriving at wrong page, unable to auto-login etc.
-  - Model service error: No response from model service due to context length exceeded or parameter error etc.
-  - Agent paradigm issues
-    - Context engineering issue: Redundant or overly long context leading to model errors
-    - Prompt engineering issue: Used plan-and-execute, react, reflexion paradigms but insufficient for complex problems, leading to inaccurate planning or sudden stop (no new steps planned)
+- **A1**: Model capability insufficiency (reasoning quality of the LLM)
+  - Environment understanding error: Visual/Page understanding error (Misreading DOM text, truncated extraction, screenshot misunderstanding)
+  - Plan error: Intent parsing/Task planning failure (Model misunderstood task, missed key conditions, unreasonable path planning or missing key steps)
+    - Leading to wrong results: Wrong input content, arriving at wrong page, unable to auto-login etc.
 
 - **A2**: Agent Code BUG
   - Coordinate mismatch between image and browser leading to wrong clicks, failed selection (dropdown) etc.
   - Failed to parse model result, tool call failure etc., leading to execution failure or stuck
+
+- **A3**: Model service error (LLM API/infrastructure failure, not reasoning quality)
+  - No response from model service, API timeout, rate limiting (429 from the LLM provider)
+  - Context length exceeded, parameter error, content-filter rejection of the model call
+
+- **A4**: Agent paradigm issues (orchestration design, not a single wrong decision)
+  - Context engineering issue: Redundant or overly long context leading to model errors
+  - Prompt engineering issue: Used plan-and-execute, react, reflexion paradigms but insufficient for complex problems, leading to inaccurate planning or sudden stop (no new steps planned)
 
 **B: Browser Causes**
 - **B1**: Triggered bot detection (Direct access forbidden or CAPTCHA triggered)
@@ -76,7 +79,7 @@ FAILURE_CLASSIFICATION_SYSTEM_PROMPT = """You are a professional browser Agent f
 Please strictly output a JSON object containing the following fields:
 {
   "reasoning": "<Detailed analysis process, explaining how you reached the conclusion based on task description, screenshots, action history and evaluation feedback>",
-  "category": "<Classification category, must be one of: A1, A2, B1, B2, C1, C2>"
+  "category": "<Classification category, must be one of: A1, A2, A3, A4, B1, B2, C1, C2>"
 }
 """
 
@@ -106,7 +109,7 @@ FAILURE_CLASSIFICATION_RESPONSE_FORMAT = {
             "type": "object",
             "properties": {
                 "reasoning": {"type": "string"},
-                "category": {"type": "string", "enum": ["A1", "A2", "B1", "B2", "C1", "C2"]},
+                "category": {"type": "string", "enum": ["A1", "A2", "A3", "A4", "B1", "B2", "C1", "C2"]},
             },
             "required": ["reasoning", "category"],
             "additionalProperties": False,
@@ -240,14 +243,17 @@ def classify_single_failure(
 
         response = model.generate(
             messages,
-            max_tokens=768,
+            max_tokens=2048,
             temperature=temperature,
             response_format=FAILURE_CLASSIFICATION_RESPONSE_FORMAT,
         )
     except MODEL_GENERATE_EXCEPTIONS as exc:
         logger.error("   [FAILED] Classification failed: %s", exc)
         return {
-            "category": "A1",  # Default category
+            # "U" (unclassified) keeps classification-pipeline failures out of
+            # the A* agent-cause buckets; A3 is reserved for LLM service errors
+            # that happened during the agent run itself.
+            "category": "U",
             "reasoning": f"Classification error: {exc}",
             "raw_response": "",
         }
@@ -266,9 +272,16 @@ def classify_single_failure(
         reasoning = parsed.get("reasoning", "") or ""
 
     if not category:
-        category_match = re.search(r"Category[：:]\s*([ABC][123]?)", response, re.IGNORECASE)
+        category_match = re.search(r"Category[：:]\s*([ABC][1-4]?)", response, re.IGNORECASE)
         if category_match:
             category = category_match.group(1).upper()
+
+    if not category:
+        # Recover from a max_tokens-truncated JSON response: the category key is
+        # emitted last, so grab its (possibly unterminated) value directly.
+        json_match = re.search(r'"category"\s*:\s*"?([ABC][12])', response)
+        if json_match:
+            category = json_match.group(1).upper()
 
     if not reasoning:
         reasoning_match = re.search(
@@ -278,12 +291,31 @@ def classify_single_failure(
             reasoning = reasoning_match.group(1).strip()
 
     # Validate category
-    valid_categories = ["A1", "A2", "B1", "B2", "C1", "C2"]
+    valid_categories = ["A1", "A2", "A3", "A4", "B1", "B2", "C1", "C2"]
     if category not in valid_categories:
         logger.warning(f"   [WARNING] Invalid category: {category}, defaulting to U")
         category = "U"
 
     return {"category": category, "reasoning": reasoning, "raw_response": response}
+
+
+def _load_agent_result(trajectories_dir: Path, task_id: str) -> dict[str, Any]:
+    """Load the agent-side result.json for a task, if present.
+
+    Eval records do not carry the agent answer or action history for every
+    benchmark schema (LexBench keeps them only in the run artifacts), so the
+    classifier falls back to ``<trajectories_dir>/<task_id>/result.json``.
+    """
+    result_file = trajectories_dir / task_id / "result.json"
+    if not result_file.exists():
+        return {}
+    try:
+        with open(result_file, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("   [WARNING] Failed to load agent result %s: %s", result_file, exc)
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def classify_failure_case(
@@ -307,11 +339,19 @@ def classify_failure_case(
     task_id = result.get("task_id", "")
     logger.info(f"   [INFO] Classifying failure case: {task_id or '<unknown>'}")
 
+    agent_result = _load_agent_result(trajectories_dir, task_id)
     task_description = result.get("task", "")
-    agent_response = result.get("agent_response", "") or result.get("response", "")
+    agent_response = (
+        result.get("agent_response") or result.get("response") or agent_result.get("answer") or ""
+    )
+    agent_error = agent_result.get("error")
+    if agent_error:
+        agent_response = f"{agent_response}\n[Agent runtime error]: {agent_error}".strip()
     evaluator_details = result.get("evaluation_details", {}) or {}
-    evaluator_response = evaluator_details.get("grader_response", "")
-    action_history = result.get("action_history", [])
+    evaluator_response = (
+        evaluator_details.get("grader_response") or evaluator_details.get("response") or ""
+    )
+    action_history = result.get("action_history") or agent_result.get("action_history") or []
     screenshots = _collect_task_screenshots(trajectories_dir, task_id)
 
     classification = classify_single_failure(
