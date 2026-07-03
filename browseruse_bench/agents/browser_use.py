@@ -280,7 +280,14 @@ class _LLMFailureRecorder:
 
 
 def _record_raw_llm_responses(llm: Any, recorder: _LLMFailureRecorder) -> None:
-    """Stash each raw chat completion so failed parses keep their payload."""
+    """
+    Stash each raw chat completion so failed parses keep their payload.
+
+    Only OpenAI-compatible clients exposing chat.completions.create are covered
+    (the bench's primary gateway path). Azure responses-API mode, Anthropic, and
+    Google clients bypass this wrap; their failure records carry error and
+    timestamp but raw_response=None.
+    """
     original_get_client = llm.get_client
 
     def get_client_with_response_recording() -> Any:
