@@ -53,7 +53,10 @@ class FailureClassification(BaseModel):
     """Failure analysis classification."""
 
     category: str
+    codes: list[str] = Field(default_factory=list)
     reasoning: str = ""
+    other_phrase: str | None = None
+    legacy_category: str | None = None
     raw_response: str | None = None
 
 

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from browseruse_bench.cli.eval import _parse_extra_args
+import json
+
+from browseruse_bench.cli.eval import _parse_extra_args, refresh_summary_failure_stats
 
 
 def test_parse_eval_extra_args_coerces_private_options() -> None:
@@ -25,10 +27,6 @@ def test_parse_eval_extra_args_rejects_positional() -> None:
 
 
 def test_refresh_summary_failure_stats(tmp_path) -> None:
-    import json
-
-    from browseruse_bench.cli.eval import refresh_summary_failure_stats
-
     d = tmp_path / "tasks_eval_result"
     d.mkdir()
     results = d / "task_m_per_task_eval_results.json"
@@ -47,10 +45,6 @@ def test_refresh_summary_failure_stats(tmp_path) -> None:
 
 
 def test_refresh_summary_failure_stats_missing_summary_is_noop(tmp_path) -> None:
-    import json
-
-    from browseruse_bench.cli.eval import refresh_summary_failure_stats
-
     results = tmp_path / "task_m_per_task_eval_results.json"
     results.write_text(json.dumps({"task_id": "1", "predicted_label": 0}), encoding="utf-8")
 

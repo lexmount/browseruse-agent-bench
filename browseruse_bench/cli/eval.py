@@ -63,7 +63,7 @@ def run_failure_classification(
     """Run failure classification on results file (post-evaluation)."""
     if not results_file.exists():
         logger.warning("Results file not found, skipping failure classification: %s", results_file)
-        return 0
+        return 1
 
     with normalized_results_file(results_file) as prepared_file:
         eval_results: list[dict[str, Any]] = []
@@ -96,19 +96,37 @@ def run_failure_classification(
         num_workers=num_workers,
     )
 
-    with open(results_file, "w", encoding="utf-8") as handle:
+    tmp_file = results_file.with_suffix(results_file.suffix + ".tmp")
+    with open(tmp_file, "w", encoding="utf-8") as handle:
         for result in updated_results:
             handle.write(json.dumps(result, ensure_ascii=False) + "\n")
+    tmp_file.replace(results_file)
 
     return 0
 
 
-def refresh_summary_failure_stats(results_file: Path) -> None:
-    """Recompute failure_category_statistics in the summary next to results_file."""
-    summary_path = results_file.with_name(
+def _find_summary_for_results(results_file: Path) -> Path | None:
+    """Locate the summary file paired with a results file.
+
+    Prefers the LexBench-style name substitution; falls back to a unique
+    *_summary.json sibling for evaluators with other naming schemes.
+    """
+    candidate = results_file.with_name(
         results_file.name.replace("_eval_results.json", "_summary.json")
     )
-    if summary_path == results_file or not summary_path.exists():
+    if candidate != results_file and candidate.exists():
+        return candidate
+    siblings = [p for p in results_file.parent.glob("*_summary.json") if p != results_file]
+    if len(siblings) == 1:
+        return siblings[0]
+    return None
+
+
+def refresh_summary_failure_stats(results_file: Path, summary_path: Path | None = None) -> None:
+    """Recompute failure_category_statistics in the summary next to results_file."""
+    if summary_path is None:
+        summary_path = _find_summary_for_results(results_file)
+    if summary_path is None or not summary_path.exists():
         logger.warning("Summary file not found for %s, skipping stats refresh", results_file)
         return
     records: list[dict[str, Any]] = []
@@ -121,6 +139,22 @@ def refresh_summary_failure_stats(results_file: Path) -> None:
     summary["failure_category_statistics"] = calculate_failure_category_stats(records)
     with open(summary_path, "w", encoding="utf-8") as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)
+
+
+def resolve_judge_settings(
+    config: dict[str, Any],
+    model: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+) -> tuple[str, str, str, Any]:
+    """Resolve judge model settings from overrides, config eval section, env."""
+    eval_cfg = config.get("eval", {})
+    return (
+        model or eval_cfg.get("model") or "gpt-4.1",
+        api_key or eval_cfg.get("api_key") or get_env_var("OPENAI_API_KEY", ""),
+        base_url or eval_cfg.get("base_url") or "",
+        eval_cfg.get("temperature"),
+    )
 
 
 def _merge_manifest_into_summary(
@@ -415,7 +449,7 @@ def run_evaluation(
     ) if results_file else 0
 
     if results_file and classification_exit == 0:
-        refresh_summary_failure_stats(results_file)
+        refresh_summary_failure_stats(results_file, evaluator.summary_path())
 
     _merge_manifest_into_summary(
         evaluator.summary_path(),

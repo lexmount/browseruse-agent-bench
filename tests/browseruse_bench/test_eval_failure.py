@@ -210,3 +210,56 @@ def test_classifier_handles_missing_result_json(tmp_path: Path) -> None:
     assert "No action history" in prompt
     assert "No response" in prompt
     assert "No evaluation feedback" in prompt
+
+
+def test_parse_tolerates_markdown_fenced_json(tmp_path: Path) -> None:
+    class _FencedModel(_CapturingModel):
+        def generate(self, messages: list[Any], **_kwargs: Any) -> str:
+            inner = json.dumps(
+                {"reasoning": "r", "codes": ["E2", "M3"], "primary_code": "E2", "other_phrase": None}
+            )
+            return f"```json\n{inner}\n```"
+
+    record = {"task_id": "3", "task": "t", "predicted_label": 0, "evaluation_details": {}}
+    classify_failure_case(record, tmp_path, _FencedModel())
+
+    assert record["failure_category"] == "E2"
+    assert record["evaluation_details"]["failure_classification"]["codes"] == ["E2", "M3"]
+
+
+def test_truncation_fallback_rejects_legacy_dotted_codes(tmp_path: Path) -> None:
+    class _LegacyModel(_CapturingModel):
+        def generate(self, messages: list[Any], **_kwargs: Any) -> str:
+            return '{"reasoning":"r","codes":["M3.1"],"primary_code":"M3.1"}'
+
+    record = {"task_id": "4", "task": "t", "predicted_label": 0, "evaluation_details": {}}
+    classify_failure_case(record, tmp_path, _LegacyModel())
+
+    assert record["failure_category"] == "U"
+
+
+def test_batch_skip_semantics_for_sentinel_and_u(tmp_path: Path) -> None:
+    from browseruse_bench.eval.failure import classify_failures_batch
+
+    records = [
+        {"task_id": "1", "predicted_label": 0, "failure_category": "not_evaluated"},
+        {"task_id": "2", "predicted_label": 0, "failure_category": "U"},
+        {"task_id": "3", "predicted_label": 0, "failure_category": "M1"},
+    ]
+    model = _CapturingModel()
+    classify_failures_batch(records, tmp_path, model, skip_existing=True, num_workers=1)
+
+    by_id = {r["task_id"]: r for r in records}
+    assert by_id["1"]["failure_category"] == "not_evaluated"
+    assert by_id["2"]["failure_category"] == "E1"
+    assert by_id["3"]["failure_category"] == "M1"
+
+
+def test_taxonomy_documented_and_mapped() -> None:
+    from browseruse_bench.eval.failure import FAILURE_TAXONOMY, LEGACY_CATEGORY_MAP
+    from browseruse_bench.utils import REPO_ROOT
+
+    doc = (REPO_ROOT / "docs" / "failure-taxonomy.md").read_text(encoding="utf-8")
+    for code in FAILURE_TAXONOMY:
+        assert f"| {code} " in doc or f"| {code}" in doc, f"{code} missing from docs"
+        assert code in LEGACY_CATEGORY_MAP, f"{code} missing from legacy map"

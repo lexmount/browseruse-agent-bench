@@ -17,6 +17,11 @@ from browseruse_bench.utils.repo_root import REPO_ROOT
 
 _root_cfg = load_config_file(REPO_ROOT / "config.yaml")
 _FAILURE_TEMPERATURE: float = float(_root_cfg.get("eval", {}).get("temperature", 0))
+_FAILURE_MAX_TOKENS: int = int(_root_cfg.get("eval", {}).get("max_tokens") or 2048)
+
+# Sentinel written by LexBench coverage backfill for tasks that were never
+# judged; it must survive attribution so eval resume can find those records.
+NOT_EVALUATED_SENTINEL = "not_evaluated"
 
 try:
     from openai import APIConnectionError, APIError, RateLimitError
@@ -307,7 +312,7 @@ def classify_single_failure(
 
         response = model.generate(
             messages,
-            max_tokens=2048,
+            max_tokens=_FAILURE_MAX_TOKENS,
             temperature=temperature,
             response_format=FAILURE_CLASSIFICATION_RESPONSE_FORMAT,
         )
@@ -330,10 +335,16 @@ def classify_single_failure(
     return result
 
 
+_CODE_PATTERN = "|".join(sorted((re.escape(c) for c in FAILURE_TAXONOMY), key=len, reverse=True))
+_PRIMARY_FALLBACK_RE = re.compile(r'"primary_code"\s*:\s*"?(' + _CODE_PATTERN + r')(?![\w.])')
+_CODES_FALLBACK_RE = re.compile(r'"codes"\s*:\s*\[\s*"(' + _CODE_PATTERN + r')(?![\w.])')
+_JSON_FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$")
+
+
 def _parse_classification_response(response: str) -> dict[str, Any]:
     """Parse a multi-label classification response, tolerating truncation."""
     try:
-        parsed = json.loads(response)
+        parsed = json.loads(_JSON_FENCE_RE.sub("", response))
     except json.JSONDecodeError:
         parsed = None
 
@@ -350,9 +361,7 @@ def _parse_classification_response(response: str) -> dict[str, Any]:
     if primary not in FAILURE_TAXONOMY:
         # Recover from a max_tokens-truncated JSON response: grab the
         # (possibly unterminated) primary_code or first codes entry directly.
-        match = re.search(r'"primary_code"\s*:\s*"?(H[12]|M[1-6]|E[1-3]|OTHER)', response)
-        if not match:
-            match = re.search(r'"codes"\s*:\s*\[\s*"(H[12]|M[1-6]|E[1-3]|OTHER)', response)
+        match = _PRIMARY_FALLBACK_RE.search(response) or _CODES_FALLBACK_RE.search(response)
         primary = match.group(1) if match else None
 
     if primary not in FAILURE_TAXONOMY and codes:
@@ -411,7 +420,10 @@ def classify_failure_case(
     task_id = result.get("task_id", "")
     logger.info(f"   [INFO] Classifying failure case: {task_id or '<unknown>'}")
 
-    agent_result = _load_agent_result(trajectories_dir, task_id)
+    has_inline_fields = bool(
+        (result.get("agent_response") or result.get("response")) and result.get("action_history")
+    )
+    agent_result = {} if has_inline_fields else _load_agent_result(trajectories_dir, task_id)
     task_description = result.get("task", "")
     agent_response = (
         result.get("agent_response") or result.get("response") or agent_result.get("answer") or ""
@@ -442,12 +454,8 @@ def classify_failure_case(
         details = {}
         result["evaluation_details"] = details
     details["failure_classification"] = {
-        "category": classification["category"],
-        "codes": classification["codes"],
-        "reasoning": classification["reasoning"],
-        "other_phrase": classification["other_phrase"],
+        **classification,
         "legacy_category": legacy_category(classification["category"]),
-        "raw_response": classification["raw_response"],
     }
 
     logger.info(f"      Classification result: {classification['category']}")
@@ -490,8 +498,14 @@ def classify_failures_batch(
 
         failure_count += 1
 
-        # If classification exists and skip_existing=True, skip
-        if skip_existing and result.get("failure_category"):
+        existing = result.get("failure_category")
+        # Synthetic never-judged placeholders must keep their sentinel so eval
+        # resume can re-judge them; "U" marks an attribution-pipeline failure
+        # and is always retried.
+        if existing == NOT_EVALUATED_SENTINEL:
+            updated_results.append(result)
+            continue
+        if skip_existing and existing and existing != "U":
             updated_results.append(result)
             continue
 

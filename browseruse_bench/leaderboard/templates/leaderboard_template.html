@@ -1005,7 +1005,7 @@
         let currentTrajectoryIndex = 0;
 
         // Predefined failure categories to ensure stable legend and colors
-        const ALL_FAILURE_CATEGORIES = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+        const ALL_FAILURE_CATEGORIES = ['H1', 'H2', 'M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'E1', 'E2', 'E3', 'OTHER', 'U', 'A1', 'A2', 'A3', 'A4', 'B1', 'B2', 'C1', 'C2'];
         const REFRESH_ICON_MARKUP = `
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="23 4 23 10 17 10"></polyline>
@@ -1023,6 +1023,21 @@
 
         // Failure category labels (short explanation)
         const FAILURE_CATEGORY_LABELS = {
+            'H1': 'H1 Harness: Execution Defect',
+            'H2': 'H2 Harness: Orchestration Guard Absence',
+            'M1': 'M1 Model: Task Planning',
+            'M2': 'M2 Model: Page Understanding & Grounding',
+            'M3': 'M3 Model: Evidence Fidelity',
+            'M4': 'M4 Model: Error Recovery',
+            'M5': 'M5 Model: Tool/Structured Output',
+            'M6': 'M6 Model: Model Service Error',
+            'E1': 'E1 Environment: Bot Defense',
+            'E2': 'E2 Environment: Access Barrier',
+            'E3': 'E3 Environment: Site Limitation',
+            'OTHER': 'Other',
+            'U': 'U Unclassified (attribution pipeline failure)',
+            'A3': 'A3 Legacy: Model Service Error',
+            'A4': 'A4 Legacy: Paradigm Issue',
             'A1': 'Agent Capability Issue',
             'A2': 'Agent Code Bug',
             'B1': 'Bot Detection Triggered',
