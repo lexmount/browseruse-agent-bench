@@ -666,7 +666,7 @@ class LexBenchBrowserEvaluator(BaseEvaluator):
             usage = (r.get("evaluation_details") or {}).get("eval_usage")
             if usage is not None:
                 usage_list.append(usage)
-        cost_summary = aggregate_evaluation_costs(usage_list)
+        cost_summary = aggregate_evaluation_costs(usage_list, model_name=self.args.model)
         if cost_summary:
             summary["evaluation_cost"] = cost_summary
 

@@ -72,6 +72,10 @@ def _extract_usage_totals(usage: Mapping[str, Any]) -> dict[str, int] | None:
         if isinstance(details, dict):
             cached_tokens = safe_int(details.get("cached_tokens", 0))
 
+    cache_creation_tokens = safe_int(
+        usage.get("total_prompt_cache_creation_tokens", usage.get("cache_creation_input_tokens", 0))
+    )
+
     if prompt_tokens == 0 and completion_tokens == 0 and total_tokens > 0:
         prompt_tokens = total_tokens
     if prompt_tokens == 0 and completion_tokens == 0 and total_tokens == 0:
@@ -82,6 +86,7 @@ def _extract_usage_totals(usage: Mapping[str, Any]) -> dict[str, int] | None:
         "completion_tokens": max(0, completion_tokens),
         "total_tokens": max(0, total_tokens),
         "cached_tokens": max(0, cached_tokens),
+        "cache_creation_tokens": max(0, cache_creation_tokens),
         "entry_count": max(1, safe_int(usage.get("entry_count", 1), 1)),
     }
 
@@ -102,18 +107,20 @@ def _extract_rates(
     entry: Mapping[str, Any],
     *,
     allow_per_million: bool,
-) -> tuple[float | None, float | None, float | None]:
+) -> tuple[float | None, float | None, float | None, float | None]:
     if allow_per_million:
         return (
             _read_rate(entry, "input_cost_per_token", "input_cost_per_million_tokens"),
             _read_rate(entry, "output_cost_per_token", "output_cost_per_million_tokens"),
             _read_rate(entry, "cache_read_input_token_cost", "cache_read_input_cost_per_million_tokens"),
+            _read_rate(entry, "cache_creation_input_token_cost", "cache_creation_input_cost_per_million_tokens"),
         )
 
     return (
         _read_rate(entry, "input_cost_per_token"),
         _read_rate(entry, "output_cost_per_token"),
         _read_rate(entry, "cache_read_input_token_cost"),
+        _read_rate(entry, "cache_creation_input_token_cost"),
     )
 
 
@@ -191,11 +198,12 @@ def _load_custom_model_pricing_table() -> dict[str, dict[str, Any]]:
         if not isinstance(model_key, str) or not isinstance(raw_entry, dict):
             continue
 
-        input_rate, output_rate, cached_rate = _extract_rates(raw_entry, allow_per_million=True)
+        input_rate, output_rate, cached_rate, creation_rate = _extract_rates(raw_entry, allow_per_million=True)
         normalized_entry = {
             "input_cost_per_token": input_rate,
             "output_cost_per_token": output_rate,
             "cache_read_input_token_cost": cached_rate,
+            "cache_creation_input_token_cost": creation_rate,
         }
         normalized_entry = {key: value for key, value in normalized_entry.items() if value is not None}
         price_table[model_key] = normalized_entry
@@ -257,23 +265,32 @@ def _build_usage_summary(
     prompt_tokens = safe_int(usage_totals.get("prompt_tokens", 0))
     completion_tokens = safe_int(usage_totals.get("completion_tokens", 0))
     total_tokens = safe_int(usage_totals.get("total_tokens", 0), prompt_tokens + completion_tokens)
+    # Convention: prompt_tokens INCLUDES cache reads and cache-creation tokens
+    # (OpenAI-style); both are disjoint subsets billed at their own rates.
     cached_tokens = min(max(0, safe_int(usage_totals.get("cached_tokens", 0))), max(0, prompt_tokens))
+    cache_creation_tokens = min(
+        max(0, safe_int(usage_totals.get("cache_creation_tokens", 0))),
+        max(0, prompt_tokens - cached_tokens),
+    )
     entry_count = max(1, safe_int(usage_totals.get("entry_count", 1), 1))
 
     pricing = custom_table.get(model_key) or litellm_table.get(model_key) or {}
-    input_rate, output_rate, cached_rate = _extract_rates(pricing, allow_per_million=False)
+    input_rate, output_rate, cached_rate, creation_rate = _extract_rates(pricing, allow_per_million=False)
     input_rate = input_rate or 0.0
     output_rate = output_rate or 0.0
     if cached_rate is None:
         cached_rate = input_rate
+    if creation_rate is None:
+        creation_rate = input_rate
 
     if input_rate == 0.0 and output_rate == 0.0:
         logger.warning("Missing pricing for model '%s'. Cost set to 0.", model_label)
 
-    non_cached_prompt_tokens = max(0, prompt_tokens - cached_tokens)
+    non_cached_prompt_tokens = max(0, prompt_tokens - cached_tokens - cache_creation_tokens)
     prompt_non_cached_cost = non_cached_prompt_tokens * input_rate
     prompt_cached_cost = cached_tokens * cached_rate
-    prompt_cost = prompt_non_cached_cost + prompt_cached_cost
+    prompt_cache_creation_cost = cache_creation_tokens * creation_rate
+    prompt_cost = prompt_non_cached_cost + prompt_cached_cost + prompt_cache_creation_cost
     completion_cost = completion_tokens * output_rate
     total_cost = prompt_cost + completion_cost
     resolved_total_tokens = total_tokens if total_tokens > 0 else prompt_tokens + completion_tokens
@@ -283,6 +300,8 @@ def _build_usage_summary(
         "total_prompt_cost": prompt_cost,
         "total_prompt_cached_tokens": cached_tokens,
         "total_prompt_cached_cost": prompt_cached_cost,
+        "total_prompt_cache_creation_tokens": cache_creation_tokens,
+        "total_prompt_cache_creation_cost": prompt_cache_creation_cost,
         "total_completion_tokens": completion_tokens,
         "total_completion_cost": completion_cost,
         "total_tokens": resolved_total_tokens,

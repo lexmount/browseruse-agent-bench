@@ -147,6 +147,66 @@ def _parse_stream(
     return result_obj, assistant_messages, saved_screenshots, turns
 
 
+def _fold_anthropic_usage(raw: Any, totals: dict[str, int]) -> bool:
+    """Accumulate one Anthropic-style usage block into *totals*.
+
+    Anthropic ``input_tokens`` EXCLUDES cache reads/writes; fold the cache
+    counters into the prompt count to match the AgentUsage convention
+    (prompt includes cached). Returns True when the block carried any tokens.
+    """
+    if not isinstance(raw, dict):
+        return False
+    input_tokens = int(raw.get("input_tokens") or 0)
+    cache_read = int(raw.get("cache_read_input_tokens") or 0)
+    cache_creation = int(raw.get("cache_creation_input_tokens") or 0)
+    output_tokens = int(raw.get("output_tokens") or 0)
+    if input_tokens + cache_read + cache_creation + output_tokens == 0:
+        return False
+    totals["prompt"] += input_tokens + cache_read + cache_creation
+    totals["cached"] += cache_read
+    totals["cache_creation"] += cache_creation
+    totals["completion"] += output_tokens
+    return True
+
+
+def _usage_totals_from_stream(
+    result_obj: dict[str, Any],
+    assistant_messages: list[dict[str, Any]],
+) -> dict[str, int]:
+    """Extract token totals from the result event, or sum assistant messages.
+
+    The result event's ``usage`` is the run-wide aggregate; when it never
+    arrived (timeout / early exit), fall back to summing the per-message
+    ``usage`` blocks so token counts are not lost.
+    """
+    totals = {"prompt": 0, "cached": 0, "cache_creation": 0, "completion": 0, "entries": 0}
+    if _fold_anthropic_usage(result_obj.get("usage"), totals):
+        totals["entries"] = int(result_obj.get("num_turns") or 0)
+        return totals
+    for message in assistant_messages:
+        if _fold_anthropic_usage(message.get("usage"), totals):
+            totals["entries"] += 1
+    return totals
+
+
+def _build_agent_usage(
+    result_obj: dict[str, Any],
+    assistant_messages: list[dict[str, Any]],
+    total_cost_usd: float | None,
+) -> AgentUsage | None:
+    totals = _usage_totals_from_stream(result_obj, assistant_messages)
+    if totals["prompt"] + totals["completion"] == 0 and total_cost_usd is None:
+        return None
+    return AgentUsage(
+        total_prompt_tokens=totals["prompt"],
+        total_prompt_cached_tokens=totals["cached"],
+        total_prompt_cache_creation_tokens=totals["cache_creation"],
+        total_completion_tokens=totals["completion"],
+        total_cost=total_cost_usd or 0.0,
+        entry_count=totals["entries"],
+    )
+
+
 def _save_screenshot(
     b64_data: str,
     index: int,
@@ -669,7 +729,7 @@ class ClaudeCodeAgent(CLIAgent):
             metrics=AgentMetrics(
                 end_to_end_ms=duration_ms,
                 steps=num_turns,
-                usage=AgentUsage(total_cost=total_cost_usd) if total_cost_usd is not None else None,
+                usage=_build_agent_usage(result_obj, assistant_messages, total_cost_usd),
             ),
             agent_metadata=agent_metadata,
         )

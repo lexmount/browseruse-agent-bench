@@ -3,6 +3,44 @@
 import pytest
 
 from browseruse_bench.utils import filter_tasks_by_label, generate_evaluation_summary
+from browseruse_bench.utils.stats import calculate_metric_stats, calculate_usage_stats
+
+
+def _task_with_usage(task_id: str, usage: dict) -> dict:
+    return {
+        "task_id": task_id,
+        "predicted_label": 1,
+        "evaluation_details": {"agent_metrics": {"usage": usage}},
+    }
+
+
+class TestCalcStatsPrecision:
+    """Per-task USD costs are small; 2dp rounding used to flatten them to 0.0."""
+
+    def test_mean_preserves_small_cost_values(self):
+        tasks = [
+            _task_with_usage("1", {"total_cost": 0.003}),
+            _task_with_usage("2", {"total_cost": 0.004}),
+        ]
+        stats = calculate_usage_stats(tasks)
+        assert stats["total_cost"]["mean"] == 0.0035
+
+    def test_median_preserves_small_cost_values(self):
+        tasks = [
+            _task_with_usage("1", {"total_cost": 0.001}),
+            _task_with_usage("2", {"total_cost": 0.002}),
+            _task_with_usage("3", {"total_cost": 0.003}),
+        ]
+        stats = calculate_usage_stats(tasks)
+        assert stats["total_cost"]["median"] == 0.002
+
+    def test_median_even_count_averages_middle_values(self):
+        tasks = [
+            {"evaluation_details": {"agent_metrics": {"steps": v}}}
+            for v in (1, 2, 3, 10)
+        ]
+        stats = calculate_metric_stats(tasks, "steps")
+        assert stats["median"] == 2.5
 
 
 class TestFilterTasksByLabel:

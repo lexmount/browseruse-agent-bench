@@ -10,13 +10,18 @@ from typing import Any, Dict, Iterator, List, Optional
 logger = logging.getLogger(__name__)
 
 
-def calculate_evaluation_cost(usage_dict: Any) -> Optional[Dict[str, Any]]:
-    """Calculate total cost based on usage and pricing.
+def calculate_evaluation_cost(
+    usage_dict: Any,
+    model_name: Optional[str] = None,
+    price_table: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Calculate the evaluation-LLM cost (USD) from usage and shared pricing.
 
-    Pricing (per million tokens):
-    - Input: ￥10 / M tokens
-    - Output: ￥40 / M tokens
-    - Cached: ￥2.5 / M tokens
+    Rates resolve through the same tables as agent-side costs (custom
+    ``configs/pricing/model_pricing.yaml`` first, then the LiteLLM table);
+    an unknown ``model_name`` yields cost 0 with a warning, matching the
+    agent-side convention. ``price_table`` overrides the LiteLLM table
+    (mainly for tests).
     """
     if not usage_dict:
         return None
@@ -29,42 +34,43 @@ def calculate_evaluation_cost(usage_dict: Any) -> Optional[Dict[str, Any]]:
         else:
             return None
 
-    prompt_tokens = usage_dict.get("prompt_tokens", 0)
-    completion_tokens = usage_dict.get("completion_tokens", 0)
+    # Lazy import: llm_cost pulls in browseruse_bench.utils, whose __init__
+    # re-exports from this module (same cycle as generate_evaluation_summary).
+    from browseruse_bench.utils.llm_cost import enrich_usage_with_litellm_pricing
 
-    cached_tokens = 0
-    prompt_details = usage_dict.get("prompt_tokens_details", {})
-    if isinstance(prompt_details, dict):
-        cached_tokens = prompt_details.get("cached_tokens", 0)
+    enriched = enrich_usage_with_litellm_pricing(
+        usage=usage_dict,
+        model_name=model_name,
+        price_table=price_table,
+        force=True,
+    )
+    if "total_cost" not in enriched:
+        return None
 
-    PRICE_INPUT = 10
-    PRICE_OUTPUT = 40
-    PRICE_CACHED = 2.5
-
-    non_cached_prompt = max(0, prompt_tokens - cached_tokens)
-
-    input_cost = (non_cached_prompt / 1_000_000) * PRICE_INPUT
-    output_cost = (completion_tokens / 1_000_000) * PRICE_OUTPUT
-    cached_cost = (cached_tokens / 1_000_000) * PRICE_CACHED
-
-    total_cost = input_cost + output_cost + cached_cost
-
+    prompt_tokens = enriched["total_prompt_tokens"]
+    cached_tokens = enriched["total_prompt_cached_tokens"]
+    creation_tokens = enriched["total_prompt_cache_creation_tokens"]
+    cached_cost = enriched["total_prompt_cached_cost"] + enriched["total_prompt_cache_creation_cost"]
     return {
         "prompt_tokens": prompt_tokens,
-        "completion_tokens": completion_tokens,
+        "completion_tokens": enriched["total_completion_tokens"],
         "cached_tokens": cached_tokens,
-        "non_cached_prompt": non_cached_prompt,
+        "non_cached_prompt": max(0, prompt_tokens - cached_tokens - creation_tokens),
         "costs": {
-            "input": input_cost,
-            "output": output_cost,
+            "input": enriched["total_prompt_cost"] - cached_cost,
+            "output": enriched["total_completion_cost"],
             "cached": cached_cost,
-            "total": total_cost,
+            "total": enriched["total_cost"],
         },
     }
 
 
-def aggregate_evaluation_costs(usage_list: List[Any]) -> Dict[str, Any]:
-    """Aggregate costs from multiple usage dictionaries."""
+def aggregate_evaluation_costs(
+    usage_list: List[Any],
+    model_name: Optional[str] = None,
+    price_table: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Aggregate USD costs from multiple usage dictionaries."""
     total_prompt = 0
     total_completion = 0
     total_cached = 0
@@ -75,7 +81,7 @@ def aggregate_evaluation_costs(usage_list: List[Any]) -> Dict[str, Any]:
     for usage in usage_list:
         if usage is None:
             continue
-        cost_info = calculate_evaluation_cost(usage)
+        cost_info = calculate_evaluation_cost(usage, model_name=model_name, price_table=price_table)
         if cost_info:
             total_prompt += cost_info["prompt_tokens"]
             total_completion += cost_info["completion_tokens"]

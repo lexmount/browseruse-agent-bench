@@ -161,3 +161,96 @@ def test_build_local_chromium_args_username_only_no_password() -> None:
         },
     )
     assert args == ["--proxy-server=http://alice@proxy.corp:3128"]
+
+
+class TestExtractUsageFromResponseBlob:
+    """Usage extraction must not mix OpenAI and Anthropic token semantics."""
+
+    def test_openai_style_prompt_includes_cached(self) -> None:
+        from browseruse_bench.agents.skyvern import _extract_usage_from_response_blob
+
+        blob = {
+            "usage": {
+                "prompt_tokens": 500,
+                "completion_tokens": 20,
+                "prompt_tokens_details": {"cached_tokens": 300},
+            }
+        }
+        usage = _extract_usage_from_response_blob(blob)
+        assert usage == {
+            "prompt_tokens": 500,
+            "completion_tokens": 20,
+            "cached_tokens": 300,
+            "cache_creation_tokens": 0,
+            "total_tokens": 520,
+        }
+
+    def test_anthropic_style_adds_cache_components_to_prompt(self) -> None:
+        from browseruse_bench.agents.skyvern import _extract_usage_from_response_blob
+
+        # Anthropic input_tokens EXCLUDES cache reads/writes; the normalized
+        # prompt count must include them so downstream cost math (which
+        # subtracts cached from prompt) stays correct.
+        blob = {
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 20,
+                "cache_read_input_tokens": 400,
+                "cache_creation_input_tokens": 50,
+            }
+        }
+        usage = _extract_usage_from_response_blob(blob)
+        assert usage == {
+            "prompt_tokens": 550,
+            "completion_tokens": 20,
+            "cached_tokens": 400,
+            "cache_creation_tokens": 50,
+            "total_tokens": 570,
+        }
+
+    def test_responses_api_style_input_already_includes_cached(self) -> None:
+        from browseruse_bench.agents.skyvern import _extract_usage_from_response_blob
+
+        # OpenAI Responses API: input_tokens INCLUDES cached tokens.
+        blob = {
+            "usage": {
+                "input_tokens": 500,
+                "output_tokens": 20,
+                "input_tokens_details": {"cached_tokens": 300},
+            }
+        }
+        usage = _extract_usage_from_response_blob(blob)
+        assert usage == {
+            "prompt_tokens": 500,
+            "completion_tokens": 20,
+            "cached_tokens": 300,
+            "cache_creation_tokens": 0,
+            "total_tokens": 520,
+        }
+
+    def test_collect_usage_sums_cache_creation(self, tmp_path) -> None:
+        import json
+
+        from browseruse_bench.agents.skyvern import collect_usage_from_skyvern_artifacts
+
+        step_dir = tmp_path / "tsk_1" / "a_stp_001"
+        step_dir.mkdir(parents=True)
+        (step_dir / "raw_llm_response.json").write_text(
+            json.dumps(
+                {
+                    "usage": {
+                        "input_tokens": 100,
+                        "output_tokens": 10,
+                        "cache_read_input_tokens": 200,
+                        "cache_creation_input_tokens": 30,
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        summary = collect_usage_from_skyvern_artifacts([tmp_path / "tsk_1"])
+        assert summary["total_prompt_tokens"] == 330
+        assert summary["total_prompt_cached_tokens"] == 200
+        assert summary["total_prompt_cache_creation_tokens"] == 30
+        assert summary["total_tokens"] == 340

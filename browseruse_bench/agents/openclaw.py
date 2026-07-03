@@ -84,6 +84,46 @@ def _normalize_session_items(session_file: Path) -> list[dict[str, Any]]:
     return items
 
 
+def _fold_openclaw_usage(raw: Any, totals: dict[str, int]) -> bool:
+    """Accumulate one OpenClaw (pi-ai) usage block into *totals*.
+
+    OpenClaw reports Anthropic-style disjoint components: ``input`` EXCLUDES
+    ``cacheRead``/``cacheWrite``. Fold them into the prompt count to match the
+    AgentUsage convention (prompt includes cached). Returns True when the
+    block carried any tokens.
+    """
+    if not isinstance(raw, dict):
+        return False
+    input_tokens = int(raw.get("input") or 0)
+    cache_read = int(raw.get("cacheRead") or 0)
+    cache_write = int(raw.get("cacheWrite") or 0)
+    output_tokens = int(raw.get("output") or 0)
+    if input_tokens + cache_read + cache_write + output_tokens == 0:
+        return False
+    totals["prompt"] += input_tokens + cache_read + cache_write
+    totals["cached"] += cache_read
+    totals["cache_creation"] += cache_write
+    totals["completion"] += output_tokens
+    totals["entries"] += 1
+    return True
+
+
+def _collect_session_usage(session_file: Path | None) -> dict[str, int]:
+    """Sum per-call usage blocks across all assistant messages in the session log."""
+    totals = {"prompt": 0, "cached": 0, "cache_creation": 0, "completion": 0, "entries": 0}
+    if session_file is None or not session_file.is_file():
+        return totals
+    for raw_line in session_file.read_text(encoding="utf-8").splitlines():
+        try:
+            obj = json.loads(raw_line)
+        except json.JSONDecodeError:
+            continue
+        message = obj.get("message")
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            _fold_openclaw_usage(message.get("usage"), totals)
+    return totals
+
+
 def _fold_message(
     message: dict[str, Any],
     items: list[dict[str, Any]],
@@ -458,29 +498,41 @@ class OpenClawAgent(CLIAgent):
             logger.warning("Failed to scrub state config secrets: %s", exc)
 
     @staticmethod
-    def _session_items(result_obj: dict[str, Any], task_workspace: Path) -> list[dict[str, Any]]:
+    def _agent_meta(result_obj: dict[str, Any]) -> dict[str, Any] | None:
         meta = result_obj.get("meta")
         agent_meta = meta.get("agentMeta") if isinstance(meta, dict) else None
-        session_file = agent_meta.get("sessionFile") if isinstance(agent_meta, dict) else None
-        if not session_file:
+        return agent_meta if isinstance(agent_meta, dict) else None
+
+    @staticmethod
+    def _session_file_from(result_obj: dict[str, Any]) -> Path | None:
+        agent_meta = OpenClawAgent._agent_meta(result_obj)
+        session_file = agent_meta.get("sessionFile") if agent_meta else None
+        return Path(str(session_file)) if session_file else None
+
+    @staticmethod
+    def _session_items(result_obj: dict[str, Any], task_workspace: Path) -> list[dict[str, Any]]:
+        session_file = OpenClawAgent._session_file_from(result_obj)
+        if session_file is None:
             return []
-        return _normalize_session_items(Path(str(session_file)))
+        return _normalize_session_items(session_file)
 
     @staticmethod
     def _usage_from(result_obj: dict[str, Any]) -> AgentUsage | None:
-        meta = result_obj.get("meta")
-        agent_meta = meta.get("agentMeta") if isinstance(meta, dict) else None
-        usage = agent_meta.get("lastCallUsage") if isinstance(agent_meta, dict) else None
-        if not isinstance(usage, dict):
-            return None
-        total = int(usage.get("total") or 0)
-        if not total:
+        totals = _collect_session_usage(OpenClawAgent._session_file_from(result_obj))
+        if not totals["entries"]:
+            # lastCallUsage covers only the final LLM call; use it only when
+            # the session log carries no per-message usage at all.
+            agent_meta = OpenClawAgent._agent_meta(result_obj)
+            last_call = agent_meta.get("lastCallUsage") if agent_meta else None
+            _fold_openclaw_usage(last_call, totals)
+        if not totals["entries"]:
             return None
         return AgentUsage(
-            total_prompt_tokens=int(usage.get("input") or 0),
-            total_prompt_cached_tokens=int(usage.get("cacheRead") or 0),
-            total_completion_tokens=int(usage.get("output") or 0),
-            total_tokens=total,
+            total_prompt_tokens=totals["prompt"],
+            total_prompt_cached_tokens=totals["cached"],
+            total_prompt_cache_creation_tokens=totals["cache_creation"],
+            total_completion_tokens=totals["completion"],
+            entry_count=totals["entries"],
         )
 
 
