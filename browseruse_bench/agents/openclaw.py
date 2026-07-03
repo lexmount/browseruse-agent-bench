@@ -383,6 +383,11 @@ class OpenClawAgent(CLIAgent):
                             "contextWindow": int(agent_config.get("context_window", 195000)),
                             "maxTokens": int(agent_config.get("max_tokens", 16000)),
                             "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                            # OpenClaw's auto-detection disables streaming usage
+                            # for custom providers, which zeroes all token
+                            # accounting; the bench gateway supports
+                            # stream_options.include_usage, so opt in.
+                            "compat": {"supportsUsageInStreaming": True},
                         }],
                     }
                 },

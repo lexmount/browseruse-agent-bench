@@ -198,6 +198,9 @@ class TestOpenClawAgentRunTask:
         assert cfg["models"]["providers"]["bench"]["timeoutSeconds"] == 300
         # The api key written for the run must be scrubbed from the artifact.
         assert provider["apiKey"] == "***"
+        # Without this compat flag OpenClaw never sends stream_options
+        # include_usage to custom providers, so token usage is all zeros.
+        assert provider["models"][0]["compat"] == {"supportsUsageInStreaming": True}
 
     def test_cdp_url_written_as_attach_profile(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
