@@ -16,8 +16,10 @@ import os
 import re
 import shutil
 import socket
+import subprocess
 import time
 from datetime import UTC, datetime
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -339,6 +341,23 @@ def _copy_media_paths(text: str, trajectory_dir: Path, saved: list[str]) -> None
             logger.warning("Failed to copy screenshot %s: %s", source, exc)
 
 
+@cache
+def _openclaw_cli_version() -> str:
+    """One `openclaw --version` per process; compat failures (e.g. rejected
+    CLI flags or config fields) are version-dependent, so every result must
+    record which CLI it ran against."""
+    exe = "openclaw.cmd" if IS_WINDOWS else "openclaw"
+    try:
+        proc = subprocess.run(
+            [exe, "--version"], capture_output=True, text=True, timeout=30, check=False
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("Could not determine OpenClaw CLI version: %s", exc)
+        return "unknown"
+    lines = (proc.stdout or proc.stderr or "").strip().splitlines()
+    return lines[0].strip() if lines else "unknown"
+
+
 def _normalize_thinking_level(value: Any) -> str | None:
     """Map config reasoning-effort spellings to OpenClaw --thinking levels."""
     if not value:
@@ -378,6 +397,8 @@ class OpenClawAgent(CLIAgent):
         browser-service startup race (every browser call failed with a
         connection error and the "answer" is just a blocked notice).
         """
+        cli_version = self._cli_version()
+        logger.info("OpenClaw CLI version: %s", cli_version)
         retries = max(0, safe_int(agent_config.get("outage_retries", 1), 1))
         result = self._attempt_task(task_info, agent_config, task_workspace, attempt=0)
         for attempt in range(1, retries + 1):
@@ -396,7 +417,12 @@ class OpenClawAgent(CLIAgent):
             result = self._attempt_task(task_info, agent_config, task_workspace, attempt=attempt)
             if isinstance(result, AgentResult) and not result.agent_metadata.get("browser_outage"):
                 result.agent_metadata["outage_retried"] = attempt
+        if isinstance(result, AgentResult):
+            result.agent_metadata["openclaw_cli_version"] = cli_version
         return result
+
+    # Class attribute so tests can patch/clear the process-wide cache.
+    _cli_version = staticmethod(_openclaw_cli_version)
 
     def _attempt_task(
         self,

@@ -490,6 +490,35 @@ class TestOpenClawAgentRunTask:
         assert "not found" in (result.error or "").lower()
 
 
+class TestCliVersionRecording:
+    def test_version_recorded_in_agent_metadata(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Compat problems (e.g. --session-key rejection in the 20260701 run)
+        # were observed on an unrecorded CLI version; every result must carry
+        # the version it ran against so failures stay attributable.
+        agent = OpenClawAgent()
+        monkeypatch.setattr(OpenClawAgent, "_cli_version", staticmethod(lambda: "2026.6.10 (test)"))
+        monkeypatch.setattr(agent, "_run_subprocess", lambda *a, **kw: (0, _result_stdout(), None))
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        assert result.agent_metadata["openclaw_cli_version"] == "2026.6.10 (test)"
+
+    def test_missing_executable_reports_unknown_version(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import subprocess
+
+        def raise_not_found(*a: Any, **kw: Any) -> None:
+            raise FileNotFoundError("openclaw not found")
+
+        monkeypatch.setattr(subprocess, "run", raise_not_found)
+        OpenClawAgent._cli_version.cache_clear()
+        try:
+            assert OpenClawAgent._cli_version() == "unknown"
+        finally:
+            OpenClawAgent._cli_version.cache_clear()
+
+
 class TestGatewayTimeoutRetry:
     """Outage-retry cases not covered by TestBrowserOutageRetry: the
     gateway-restart signature variant, and the fresh-browser-session
