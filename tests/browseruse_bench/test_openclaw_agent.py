@@ -243,6 +243,11 @@ class TestOpenClawAgentRunTask:
         for alias in ("user", "openclaw"):
             assert cfg["browser"]["profiles"][alias]["cdpUrl"] == "wss://cdp.example/1"
             assert cfg["browser"]["profiles"][alias]["attachOnly"] is True
+        # Local fake-IP proxy clients resolve proxied domains to the RFC 2544
+        # benchmark range (198.18.0.0/15); OpenClaw's local SSRF preflight then
+        # blocks navigation even though navigation happens in the remote CDP
+        # browser. Only the CDP path disables it (see the non-CDP test).
+        assert cfg["browser"]["ssrfPolicy"]["dangerouslyAllowPrivateNetwork"] is True
         assert result.env_status == "success"
 
     def test_gateway_browser_node_dispatch_disabled(
@@ -256,11 +261,6 @@ class TestOpenClawAgentRunTask:
         agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
         cfg = json.loads((tmp_path / ".openclaw-state" / "openclaw.json").read_text())
         assert cfg["gateway"]["nodes"]["browser"]["mode"] == "off"
-        # Local fake-IP proxy clients resolve proxied domains to the RFC 2544
-        # benchmark range (198.18.0.0/15); OpenClaw's local SSRF preflight then
-        # blocks navigation ("browser navigation blocked by policy") even
-        # though the real navigation happens in the remote CDP browser.
-        assert cfg["browser"]["ssrfPolicy"]["dangerouslyAllowPrivateNetwork"] is True
 
     def test_non_cdp_backend_fails_fast(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -480,3 +480,127 @@ class TestBrowserOutageRetry:
         result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
         assert len(calls) == 1
         assert result.env_status == "success"
+
+
+class TestOutageRetryHardening:
+    """Review findings: the retry must be genuinely fresh and well-scoped."""
+
+    def _blocked_and_good(self, tmp_path: Path) -> tuple[Path, Path]:
+        blocked = tmp_path / "blocked.jsonl"
+        _write_blocked_session(blocked)
+        good = tmp_path / "good.jsonl"
+        _write_session(good)
+        return blocked, good
+
+    def test_retry_uses_a_fresh_session_key(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Reusing the session key resumes attempt 1's transcript: the model
+        # sees its own failures and gives up without touching the browser,
+        # and usage/steps double-count across attempts.
+        blocked, good = self._blocked_and_good(tmp_path)
+        cmds: list[list[str]] = []
+
+        def fake_run(cmd: list[str], **kw: Any) -> tuple[int, list[str], None]:
+            cmds.append(cmd)
+            session = blocked if len(cmds) == 1 else good
+            return 0, _result_stdout(session, answer="[blocked]" if len(cmds) == 1 else "ok"), None
+
+        agent = OpenClawAgent()
+        monkeypatch.setattr(agent, "_run_subprocess", fake_run)
+        agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        key1 = cmds[0][cmds[0].index("--session-key") + 1]
+        key2 = cmds[1][cmds[1].index("--session-key") + 1]
+        assert key1 != key2
+
+    def test_dangling_tool_call_does_not_mask_outage(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # A browser call whose toolResult never arrived is unknown, not
+        # evidence of a working browser.
+        session = tmp_path / "dangling.jsonl"
+        lines = [
+            {"type": "message", "message": {"role": "assistant", "content": [
+                {"type": "toolCall", "id": "c1", "name": "browser",
+                 "arguments": {"action": "open", "url": "https://example.com"}},
+                {"type": "toolCall", "id": "c2", "name": "browser",
+                 "arguments": {"action": "open", "url": "https://example.com"}},
+            ]}},
+            {"type": "message", "message": {"role": "toolResult", "toolCallId": "c1",
+                "toolName": "browser", "content": [{"type": "text", "text": _OUTAGE_TEXT}]}},
+            # c2 never gets a toolResult (stop_predicate raced the write)
+        ]
+        session.write_text("\n".join(json.dumps(line) for line in lines), encoding="utf-8")
+        calls: list[int] = []
+
+        def fake_run(cmd: list[str], **kw: Any) -> tuple[int, list[str], None]:
+            calls.append(1)
+            return 0, _result_stdout(session, answer="[blocked] browser down"), None
+
+        agent = OpenClawAgent()
+        monkeypatch.setattr(agent, "_run_subprocess", fake_run)
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        assert len(calls) == 2  # outage detected despite the dangling call
+        assert result.env_status == "failed"
+
+    def test_timeout_results_are_not_flipped_or_retried(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        blocked = tmp_path / "blocked.jsonl"
+        _write_blocked_session(blocked)
+        calls: list[int] = []
+
+        def fake_run(cmd: list[str], **kw: Any) -> tuple[int, list[str], str]:
+            calls.append(1)
+            return -1, _result_stdout(blocked, answer="partial"), "Timeout after 10 seconds"
+
+        agent = OpenClawAgent()
+        monkeypatch.setattr(agent, "_run_subprocess", fake_run)
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        assert len(calls) == 1
+        assert result.agent_done == "timeout"
+
+    def test_outage_retries_zero_disables_retry(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        blocked = tmp_path / "blocked.jsonl"
+        _write_blocked_session(blocked)
+        calls: list[int] = []
+
+        def fake_run(cmd: list[str], **kw: Any) -> tuple[int, list[str], None]:
+            calls.append(1)
+            return 0, _result_stdout(blocked, answer="[blocked]"), None
+
+        agent = OpenClawAgent()
+        monkeypatch.setattr(agent, "_run_subprocess", fake_run)
+        result = agent.run_task(TASK_INFO, {**AGENT_CONFIG, "outage_retries": 0}, tmp_path)
+        assert len(calls) == 1
+        assert result.env_status == "failed"
+
+    def test_successful_retry_is_recorded_in_metadata(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        blocked, good = self._blocked_and_good(tmp_path)
+        calls: list[int] = []
+
+        def fake_run(cmd: list[str], **kw: Any) -> tuple[int, list[str], None]:
+            calls.append(1)
+            session = blocked if len(calls) == 1 else good
+            return 0, _result_stdout(session, answer="[blocked]" if len(calls) == 1 else "ok"), None
+
+        agent = OpenClawAgent()
+        monkeypatch.setattr(agent, "_run_subprocess", fake_run)
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        assert result.env_status == "success"
+        assert result.agent_metadata.get("outage_retried") == 1
+
+    def test_ssrf_policy_only_for_cdp_browsers(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The SSRF preflight is meaningless for a REMOTE CDP browser, but for
+        # a locally launched browser it is a real guard and must stay on.
+        agent = OpenClawAgent()
+        monkeypatch.setattr(agent, "_run_subprocess", lambda *a, **kw: (0, _result_stdout(), None))
+        agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        cfg = json.loads((tmp_path / ".openclaw-state" / "openclaw.json").read_text())
+        assert "ssrfPolicy" not in cfg["browser"]

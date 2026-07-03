@@ -125,7 +125,12 @@ def _detect_browser_outage(items: list[dict[str, Any]], answer: str) -> str | No
     for item in items:
         if not str(item.get("tool", "")).startswith("browser"):
             continue
-        content = (item.get("result") or {}).get("content") or []
+        result = item.get("result")
+        if not isinstance(result, dict):
+            # The toolResult never arrived (turn aborted, stop_predicate raced
+            # the session write): unknown, not evidence of a working browser.
+            continue
+        content = result.get("content") or []
         text = " ".join(
             str(block.get("text", "")) for block in content if isinstance(block, dict)
         )
@@ -135,11 +140,53 @@ def _detect_browser_outage(items: list[dict[str, Any]], answer: str) -> str | No
     return _match_outage(answer)
 
 
+def _browser_config(cdp_url: str | None) -> dict[str, Any]:
+    """Build the per-task browser section of openclaw.json."""
+    if not cdp_url:
+        # Locally launched browser: keep OpenClaw's SSRF preflight intact.
+        return {"enabled": True}
+    bench_profile = {"cdpUrl": cdp_url, "attachOnly": True, "color": "#00AA00"}
+    return {
+        "enabled": True,
+        # The SSRF preflight resolves DNS locally, but navigation happens in
+        # the REMOTE CDP browser where local private-network concerns do not
+        # apply — and local fake-IP proxy clients resolve proxied domains to
+        # the RFC 2544 range, which the guard would reject.
+        "ssrfPolicy": _BROWSER_SSRF_POLICY,
+        "defaultProfile": "bench",
+        # OpenClaw auto-injects built-in `user`/`openclaw` profiles
+        # (operator's local Chrome) unless the config defines those names;
+        # models sometimes pass them explicitly and escape the bench
+        # browser. Pin both to the bench CDP endpoint.
+        "profiles": {
+            "bench": bench_profile,
+            "user": bench_profile,
+            "openclaw": bench_profile,
+        },
+    }
+
+
 def _allocate_free_port() -> int:
-    """Reserve an ephemeral TCP port for a task's private OpenClaw gateway."""
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+    """Reserve an ephemeral TCP port family for a task's private OpenClaw gateway.
+
+    OpenClaw binds a small family around the gateway port (browser control
+    service on port+2), so probe both before handing the base out. Best
+    effort: the probe sockets are closed before OpenClaw binds, so a race
+    remains possible but requires another process to grab the exact port in
+    the spawn window.
+    """
+    base = 0
+    for _ in range(20):
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            base = sock.getsockname()[1]
+            try:
+                with socket.socket() as neighbor:
+                    neighbor.bind(("127.0.0.1", base + 2))
+            except OSError:
+                continue
+            return base
+    return base
 
 
 def _fold_openclaw_usage(raw: Any, totals: dict[str, int]) -> bool:
@@ -307,32 +354,38 @@ class OpenClawAgent(CLIAgent):
         browser-service startup race (every browser call failed with a
         connection error and the "answer" is just a blocked notice).
         """
-        result = self._attempt_task(task_info, agent_config, task_workspace)
-        outage = (
-            result.agent_metadata.get("browser_outage")
-            if isinstance(result, AgentResult)
-            else None
-        )
-        if not outage:
-            return result
-        logger.warning(
-            "OpenClaw browser outage on task %s (%s); retrying once on a fresh browser session",
-            task_info.get("task_id"),
-            outage,
-        )
-        return self._attempt_task(task_info, agent_config, task_workspace)
+        retries = max(0, safe_int(agent_config.get("outage_retries", 1), 1))
+        result = self._attempt_task(task_info, agent_config, task_workspace, attempt=0)
+        for attempt in range(1, retries + 1):
+            outage = (
+                result.agent_metadata.get("browser_outage")
+                if isinstance(result, AgentResult)
+                else None
+            )
+            if not outage:
+                break
+            logger.warning(
+                "OpenClaw browser outage on task %s (%s); retrying on a fresh browser session",
+                task_info.get("task_id"),
+                outage,
+            )
+            result = self._attempt_task(task_info, agent_config, task_workspace, attempt=attempt)
+            if isinstance(result, AgentResult) and not result.agent_metadata.get("browser_outage"):
+                result.agent_metadata["outage_retried"] = attempt
+        return result
 
     def _attempt_task(
         self,
         task_info: dict[str, Any],
         agent_config: dict[str, Any],
         task_workspace: Path,
+        attempt: int,
     ) -> AgentResult | dict[str, Any]:
         """Run one OpenClaw attempt against a freshly opened browser session."""
         browser_id = str(agent_config.get("browser_id") or "")
         if browser_id in SELF_LAUNCH_BROWSER_IDS:
             warn_if_local_proxy_unsupported(agent_config, self.name)
-            return self._execute(task_info, agent_config, task_workspace, cdp_url=None)
+            return self._execute(task_info, agent_config, task_workspace, cdp_url=None, attempt=attempt)
         with open_browser_session(
             browser_id=browser_id,
             agent_name=self.name,
@@ -343,7 +396,9 @@ class OpenClawAgent(CLIAgent):
                 return self._unsupported_backend_result(
                     task_info["task_id"], browser_id, session_context.transport
                 )
-            return self._execute(task_info, agent_config, task_workspace, cdp_url=cdp_url)
+            return self._execute(
+                task_info, agent_config, task_workspace, cdp_url=cdp_url, attempt=attempt
+            )
 
     def _unsupported_backend_result(
         self, task_id: str, browser_id: str, transport: str
@@ -368,6 +423,7 @@ class OpenClawAgent(CLIAgent):
         agent_config: dict[str, Any],
         task_workspace: Path,
         cdp_url: str | None,
+        attempt: int = 0,
     ) -> AgentResult:
         task_id = task_info["task_id"]
         prompt = task_info.get("prompt") or self.build_task_prompt(task_info)
@@ -379,7 +435,7 @@ class OpenClawAgent(CLIAgent):
         trajectory_dir.mkdir(parents=True, exist_ok=True)
         state_dir = task_workspace / ".openclaw-state"
         self._write_state_config(agent_config, task_workspace, state_dir, model, cdp_url)
-        cmd = self._build_command(f"{rules}\n\n{prompt}", task_id, timeout)
+        cmd = self._build_command(f"{rules}\n\n{prompt}", task_id, timeout, attempt)
 
         env = {**os.environ}
         env["OPENCLAW_STATE_DIR"] = str(state_dir)
@@ -494,41 +550,33 @@ class OpenClawAgent(CLIAgent):
                 # Tool whitelist: browsing plus reading bundled skill files.
                 "list": [{"id": "main", "tools": {"allow": ["browser", "read"]}}],
             },
-            "browser": {"enabled": True, "ssrfPolicy": dict(_BROWSER_SSRF_POLICY)},
+            "browser": _browser_config(cdp_url),
             # Default "auto" consults gateway node.list before the in-process
             # browser service; without gateway credentials every browser call
             # fails ("gateway node.list requires credentials before opening a
             # websocket"). Force local dispatch.
             "gateway": {"nodes": {"browser": {"mode": "off"}}},
         }
-        if cdp_url:
-            bench_profile = {"cdpUrl": cdp_url, "attachOnly": True, "color": "#00AA00"}
-            config["browser"] = {
-                "enabled": True,
-                "ssrfPolicy": dict(_BROWSER_SSRF_POLICY),
-                "defaultProfile": "bench",
-                # OpenClaw auto-injects built-in `user`/`openclaw` profiles
-                # (operator's local Chrome) unless the config defines those
-                # names; models sometimes pass them explicitly and escape the
-                # bench browser. Pin both to the bench CDP endpoint.
-                "profiles": {
-                    "bench": bench_profile,
-                    "user": dict(bench_profile),
-                    "openclaw": dict(bench_profile),
-                },
-            }
         (state_dir / "openclaw.json").write_text(
             json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
     @staticmethod
-    def _build_command(full_prompt: str, task_id: str, timeout: int) -> list[str]:
+    def _build_command(
+        full_prompt: str, task_id: str, timeout: int, attempt: int = 0
+    ) -> list[str]:
         exe = "openclaw.cmd" if IS_WINDOWS else "openclaw"
+        # Retries need a fresh session key: reusing it resumes the failed
+        # attempt's transcript, so the model sees its own browser failures
+        # and gives up — and metrics double-count both attempts.
+        session_key = f"agent:main:bench-{task_id}"
+        if attempt:
+            session_key = f"{session_key}-r{attempt}"
         return [
             exe, "agent",
             "--local",   # embedded agent turn, no Gateway service required
             "--json",
-            "--session-key", f"agent:main:bench-{task_id}",
+            "--session-key", session_key,
             "-m", full_prompt,
             "--timeout", str(timeout),
         ]
@@ -577,13 +625,21 @@ class OpenClawAgent(CLIAgent):
                 logger.warning("Failed to generate api_logs for task %s: %s", task_id, exc)
 
         # A "successful" run whose browser never worked is a false success:
-        # the answer is a blocked notice, not a task result.
+        # the answer is a blocked notice, not a task result. Timeouts are
+        # excluded — flipping them would corrupt timeout stats and burn a
+        # second full timeout budget on retry.
         agent_metadata: dict[str, Any] = {}
-        outage = _detect_browser_outage(items, answer) if env_status == "success" else None
+        outage = (
+            _detect_browser_outage(items, answer)
+            if env_status == "success" and agent_done == "done"
+            else None
+        )
         if outage:
             env_status, agent_done = "failed", "error"
             error_message = f"OpenClaw browser tool unavailable ({outage})"
             agent_metadata["browser_outage"] = outage
+            if not answer:
+                answer = f"[Task Failed: {error_message}]"
 
         return AgentResult(
             task_id=task_id,
