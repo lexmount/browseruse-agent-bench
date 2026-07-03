@@ -77,6 +77,8 @@ def _install_fake_lexmount_sdk(
 
     monkeypatch.setattr(lexmount_module, "Lexmount", FakeLexmount)
     monkeypatch.setattr(lexmount_module, "write_session_state", fake_write_session_state)
+    # Unit tests use fake ws URLs; skip the real CDP readiness probe.
+    monkeypatch.setattr(lexmount_module, "_wait_for_cdp_ready", lambda *a, **kw: True)
     return state
 
 
@@ -330,3 +332,73 @@ def test_lexmount_official_proxy_profile_override(
     assert state["create_calls"] == [
         {"browser_mode": "normal", "official_proxy": True, "context": None}
     ]
+
+
+class TestCdpReadyProbe:
+    """Sessions can be created while the browser is still booting; open() must
+    wait for the CDP endpoint to actually accept connections."""
+
+    def _fake_ws_server(self, status_line: bytes):
+        import socket
+        import threading
+
+        server = socket.socket()
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        port = server.getsockname()[1]
+
+        def serve() -> None:
+            try:
+                conn, _ = server.accept()
+                conn.recv(1024)
+                conn.sendall(status_line + b"\r\n\r\n")
+                conn.close()
+            except OSError:
+                pass
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        return server, port
+
+    def test_handshake_ok_on_101(self) -> None:
+        server, port = self._fake_ws_server(b"HTTP/1.1 101 Switching Protocols")
+        try:
+            assert lexmount_module._cdp_handshake_ok(f"ws://127.0.0.1:{port}/devtools") is True
+        finally:
+            server.close()
+
+    def test_handshake_rejected_on_502(self) -> None:
+        server, port = self._fake_ws_server(b"HTTP/1.1 502 Bad Gateway")
+        try:
+            assert lexmount_module._cdp_handshake_ok(f"ws://127.0.0.1:{port}/devtools") is False
+        finally:
+            server.close()
+
+    def test_wait_polls_until_ready(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        outcomes = iter([False, False, True])
+        monkeypatch.setattr(lexmount_module, "_cdp_handshake_ok", lambda *a, **kw: next(outcomes))
+        monkeypatch.setattr(lexmount_module.time, "sleep", lambda s: None)
+        assert lexmount_module._wait_for_cdp_ready("wss://x/devtools", timeout_seconds=60) is True
+
+    def test_wait_times_out(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(lexmount_module, "_cdp_handshake_ok", lambda *a, **kw: False)
+        monkeypatch.setattr(lexmount_module.time, "sleep", lambda s: None)
+        assert lexmount_module._wait_for_cdp_ready("wss://x/devtools", timeout_seconds=0.01) is False
+
+    def test_open_raises_when_cdp_never_ready(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _install_fake_lexmount_sdk(monkeypatch)
+        monkeypatch.setattr(lexmount_module, "_wait_for_cdp_ready", lambda *a, **kw: False)
+        backend = LexmountBackend("lexmount")
+        with pytest.raises(RuntimeError, match="not ready"):
+            backend.open(agent_name="openclaw", agent_config={"lexmount_cdp_ready_timeout": 5})
+
+    def test_open_skips_probe_when_timeout_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _install_fake_lexmount_sdk(monkeypatch)
+
+        def _boom(*a: object, **kw: object) -> bool:
+            raise AssertionError("probe must not run when disabled")
+
+        monkeypatch.setattr(lexmount_module, "_wait_for_cdp_ready", _boom)
+        backend = LexmountBackend("lexmount")
+        ctx = backend.open(agent_name="openclaw", agent_config={"lexmount_cdp_ready_timeout": 0})
+        assert ctx.cdp_url
