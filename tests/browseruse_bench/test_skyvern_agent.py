@@ -9,6 +9,7 @@ import tomllib
 from pathlib import Path
 
 from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 from browseruse_bench.agents import skyvern as skyvern_module
 from browseruse_bench.agents.skyvern import SkyvernAgent, _build_local_chromium_args
@@ -437,7 +438,9 @@ def test_skyvern_extra_provides_psycopg_on_all_supported_pythons() -> None:
     # broke every first `bubench run --agent skyvern`.
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     skyvern_deps = pyproject["project"]["optional-dependencies"]["skyvern"]
-    psycopg_reqs = [req for req in map(Requirement, skyvern_deps) if req.name == "psycopg"]
+    psycopg_reqs = [
+        req for req in map(Requirement, skyvern_deps) if canonicalize_name(req.name) == "psycopg"
+    ]
 
     assert psycopg_reqs, "skyvern extra must declare psycopg for temporary Postgres mode"
     for minor in (11, 12, 13):

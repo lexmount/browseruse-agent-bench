@@ -53,6 +53,7 @@ dev = [
     "pytest-asyncio",
     "ruff",
     "mypy",
+    "packaging",
 ]
 
 # Agent-specific dependencies (use --extra to select)
