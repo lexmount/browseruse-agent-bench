@@ -44,42 +44,94 @@ MODEL_GENERATE_EXCEPTIONS: tuple[type[BaseException], ...] = tuple(
 # Failure Classification Constants
 # ============================================================================
 
-FAILURE_CLASSIFICATION_SYSTEM_PROMPT = """You are a professional browser Agent failure analysis expert. Your task is to analyze the root cause of the Agent's task failure based on the provided information and provide a specific classification category.
+M_TAXONOMY: dict[str, tuple[str, str]] = {
+    "M1.1": ("Task Reasoning", "Requirement Following"),
+    "M1.2": ("Task Reasoning", "Target Selection"),
+    "M1.3": ("Task Reasoning", "Evidence Grounding"),
+    "M2.1": ("Action Execution", "UI Misoperation"),
+    "M2.2": ("Action Execution", "Infinite Loop"),
+    "M2.3": ("Action Execution", "Format Breakdown"),
+    "M2.4": ("Action Execution", "Model Service Error"),
+    "M3.1": ("Web Constraints", "Bot Defense"),
+    "M3.2": ("Web Constraints", "Access Barrier"),
+    "M3.3": ("Web Constraints", "Site Limitation"),
+    "OTHER": ("Other", "Other"),
+}
 
-## Classification System
+# Deterministic mapping to the pre-fusion single-label codes, kept for
+# continuity of historical reports. "U" marks attribution-pipeline failures
+# and is never selectable by the judge.
+LEGACY_CATEGORY_MAP: dict[str, str] = {
+    "M1.1": "A1",
+    "M1.2": "A1",
+    "M1.3": "A1",
+    "M2.1": "A2",
+    "M2.2": "A4",
+    "M2.3": "A2",
+    "M2.4": "A3",
+    "M3.1": "B1",
+    "M3.2": "B2",
+    "M3.3": "C2",
+    "OTHER": "OTHER",
+    "U": "U",
+}
 
-**A: Agent Causes**
-- **A1**: Model capability insufficiency (reasoning quality of the LLM)
-  - Environment understanding error: Visual/Page understanding error (Misreading DOM text, truncated extraction, screenshot misunderstanding)
-  - Plan error: Intent parsing/Task planning failure (Model misunderstood task, missed key conditions, unreasonable path planning or missing key steps)
-    - Leading to wrong results: Wrong input content, arriving at wrong page, unable to auto-login etc.
 
-- **A2**: Agent Code BUG
-  - Coordinate mismatch between image and browser leading to wrong clicks, failed selection (dropdown) etc.
-  - Failed to parse model result, tool call failure etc., leading to execution failure or stuck
+def legacy_category(code: str) -> str:
+    """Map a unified taxonomy code to the pre-fusion A/B/C code."""
+    return LEGACY_CATEGORY_MAP.get(code, "U")
 
-- **A3**: Model service error (LLM API/infrastructure failure, not reasoning quality)
-  - No response from model service, API timeout, rate limiting (429 from the LLM provider)
-  - Context length exceeded, parameter error, content-filter rejection of the model call
 
-- **A4**: Agent paradigm issues (orchestration design, not a single wrong decision)
-  - Context engineering issue: Redundant or overly long context leading to model errors
-  - Prompt engineering issue: Used plan-and-execute, react, reflexion paradigms but insufficient for complex problems, leading to inaccurate planning or sudden stop (no new steps planned)
+FAILURE_CLASSIFICATION_SYSTEM_PROMPT = """You are an expert browser-agent benchmark analyst. A browser agent failed a benchmark task. Classify the failure into the taxonomy below.
 
-**B: Browser Causes**
-- **B1**: Triggered bot detection (Direct access forbidden or CAPTCHA triggered)
-- **B2**: Unable to login (Session expired, login forbidden by risk control etc.)
+Use the supplied task description, agent action history, agent final answer (including any runtime error), evaluator feedback, and screenshots. Prefer evidence from the trajectory and evaluator feedback over assumptions.
 
-**C: Website Causes (Unreachable)**
-- **C1**: Network interruption, geo-blocking
-- **C2**: Website unavailable (Website itself is down)
+## Taxonomy
+
+### M1 Task Reasoning
+Failures in task understanding, decision making, selection, evidence use, or safety judgment.
+
+- **M1.1 Requirement Following**: The agent misses explicit task requirements, required websites, required fields, required output format, required number of items, or the required safety/legal response. Use this for incomplete fulfillment of the user's objective even when the browser interactions were technically possible.
+- **M1.2 Target Selection**: The agent applies the wrong scope, entity, date, city, item, channel, season, product, ranking criterion, filter, sort order, or comparison logic. Use this when it reaches usable pages but chooses the wrong target or fails to enforce "latest", "highest", "most viewed", "top N", date windows, or cross-platform comparison criteria.
+- **M1.3 Evidence Grounding**: The agent fails to extract information that is available, extracts the wrong fields, mixes fields from different items, fabricates or hallucinates values, reports unverifiable data, or answers without enough evidence.
+
+### M2 Action Execution
+Failures in controlling the browser-agent loop, UI operations, recovery behavior, tool/output protocol, or the model service behind the agent. These are agent-side failures, not external website failures.
+
+- **M2.1 UI Misoperation**: The agent cannot operate normal UI elements: search boxes, buttons, date pickers, dropdowns, filters, tabs, popups, modals, pagination, detail-page links, window/tab switching, or page scrolling. Use this when the site is accessible but the agent cannot drive the interface to the needed state.
+- **M2.2 Infinite Loop**: The agent repeats ineffective actions, gets stuck, fails to recover from a bad page state, runs out of steps, times out, or completes only a small part of a long multi-item task due to poor workflow control. Use this for loops, dead ends, and poor long-horizon task management.
+- **M2.3 Format Breakdown**: Malformed JSON action output, invalid tool-call structure, parser failures, missing final response, failed file saving, corrupted artifacts, or required output files not being produced. Use this only when protocol or artifact generation is a direct cause of failure.
+- **M2.4 Model Service Error**: The LLM service behind the agent fails: no response from the model service, API timeout, provider rate limiting, context length exceeded, parameter error, or content-filter rejection of the agent's own model calls. Infrastructure failure, not reasoning quality.
+
+### M3 Web Constraints
+Failures mainly caused by external web environment constraints. These may still expose agent limits, but the primary obstacle is the website or access environment.
+
+- **M3.1 Bot Defense**: The target site blocks automation with CAPTCHA, Cloudflare, PerimeterX, slider verification, "robot or human", 403 caused by automation, rate limits, "Too Many Requests", security control, abnormal traffic, or similar bot-detection defenses.
+- **M3.2 Access Barrier**: The needed content or action is blocked by login, session expiry, SMS/QR authentication, membership, VIP, paywall, permissions, account-only views, paid downloads, copyright restrictions, or regional access restrictions.
+- **M3.3 Site Limitation**: The site is down, unreachable, returns 404/server errors, has empty DOM or SPA rendering failure, does not expose the requested content, lacks the requested filter/data, or the target content genuinely does not exist on the specified site.
+
+### OTHER
+Use OTHER only when none of the categories captures the core failure. If OTHER is used, provide a short phrase in other_phrase. Do not use OTHER for common combinations of the above categories.
+
+## Multi-label rules
+
+- Assign every category that substantially contributed to the failed outcome; one or multiple codes.
+- Choose primary_code as the most direct cause that explains why the run failed.
+- If the agent is blocked by CAPTCHA or rate limiting, include M3.1 even if it also fails later.
+- If the page is accessible but the agent misses filters, sorting, or target selection, use M1.2, not M3.3.
+- If the page is accessible and the answer is unsupported, use M1.3.
+- If the agent cannot click or manipulate a normal accessible interface, use M2.1.
+- If repeated ineffective attempts, timeout, or step exhaustion prevent completion, use M2.2.
+- If the run stops because of malformed output or missing artifacts, use M2.3; if the model service itself errored (timeout, rate limit, content filter), use M2.4.
 
 ## Output Format
 
-Please strictly output a JSON object containing the following fields:
+Strictly output a JSON object:
 {
-  "reasoning": "<Detailed analysis process, explaining how you reached the conclusion based on task description, screenshots, action history and evaluation feedback>",
-  "category": "<Classification category, must be one of: A1, A2, A3, A4, B1, B2, C1, C2>"
+  "reasoning": "<How you reached the conclusion from task, screenshots, action history and evaluation feedback>",
+  "codes": ["<every contributing category code>"],
+  "primary_code": "<the single most direct cause>",
+  "other_phrase": "<short phrase when OTHER is used, else null>"
 }
 """
 
@@ -109,9 +161,15 @@ FAILURE_CLASSIFICATION_RESPONSE_FORMAT = {
             "type": "object",
             "properties": {
                 "reasoning": {"type": "string"},
-                "category": {"type": "string", "enum": ["A1", "A2", "A3", "A4", "B1", "B2", "C1", "C2"]},
+                "codes": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": list(M_TAXONOMY)},
+                    "minItems": 1,
+                },
+                "primary_code": {"type": "string", "enum": list(M_TAXONOMY)},
+                "other_phrase": {"type": ["string", "null"]},
             },
-            "required": ["reasoning", "category"],
+            "required": ["reasoning", "codes", "primary_code"],
             "additionalProperties": False,
         },
     },
@@ -251,52 +309,60 @@ def classify_single_failure(
         logger.error("   [FAILED] Classification failed: %s", exc)
         return {
             # "U" (unclassified) keeps classification-pipeline failures out of
-            # the A* agent-cause buckets; A3 is reserved for LLM service errors
-            # that happened during the agent run itself.
+            # the M buckets; M2.4 is reserved for LLM service errors that
+            # happened during the agent run itself.
             "category": "U",
+            "codes": [],
             "reasoning": f"Classification error: {exc}",
+            "other_phrase": None,
             "raw_response": "",
         }
 
     # Parse response
-    category = None
-    reasoning = ""
+    result = _parse_classification_response(response)
+    result["raw_response"] = response
+    return result
 
+
+def _parse_classification_response(response: str) -> dict[str, Any]:
+    """Parse a multi-label classification response, tolerating truncation."""
     try:
         parsed = json.loads(response)
     except json.JSONDecodeError:
         parsed = None
 
+    codes: list[str] = []
+    primary = None
+    reasoning = ""
+    other_phrase = None
     if isinstance(parsed, dict):
-        category = parsed.get("category")
+        codes = [c for c in parsed.get("codes") or [] if c in M_TAXONOMY]
+        primary = parsed.get("primary_code")
         reasoning = parsed.get("reasoning", "") or ""
+        other_phrase = parsed.get("other_phrase") or None
 
-    if not category:
-        category_match = re.search(r"Category[：:]\s*([ABC][1-4]?)", response, re.IGNORECASE)
-        if category_match:
-            category = category_match.group(1).upper()
+    if primary not in M_TAXONOMY:
+        # Recover from a max_tokens-truncated JSON response: grab the
+        # (possibly unterminated) primary_code or first codes entry directly.
+        match = re.search(r'"primary_code"\s*:\s*"?(M[123]\.[1-4]|OTHER)', response)
+        if not match:
+            match = re.search(r'"codes"\s*:\s*\[\s*"(M[123]\.[1-4]|OTHER)', response)
+        primary = match.group(1) if match else None
 
-    if not category:
-        # Recover from a max_tokens-truncated JSON response: the category key is
-        # emitted last, so grab its (possibly unterminated) value directly.
-        json_match = re.search(r'"category"\s*:\s*"?([ABC][12])', response)
-        if json_match:
-            category = json_match.group(1).upper()
+    if primary not in M_TAXONOMY and codes:
+        primary = codes[0]
+    if primary not in M_TAXONOMY:
+        logger.warning("   [WARNING] Invalid classification response, defaulting to U")
+        primary = "U"
+    if primary != "U" and primary not in codes:
+        codes.insert(0, primary)
 
-    if not reasoning:
-        reasoning_match = re.search(
-            r"Reasoning[：:]\s*(.+?)(?=Category[：:]|$)", response, re.IGNORECASE | re.DOTALL
-        )
-        if reasoning_match:
-            reasoning = reasoning_match.group(1).strip()
-
-    # Validate category
-    valid_categories = ["A1", "A2", "A3", "A4", "B1", "B2", "C1", "C2"]
-    if category not in valid_categories:
-        logger.warning(f"   [WARNING] Invalid category: {category}, defaulting to U")
-        category = "U"
-
-    return {"category": category, "reasoning": reasoning, "raw_response": response}
+    return {
+        "category": primary,
+        "codes": codes,
+        "reasoning": reasoning,
+        "other_phrase": other_phrase,
+    }
 
 
 def _load_agent_result(trajectories_dir: Path, task_id: str) -> dict[str, Any]:
@@ -371,7 +437,10 @@ def classify_failure_case(
         result["evaluation_details"] = details
     details["failure_classification"] = {
         "category": classification["category"],
+        "codes": classification["codes"],
         "reasoning": classification["reasoning"],
+        "other_phrase": classification["other_phrase"],
+        "legacy_category": legacy_category(classification["category"]),
         "raw_response": classification["raw_response"],
     }
 
