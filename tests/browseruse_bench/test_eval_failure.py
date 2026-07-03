@@ -22,8 +22,8 @@ class _CapturingModel:
         return json.dumps(
             {
                 "reasoning": "stub",
-                "codes": ["M3.1", "M2.2"],
-                "primary_code": "M3.1",
+                "codes": ["E1", "H3"],
+                "primary_code": "E1",
                 "other_phrase": None,
             }
         )
@@ -46,9 +46,9 @@ def test_classifier_multilabel_primary_and_legacy(tmp_path: Path) -> None:
 
     classify_failure_case(record, tmp_path, model)
 
-    assert record["failure_category"] == "M3.1"
+    assert record["failure_category"] == "E1"
     fc = record["evaluation_details"]["failure_classification"]
-    assert fc["codes"] == ["M3.1", "M2.2"]
+    assert fc["codes"] == ["E1", "H3"]
     assert fc["legacy_category"] == "B1"
 
 
@@ -65,10 +65,11 @@ def test_classifier_drops_invalid_codes_and_falls_back_to_u(tmp_path: Path) -> N
 
 
 def test_legacy_mapping_table() -> None:
-    assert legacy_category("M1.2") == "A1"
-    assert legacy_category("M2.2") == "A4"
-    assert legacy_category("M2.4") == "A3"
-    assert legacy_category("M3.3") == "C2"
+    assert legacy_category("M2") == "A1"
+    assert legacy_category("H3") == "A4"
+    assert legacy_category("M4") == "A3"
+    assert legacy_category("E3") == "C2"
+    assert legacy_category("H1") == "A2"
     assert legacy_category("U") == "U"
     assert legacy_category("nonsense") == "U"
 
@@ -105,7 +106,7 @@ def test_classifier_reads_lexbench_record_fields(tmp_path: Path) -> None:
     assert "No action history" not in prompt
     assert "No response" not in prompt
     assert "No evaluation feedback" not in prompt
-    assert record["failure_category"] == "M3.1"
+    assert record["failure_category"] == "E1"
 
 
 def test_classifier_prefers_record_fields_over_result_json(tmp_path: Path) -> None:
@@ -135,14 +136,14 @@ def test_classifier_prefers_record_fields_over_result_json(tmp_path: Path) -> No
     assert "fallback action" not in prompt
 
 
-class _M24Model(_CapturingModel):
+class _M4Model(_CapturingModel):
     def generate(self, messages: list[Any], **_kwargs: Any) -> str:
         self.captured_messages = messages
         return json.dumps(
             {
                 "reasoning": "LLM API timed out repeatedly during the run",
-                "codes": ["M2.4"],
-                "primary_code": "M2.4",
+                "codes": ["M4"],
+                "primary_code": "M4",
                 "other_phrase": None,
             }
         )
@@ -156,9 +157,9 @@ class _FailingModel(_CapturingModel):
 def test_classifier_accepts_model_service_error_code(tmp_path: Path) -> None:
     record = {"task_id": "1", "task": "some task", "predicted_label": 0, "evaluation_details": {}}
 
-    classify_failure_case(record, tmp_path, _M24Model())
+    classify_failure_case(record, tmp_path, _M4Model())
 
-    assert record["failure_category"] == "M2.4"
+    assert record["failure_category"] == "M4"
     assert record["evaluation_details"]["failure_classification"]["legacy_category"] == "A3"
 
 
@@ -178,7 +179,7 @@ class _TruncatedModel(_CapturingModel):
 
     def generate(self, messages: list[Any], **_kwargs: Any) -> str:
         self.captured_messages = messages
-        return '{"reasoning":"页面被风控拦截，导航全部超时……","codes":["M3.1"],"primary_code":"M3.1'
+        return '{"reasoning":"页面被风控拦截，导航全部超时……","codes":["E1"],"primary_code":"E1'
 
 
 def test_classifier_recovers_category_from_truncated_json(tmp_path: Path) -> None:
@@ -188,7 +189,7 @@ def test_classifier_recovers_category_from_truncated_json(tmp_path: Path) -> Non
 
     classify_failure_case(record, tmp_path, model)
 
-    assert record["failure_category"] == "M3.1"
+    assert record["failure_category"] == "E1"
 
 
 def test_classifier_handles_missing_result_json(tmp_path: Path) -> None:
