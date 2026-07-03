@@ -5,10 +5,14 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import tomllib
 from pathlib import Path
+
+from packaging.requirements import Requirement
 
 from browseruse_bench.agents import skyvern as skyvern_module
 from browseruse_bench.agents.skyvern import SkyvernAgent, _build_local_chromium_args
+from browseruse_bench.utils import REPO_ROOT
 
 
 def test_close_runtime_resources_closes_browser_and_client() -> None:
@@ -424,3 +428,23 @@ class TestExtractUsageFromResponseBlob:
         assert usage is not None
         assert usage["prompt_tokens"] == 14000  # anthropic-style fold
         assert usage["cached_tokens"] == 6000
+
+
+def test_skyvern_extra_provides_psycopg_on_all_supported_pythons() -> None:
+    # Temporary-Postgres mode imports psycopg v3 regardless of Python version,
+    # so the skyvern extra must install it on every version we support. A
+    # python_full_version marker here once skipped psycopg on 3.11/3.12 and
+    # broke every first `bubench run --agent skyvern`.
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    skyvern_deps = pyproject["project"]["optional-dependencies"]["skyvern"]
+    psycopg_reqs = [req for req in map(Requirement, skyvern_deps) if req.name == "psycopg"]
+
+    assert psycopg_reqs, "skyvern extra must declare psycopg for temporary Postgres mode"
+    for minor in (11, 12, 13):
+        environment = {
+            "python_version": f"3.{minor}",
+            "python_full_version": f"3.{minor}.0",
+        }
+        assert any(
+            req.marker is None or req.marker.evaluate(environment) for req in psycopg_reqs
+        ), f"skyvern extra does not install psycopg on Python 3.{minor}"
