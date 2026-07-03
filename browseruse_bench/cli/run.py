@@ -490,32 +490,68 @@ def _cleanup_orphaned_browser_session(
         logger.error("Parent-side browser session cleanup failed (exit code=%s)", result.returncode)
 
 
-def _is_task_env_success_by_result_json(
+# Filesystem mtime granularity / clock-step slack for the freshness check.
+_RESULT_MTIME_SLACK_SECONDS = 2
+
+
+def _read_fresh_result_json(
     task_id: str,
     output_dir: Path,
     newer_than: float | None = None,
-) -> bool:
-    """True when result.json holds a usable non-env-failed result.
+) -> dict[str, Any] | None:
+    """Parse tasks/<id>/result.json when non-empty and fresh.
 
     ``newer_than`` (epoch seconds) guards against result.json files left over
     from a previous run of the same output directory: only files modified
-    after it count.
+    after it (minus a small mtime slack) count.
     """
     result_file = output_dir / "tasks" / task_id / "result.json"
     try:
         stat = result_file.stat()
     except OSError:
-        return False
+        return None
     if stat.st_size == 0:
-        return False
-    if newer_than is not None and stat.st_mtime < newer_than:
-        return False
+        return None
+    if newer_than is not None and stat.st_mtime < newer_than - _RESULT_MTIME_SLACK_SECONDS:
+        return None
     try:
         result = json.loads(result_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        return None
+    return result if isinstance(result, dict) else None
+
+
+def _is_task_env_success_by_result_json(
+    task_id: str,
+    output_dir: Path,
+    newer_than: float | None = None,
+) -> bool:
+    """True when result.json holds a usable non-env-failed result."""
+    result = _read_fresh_result_json(task_id, output_dir, newer_than)
+    if result is None:
         return False
     status = result.get("env_status") or result.get("status")
     return status == "success" and not result.get("error")
+
+
+def _is_task_result_terminal(
+    task_id: str,
+    output_dir: Path,
+    newer_than: float | None = None,
+) -> bool:
+    """True when result.json is complete (success OR failure): the runner is done."""
+    result = _read_fresh_result_json(task_id, output_dir, newer_than)
+    return result is not None and bool(result.get("env_status") or result.get("status"))
+
+
+def _watchdog_deadline_seconds(task_timeout: int) -> int:
+    """Hard deadline for one agent_runner subprocess.
+
+    Agents may legitimately run one full-timeout retry on top of the first
+    attempt (e.g. OpenClaw outage_retries=1), so cover two attempts plus
+    grace; this still bounds runaway runners.
+    """
+    return 2 * task_timeout + _TASK_RUNNER_WATCHDOG_GRACE_SECONDS
 
 
 def _wait_for_task_runner(
@@ -529,12 +565,13 @@ def _wait_for_task_runner(
 
     Some agent CLIs (e.g. OpenClaw) spawn helpers that can keep agent_runner
     alive after result.json is complete. Returns ``(returncode,
-    killed_after_result)``; the latter is True when the runner was reaped
-    after its result.json already reported success. A hard deadline of task
-    timeout plus grace reaps runaway runners either way.
+    reaped_after_result)``; the latter is True when the runner was reaped
+    after its result.json was already terminal (success or failure). A hard
+    deadline covering the agent-level retry budget reaps runaway runners
+    either way.
     """
     started_at = time.time()
-    watchdog_deadline = time.monotonic() + task_timeout + _TASK_RUNNER_WATCHDOG_GRACE_SECONDS
+    watchdog_deadline = time.monotonic() + _watchdog_deadline_seconds(task_timeout)
     result_seen_at: float | None = None
     while True:
         try:
@@ -542,13 +579,13 @@ def _wait_for_task_runner(
         except subprocess.TimeoutExpired:
             pass
         now = time.monotonic()
-        if not _is_task_env_success_by_result_json(task_id, output_dir, newer_than=started_at):
+        if not _is_task_result_terminal(task_id, output_dir, newer_than=started_at):
             result_seen_at = None
         elif result_seen_at is None:
             result_seen_at = now
         elif now - result_seen_at >= _TASK_RUNNER_RESULT_EXIT_GRACE_SECONDS:
             logger.warning(
-                "[WATCHDOG] %s result.json is already successful but agent_runner "
+                "[WATCHDOG] %s result.json is already terminal but agent_runner "
                 "is still alive after %ss; terminating the task process group",
                 prefix,
                 _TASK_RUNNER_RESULT_EXIT_GRACE_SECONDS,
@@ -558,8 +595,8 @@ def _wait_for_task_runner(
             return (returncode if returncode is not None else -1), True
         if now >= watchdog_deadline:
             logger.error(
-                "[TIMEOUT] %s agent_runner exceeded watchdog timeout "
-                "(task timeout %ss + grace %ss); terminating",
+                "[TIMEOUT] %s agent_runner exceeded watchdog deadline "
+                "(2 x task timeout %ss + grace %ss); terminating",
                 prefix,
                 task_timeout,
                 _TASK_RUNNER_WATCHDOG_GRACE_SECONDS,
@@ -1049,16 +1086,21 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
             stdout_thread.start()
 
             task_timeout = resolve_timeout_value(args.timeout, task_inline_cfg or {})
-            returncode, killed_after_result = _wait_for_task_runner(
+            returncode, reaped_after_result = _wait_for_task_runner(
                 proc, current_task_id, output_dir, task_timeout, prefix
             )
             stdout_thread.join(timeout=5)
 
-            if killed_after_result:
+            if reaped_after_result:
+                if _is_task_env_success_by_result_json(current_task_id, output_dir):
+                    logger.info(
+                        "[SUCCESS] %s completed; killed lingering runner after result", prefix
+                    )
+                    return True
                 logger.info(
-                    "[SUCCESS] %s completed; killed lingering runner after result", prefix
+                    "[FAILED] %s result is terminal but failed; killed lingering runner", prefix
                 )
-                return True
+                return False
 
             if returncode == 0:
                 logger.info("[SUCCESS] %s completed", prefix)

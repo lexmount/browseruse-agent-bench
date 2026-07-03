@@ -490,6 +490,30 @@ class TestOpenClawAgentRunTask:
         assert "not found" in (result.error or "").lower()
 
 
+class TestSessionResultTerminality:
+    def test_tool_call_after_text_message_is_not_terminal(self, tmp_path: Path) -> None:
+        # A text-only assistant message followed by more tool calls is
+        # mid-turn commentary, not a final answer; treating it as terminal
+        # would let the stop predicate kill a healthy run.
+        session_dir = tmp_path / ".openclaw-state" / "agents" / "main" / "sessions"
+        session_dir.mkdir(parents=True)
+        rows = [
+            {"type": "message", "message": {"role": "assistant", "content": [
+                {"type": "text", "text": "I will open the site now."},
+            ]}},
+            {"type": "message", "message": {"role": "assistant", "content": [
+                {"type": "toolCall", "id": "c1", "name": "browser",
+                 "arguments": {"action": "open", "url": "https://example.com"}},
+            ]}},
+            {"type": "message", "message": {"role": "toolResult", "toolCallId": "c1",
+                "content": [{"type": "text", "text": "opened"}]}},
+        ]
+        (session_dir / "bench-t1.jsonl").write_text(
+            "\n".join(json.dumps(row) for row in rows), encoding="utf-8"
+        )
+        assert OpenClawAgent._session_result(tmp_path, "bench-t1") is None
+
+
 class TestCliVersionRecording:
     def test_version_recorded_in_agent_metadata(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

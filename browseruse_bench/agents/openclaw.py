@@ -341,12 +341,63 @@ def _copy_media_paths(text: str, trajectory_dir: Path, saved: list[str]) -> None
             logger.warning("Failed to copy screenshot %s: %s", source, exc)
 
 
+def _terminal_assistant_answer(raw_lines: list[str]) -> tuple[str, dict[str, Any]]:
+    """Return (answer, usage) from the last text-only assistant message.
+
+    Terminal means nothing but tool plumbing follows it: a tool call AFTER a
+    text-only message marks that text as mid-turn commentary, not an answer
+    (returning it would let the stop predicate kill a healthy run).
+    """
+    answer = ""
+    usage: dict[str, Any] = {}
+    for raw_line in raw_lines:
+        try:
+            obj = json.loads(raw_line)
+        except json.JSONDecodeError:
+            continue
+        message = obj.get("message")
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        has_tool_call = any(
+            isinstance(block, dict) and block.get("type") == "toolCall" for block in content
+        )
+        if has_tool_call:
+            answer, usage = "", {}
+            continue
+        texts = [
+            str(block.get("text", ""))
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text" and block.get("text")
+        ]
+        if texts:
+            answer = "\n".join(texts).strip()
+            raw_usage = message.get("usage")
+            usage = raw_usage if isinstance(raw_usage, dict) else {}
+    return answer, usage
+
+
+def _openclaw_exe() -> str:
+    """The one place that knows the CLI executable name per platform."""
+    return "openclaw.cmd" if IS_WINDOWS else "openclaw"
+
+
+def _session_file_path(task_workspace: Path, session_id: str) -> Path:
+    """The one place that knows OpenClaw's per-task session JSONL layout."""
+    return (
+        task_workspace / ".openclaw-state" / "agents" / "main" / "sessions"
+        / f"{session_id}.jsonl"
+    )
+
+
 @cache
 def _openclaw_cli_version() -> str:
     """One `openclaw --version` per process; compat failures (e.g. rejected
     CLI flags or config fields) are version-dependent, so every result must
     record which CLI it ran against."""
-    exe = "openclaw.cmd" if IS_WINDOWS else "openclaw"
+    exe = _openclaw_exe()
     try:
         proc = subprocess.run(
             [exe, "--version"], capture_output=True, text=True, timeout=30, check=False
@@ -504,11 +555,21 @@ class OpenClawAgent(CLIAgent):
         t_start = time.monotonic()
 
         session_id = self._session_id(task_id, attempt)
+        # The predicate runs per output line; the filesystem fallbacks
+        # (re-reading stdout.txt/stderr.txt and parsing the session JSONL)
+        # are too expensive for that cadence, so probe them at most once a
+        # second — the wait loop re-evaluates every 0.25s regardless.
+        next_probe_at = [0.0]
 
         def _has_result(lines: list[str]) -> bool:
+            if _stdout_json(lines) is not None:
+                return True
+            now = time.monotonic()
+            if now < next_probe_at[0]:
+                return False
+            next_probe_at[0] = now + 1.0
             return (
-                _stdout_json(lines) is not None
-                or self._workspace_json(task_workspace) is not None
+                self._workspace_json(task_workspace) is not None
                 or self._session_result(task_workspace, session_id) is not None
             )
 
@@ -583,6 +644,11 @@ class OpenClawAgent(CLIAgent):
     ) -> None:
         """Write the per-task openclaw.json (provider, workspace, tools, browser)."""
         state_dir.mkdir(parents=True, exist_ok=True)
+        if agent_config.get("llm_timeout"):
+            logger.warning(
+                "llm_timeout is ignored: provider timeoutSeconds was dropped for "
+                "OpenClaw CLI config-schema compatibility"
+            )
         provider_api = str(agent_config.get("api") or "openai-completions")
         # OpenClaw's auto-detection disables streaming usage for custom
         # providers, which zeroes all token accounting; the bench gateway
@@ -653,7 +719,7 @@ class OpenClawAgent(CLIAgent):
         agent_config: dict[str, Any],
         attempt: int = 0,
     ) -> list[str]:
-        exe = "openclaw.cmd" if IS_WINDOWS else "openclaw"
+        exe = _openclaw_exe()
         cmd = [
             # --dev keeps the embedded gateway/browser-control ports off the
             # defaults, so bench runs never collide with an operator's own
@@ -799,42 +865,14 @@ class OpenClawAgent(CLIAgent):
         as the terminal answer so the benchmark can terminate the lingering
         process group and continue.
         """
-        session_file = (
-            task_workspace / ".openclaw-state" / "agents" / "main" / "sessions"
-            / f"{session_id}.jsonl"
-        )
+        session_file = _session_file_path(task_workspace, session_id)
         if not session_file.is_file():
             return None
         try:
             raw_lines = session_file.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
             return None
-
-        answer = ""
-        usage: dict[str, Any] = {}
-        for raw_line in raw_lines:
-            try:
-                obj = json.loads(raw_line)
-            except json.JSONDecodeError:
-                continue
-            message = obj.get("message")
-            if not isinstance(message, dict) or message.get("role") != "assistant":
-                continue
-            content = message.get("content")
-            if not isinstance(content, list):
-                continue
-            has_tool_call = any(
-                isinstance(block, dict) and block.get("type") == "toolCall" for block in content
-            )
-            texts = [
-                str(block.get("text", ""))
-                for block in content
-                if isinstance(block, dict) and block.get("type") == "text" and block.get("text")
-            ]
-            if texts and not has_tool_call:
-                answer = "\n".join(texts).strip()
-                raw_usage = message.get("usage")
-                usage = raw_usage if isinstance(raw_usage, dict) else {}
+        answer, usage = _terminal_assistant_answer(raw_lines)
         if not answer:
             return None
 
@@ -874,11 +912,7 @@ class OpenClawAgent(CLIAgent):
         session_id = agent_meta.get("sessionId") if agent_meta else None
         if not session_id:
             return []
-        fallback = (
-            task_workspace / ".openclaw-state" / "agents" / "main" / "sessions"
-            / f"{session_id}.jsonl"
-        )
-        return _normalize_session_items(fallback)
+        return _normalize_session_items(_session_file_path(task_workspace, str(session_id)))
 
     @staticmethod
     def _usage_from(result_obj: dict[str, Any]) -> AgentUsage | None:

@@ -209,6 +209,30 @@ class TestRunSubprocess:
         assert any("RESULT_ON_STDERR" in line for line in lines)
         assert elapsed < 10
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="signal semantics differ on Windows")
+    def test_late_predicate_match_does_not_rewrite_timeout(self, tmp_path: Path) -> None:
+        # A dying process can flush a line matching the predicate AFTER the
+        # timeout was decided; the run must stay a timeout, not a success.
+        agent = self._agent()
+        code = (
+            "import signal, sys, time\n"
+            "signal.signal(signal.SIGTERM, lambda s, f: print('RESULT_READY', flush=True))\n"
+            "print('started', flush=True)\n"
+            "time.sleep(60)\n"
+        )
+        rc, lines, err = agent._run_subprocess(
+            [sys.executable, "-u", "-c", code],
+            timeout=1,
+            task_workspace=tmp_path,
+            stop_predicate=lambda seen: any("RESULT_READY" in line for line in seen),
+            terminate_process_group=True,
+            early_stop_grace_seconds=2,
+            kill_grace_seconds=2,
+        )
+        assert err is not None
+        assert "Timeout" in err
+        assert rc == -1
+
     @pytest.mark.skipif(sys.platform == "win32", reason="process-group semantics differ on Windows")
     def test_stop_predicate_terminates_process_group_children(self, tmp_path: Path) -> None:
         import time as time_module

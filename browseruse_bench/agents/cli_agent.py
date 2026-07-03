@@ -10,6 +10,7 @@ from this class instead of BaseAgent directly. It provides:
 
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import subprocess
@@ -22,6 +23,33 @@ from typing import TextIO
 
 from browseruse_bench.agents.base import BaseAgent
 from browseruse_bench.utils import IS_WINDOWS
+
+logger = logging.getLogger(__name__)
+
+
+def _escalate_stop(
+    process: subprocess.Popen,
+    signal_group: Callable[[int], None],
+    early_grace_seconds: float,
+    kill_grace_seconds: float,
+) -> int:
+    """Wait for a process already sent SIGTERM, escalating to SIGKILL.
+
+    Returns the exit code, or -1 when the process outlives even the
+    post-SIGKILL grace (e.g. stuck in uninterruptible I/O) — never raises,
+    so a captured result is not lost to a shutdown hiccup.
+    """
+    try:
+        return process.wait(timeout=early_grace_seconds)
+    except subprocess.TimeoutExpired:
+        signal_group(getattr(signal, "SIGKILL", signal.SIGTERM))
+    try:
+        return process.wait(timeout=kill_grace_seconds)
+    except subprocess.TimeoutExpired:
+        logger.error(
+            "Process %s survived SIGKILL for %ss; abandoning wait", process.pid, kill_grace_seconds
+        )
+        return -1
 
 
 class CLIAgent(BaseAgent):
@@ -119,6 +147,9 @@ class CLIAgent(BaseAgent):
                 }
                 if terminate_process_group:
                     if IS_WINDOWS:
+                        # Known limitation: without a CTRL_BREAK_EVENT sender
+                        # only the direct child is terminated on Windows;
+                        # helper processes are reaped by the runner watchdog.
                         popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
                     else:
                         popen_kwargs["start_new_session"] = True
@@ -132,8 +163,11 @@ class CLIAgent(BaseAgent):
                             return
                         except ProcessLookupError:
                             return
-                        except OSError:
-                            pass
+                        except OSError as exc:
+                            logger.error(
+                                "killpg(%s, %s) failed: %s; falling back to the direct child",
+                                process.pid, sig, exc,
+                            )
                     with suppress(ProcessLookupError, OSError):
                         kill_signal = getattr(signal, "SIGKILL", None)
                         if kill_signal is not None and sig == kill_signal:
@@ -181,11 +215,10 @@ class CLIAgent(BaseAgent):
                 deadline = time.monotonic() + timeout
                 while True:
                     if stopped_early:
-                        try:
-                            returncode = process.wait(timeout=early_stop_grace_seconds)
-                        except subprocess.TimeoutExpired:
-                            _signal_process_group(getattr(signal, "SIGKILL", signal.SIGTERM))
-                            returncode = process.wait(timeout=kill_grace_seconds)
+                        returncode = _escalate_stop(
+                            process, _signal_process_group,
+                            early_stop_grace_seconds, kill_grace_seconds,
+                        )
                         break
                     if stop_predicate and not stopped_early and stop_predicate(stdout_lines):
                         stopped_early = True
@@ -198,12 +231,10 @@ class CLIAgent(BaseAgent):
                         if time.monotonic() < deadline:
                             continue
                         _signal_process_group(signal.SIGTERM)
-                        try:
-                            process.wait(timeout=early_stop_grace_seconds)
-                        except subprocess.TimeoutExpired:
-                            _signal_process_group(getattr(signal, "SIGKILL", signal.SIGTERM))
-                            with suppress(subprocess.TimeoutExpired):
-                                process.wait(timeout=kill_grace_seconds)
+                        _escalate_stop(
+                            process, _signal_process_group,
+                            early_stop_grace_seconds, kill_grace_seconds,
+                        )
                         execution_error = f"Timeout after {timeout} seconds"
                         returncode = -1
                         break
@@ -211,9 +242,11 @@ class CLIAgent(BaseAgent):
                 t_out.join(timeout=kill_grace_seconds)
                 t_err.join(timeout=kill_grace_seconds)
 
-                if stopped_early:
+                # A drain thread can match the predicate on the dying
+                # process's final output flush AFTER the timeout branch has
+                # already decided; never rewrite a timeout into a success.
+                if stopped_early and execution_error is None:
                     returncode = 0
-                    execution_error = None
 
         except FileNotFoundError:
             raise

@@ -125,3 +125,29 @@ class TestWaitForTaskRunner:
         assert killed is False
         assert time.monotonic() - t0 < 30
         assert proc.poll() is not None
+
+    def test_watchdog_deadline_covers_one_agent_level_retry(self) -> None:
+        # OpenClaw legitimately runs up to two full-timeout attempts
+        # (outage_retries=1); a single-attempt deadline would kill the retry.
+        assert run_module._watchdog_deadline_seconds(600) >= 2 * 600
+
+    def test_failed_terminal_result_also_reaps_lingering_runner(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # A complete result.json reporting failure is just as terminal as a
+        # success; the runner must not be held until the hard deadline.
+        import threading
+
+        monkeypatch.setattr(run_module, "_TASK_RUNNER_RESULT_EXIT_GRACE_SECONDS", 1)
+        proc = _spawn_sleeper()
+        timer = threading.Timer(
+            1.0, _write_result, args=(tmp_path, "t1"), kwargs={"env_status": "failed"}
+        )
+        timer.start()
+        t0 = time.monotonic()
+        rc, killed = _wait_for_task_runner(
+            proc, "t1", tmp_path, task_timeout=60, prefix="Task t1"
+        )
+        assert killed is True
+        assert time.monotonic() - t0 < 30
+        assert proc.poll() is not None
