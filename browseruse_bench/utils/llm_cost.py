@@ -27,6 +27,10 @@ DEFAULT_PRICE_CACHE_TTL_SECONDS = 86400
 DEFAULT_HTTP_TIMEOUT_SECONDS = 10
 
 _PRICE_CACHE: dict[str, tuple[float, dict[str, dict[str, Any]]]] = {}
+# Parsed custom pricing table keyed by file path, invalidated by mtime — the
+# eval summary path resolves cost per usage record and must not re-read the
+# YAML each time.
+_CUSTOM_PRICING_CACHE: dict[str, tuple[float, dict[str, dict[str, Any]]]] = {}
 
 
 def _as_mapping_dict(value: Any) -> dict[str, Any] | None:
@@ -183,6 +187,15 @@ def _load_custom_model_pricing_table() -> dict[str, dict[str, Any]]:
     if not DEFAULT_CUSTOM_MODEL_PRICING_FILE.exists():
         return {}
 
+    cache_key = str(DEFAULT_CUSTOM_MODEL_PRICING_FILE)
+    try:
+        mtime = DEFAULT_CUSTOM_MODEL_PRICING_FILE.stat().st_mtime
+    except OSError:
+        mtime = -1.0
+    cache_hit = _CUSTOM_PRICING_CACHE.get(cache_key)
+    if cache_hit and cache_hit[0] == mtime:
+        return cache_hit[1]
+
     try:
         payload = yaml.safe_load(DEFAULT_CUSTOM_MODEL_PRICING_FILE.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
@@ -208,7 +221,9 @@ def _load_custom_model_pricing_table() -> dict[str, dict[str, Any]]:
         normalized_entry = {key: value for key, value in normalized_entry.items() if value is not None}
         price_table[model_key] = normalized_entry
 
-    return _normalize_price_table(price_table)
+    normalized_table = _normalize_price_table(price_table)
+    _CUSTOM_PRICING_CACHE[cache_key] = (mtime, normalized_table)
+    return normalized_table
 
 
 def load_litellm_price_table() -> dict[str, dict[str, Any]]:

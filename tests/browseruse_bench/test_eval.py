@@ -155,3 +155,46 @@ class TestEvaluationCostPricing:
         assert agg["total_completion_tokens"] == 150
         # 1500 * 2e-6 + 150 * 8e-6
         assert agg["costs"]["total"] == pytest.approx(0.0042)
+
+
+class TestEvaluationCostRobustness:
+    def test_zero_token_usage_with_total_cost_returns_none(self):
+        from browseruse_bench.eval.summary import calculate_evaluation_cost
+
+        # Already-enriched zero-token usage that carries a total_cost key must
+        # not crash on the enriched-only keys it lacks.
+        usage = {
+            "total_prompt_tokens": 0,
+            "total_completion_tokens": 0,
+            "total_tokens": 0,
+            "total_cost": 0.02,
+        }
+        assert calculate_evaluation_cost(usage, model_name="judge-model", price_table={}) is None
+
+    def test_aggregate_accounts_cache_creation_consistently(self):
+        from browseruse_bench.eval.summary import aggregate_evaluation_costs
+
+        price_table = {
+            "judge-model": {
+                "input_cost_per_token": 2e-06,
+                "output_cost_per_token": 8e-06,
+                "cache_read_input_token_cost": 5e-07,
+                "cache_creation_input_token_cost": 2.5e-06,
+            }
+        }
+        usages = [
+            {
+                "total_prompt_tokens": 1000,
+                "total_prompt_cached_tokens": 400,
+                "total_prompt_cache_creation_tokens": 200,
+                "total_completion_tokens": 0,
+            }
+        ] * 2
+        agg = aggregate_evaluation_costs(usages, model_name="judge-model", price_table=price_table)
+        assert agg["total_cache_creation_tokens"] == 400
+        # non-cached prompt excludes cached AND creation tokens
+        assert agg["total_non_cached_prompt"] == 800
+        # cached bucket is cache reads only; creation has its own bucket
+        assert agg["costs"]["cached"] == pytest.approx(2 * 400 * 5e-07)
+        assert agg["costs"]["cache_creation"] == pytest.approx(2 * 200 * 2.5e-06)
+        assert agg["costs"]["total"] == pytest.approx(2 * (400 * 2e-06 + 400 * 5e-07 + 200 * 2.5e-06))

@@ -32,6 +32,7 @@ from browseruse_bench.browsers import open_browser_session
 from browseruse_bench.browsers.providers.local import warn_if_local_proxy_unsupported
 from browseruse_bench.schemas import AgentMetrics, AgentResult, AgentUsage
 from browseruse_bench.utils import IS_WINDOWS
+from browseruse_bench.utils.parse_utils import safe_int
 
 logger = logging.getLogger(__name__)
 
@@ -94,10 +95,10 @@ def _fold_openclaw_usage(raw: Any, totals: dict[str, int]) -> bool:
     """
     if not isinstance(raw, dict):
         return False
-    input_tokens = int(raw.get("input") or 0)
-    cache_read = int(raw.get("cacheRead") or 0)
-    cache_write = int(raw.get("cacheWrite") or 0)
-    output_tokens = int(raw.get("output") or 0)
+    input_tokens = safe_int(raw.get("input"))
+    cache_read = safe_int(raw.get("cacheRead"))
+    cache_write = safe_int(raw.get("cacheWrite"))
+    output_tokens = safe_int(raw.get("output"))
     if input_tokens + cache_read + cache_write + output_tokens == 0:
         return False
     totals["prompt"] += input_tokens + cache_read + cache_write
@@ -116,7 +117,8 @@ def _collect_session_usage(session_file: Path | None) -> dict[str, int]:
     for raw_line in session_file.read_text(encoding="utf-8").splitlines():
         try:
             obj = json.loads(raw_line)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            logger.debug("OpenClaw usage: skipping unparsable session line: %s", exc)
             continue
         message = obj.get("message")
         if isinstance(message, dict) and message.get("role") == "assistant":
@@ -519,6 +521,7 @@ class OpenClawAgent(CLIAgent):
     @staticmethod
     def _usage_from(result_obj: dict[str, Any]) -> AgentUsage | None:
         totals = _collect_session_usage(OpenClawAgent._session_file_from(result_obj))
+        last_call: Any = None
         if not totals["entries"]:
             # lastCallUsage covers only the final LLM call; use it only when
             # the session log carries no per-message usage at all.
@@ -526,7 +529,12 @@ class OpenClawAgent(CLIAgent):
             last_call = agent_meta.get("lastCallUsage") if agent_meta else None
             _fold_openclaw_usage(last_call, totals)
         if not totals["entries"]:
-            return None
+            # Degenerate lastCallUsage with only an aggregate total: keep the
+            # total token count rather than dropping usage entirely.
+            total_tokens = safe_int(last_call.get("total")) if isinstance(last_call, dict) else 0
+            if not total_tokens:
+                return None
+            return AgentUsage(total_tokens=total_tokens, entry_count=1)
         return AgentUsage(
             total_prompt_tokens=totals["prompt"],
             total_prompt_cached_tokens=totals["cached"],

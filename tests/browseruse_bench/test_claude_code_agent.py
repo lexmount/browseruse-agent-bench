@@ -383,6 +383,35 @@ class TestClaudeCodeAgentUsage:
         assert usage.total_completion_tokens == 12
         assert usage.entry_count == 2
 
+    def test_usage_fallback_dedups_events_of_same_message(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Claude Code emits one assistant event per content block of the same
+        # API message, each repeating the identical usage block. The fallback
+        # must count each message id once.
+        usage = {"input_tokens": 100, "cache_read_input_tokens": 400, "output_tokens": 20}
+        stream = [
+            _line({"type": "assistant", "message": {
+                "id": "msg_1",
+                "content": [{"type": "text", "text": "thinking"}],
+                "usage": usage,
+            }}),
+            _line({"type": "assistant", "message": {
+                "id": "msg_1",
+                "content": [{"type": "tool_use", "id": "tu_1", "name": "browser_click", "input": {}}],
+                "usage": usage,
+            }}),
+        ]
+        agent = self._agent()
+        monkeypatch.setattr(
+            agent, "_run_subprocess",
+            lambda *a, **kw: (-1, stream, "Timeout after 10 seconds"),
+        )
+        result = agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
+        assert result.metrics.usage is not None
+        assert result.metrics.usage.total_prompt_tokens == 500
+        assert result.metrics.usage.entry_count == 1
+
     def test_usage_without_cost_still_records_tokens(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:

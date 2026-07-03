@@ -44,22 +44,38 @@ def calculate_evaluation_cost(
         price_table=price_table,
         force=True,
     )
-    if "total_cost" not in enriched:
+    # A zero-token usage dict comes back unchanged from enrichment (nothing to
+    # price); require the full enriched shape before indexing it.
+    required_keys = (
+        "total_prompt_tokens",
+        "total_prompt_cost",
+        "total_prompt_cached_tokens",
+        "total_prompt_cached_cost",
+        "total_prompt_cache_creation_tokens",
+        "total_prompt_cache_creation_cost",
+        "total_completion_tokens",
+        "total_completion_cost",
+        "total_cost",
+    )
+    if not all(key in enriched for key in required_keys):
         return None
 
     prompt_tokens = enriched["total_prompt_tokens"]
     cached_tokens = enriched["total_prompt_cached_tokens"]
     creation_tokens = enriched["total_prompt_cache_creation_tokens"]
-    cached_cost = enriched["total_prompt_cached_cost"] + enriched["total_prompt_cache_creation_cost"]
+    cached_cost = enriched["total_prompt_cached_cost"]
+    creation_cost = enriched["total_prompt_cache_creation_cost"]
     return {
         "prompt_tokens": prompt_tokens,
         "completion_tokens": enriched["total_completion_tokens"],
         "cached_tokens": cached_tokens,
+        "cache_creation_tokens": creation_tokens,
         "non_cached_prompt": max(0, prompt_tokens - cached_tokens - creation_tokens),
         "costs": {
-            "input": enriched["total_prompt_cost"] - cached_cost,
+            "input": enriched["total_prompt_cost"] - cached_cost - creation_cost,
             "output": enriched["total_completion_cost"],
             "cached": cached_cost,
+            "cache_creation": creation_cost,
             "total": enriched["total_cost"],
         },
     }
@@ -78,6 +94,8 @@ def aggregate_evaluation_costs(
     total_output_cost = 0.0
     total_cached_cost = 0.0
 
+    total_cache_creation = 0
+    total_cache_creation_cost = 0.0
     for usage in usage_list:
         if usage is None:
             continue
@@ -86,21 +104,25 @@ def aggregate_evaluation_costs(
             total_prompt += cost_info["prompt_tokens"]
             total_completion += cost_info["completion_tokens"]
             total_cached += cost_info["cached_tokens"]
+            total_cache_creation += cost_info["cache_creation_tokens"]
             total_input_cost += cost_info["costs"]["input"]
             total_output_cost += cost_info["costs"]["output"]
             total_cached_cost += cost_info["costs"]["cached"]
+            total_cache_creation_cost += cost_info["costs"]["cache_creation"]
 
-    total_cost = total_input_cost + total_output_cost + total_cached_cost
+    total_cost = total_input_cost + total_output_cost + total_cached_cost + total_cache_creation_cost
 
     return {
         "total_prompt_tokens": total_prompt,
         "total_completion_tokens": total_completion,
         "total_cached_tokens": total_cached,
-        "total_non_cached_prompt": max(0, total_prompt - total_cached),
+        "total_cache_creation_tokens": total_cache_creation,
+        "total_non_cached_prompt": max(0, total_prompt - total_cached - total_cache_creation),
         "costs": {
             "input": total_input_cost,
             "output": total_output_cost,
             "cached": total_cached_cost,
+            "cache_creation": total_cache_creation_cost,
             "total": total_cost,
         },
     }

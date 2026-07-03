@@ -338,3 +338,15 @@ class TestStopPredicate:
         assert error is None
         assert _stdout_json(lines) == {"done": True}
         assert elapsed < 15
+
+
+class TestUsageFromTotalOnly:
+    def test_total_only_last_call_usage_preserved(self) -> None:
+        from browseruse_bench.agents.openclaw import OpenClawAgent
+
+        result_obj = {
+            "meta": {"agentMeta": {"lastCallUsage": {"total": 5000}}},
+        }
+        usage = OpenClawAgent._usage_from(result_obj)
+        assert usage is not None
+        assert usage.total_tokens == 5000

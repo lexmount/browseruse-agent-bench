@@ -399,10 +399,14 @@ def _extract_usage_from_response_blob(blob: Any) -> dict[str, int] | None:
             return 0
 
     def _details_cached(node: dict[str, Any]) -> int:
+        # Trust a nonzero details counter first; a zero-filled details object
+        # must not mask a real top-level cache counter.
         for details_key in ("prompt_tokens_details", "input_tokens_details"):
             details = node.get(details_key)
-            if isinstance(details, dict) and details.get("cached_tokens") is not None:
-                return _safe_int(details["cached_tokens"])
+            if isinstance(details, dict):
+                cached = _safe_int(details.get("cached_tokens", 0))
+                if cached:
+                    return cached
         fallback = node.get("cache_read_input_tokens")
         if fallback is None:
             fallback = node.get("cached_tokens")
@@ -411,7 +415,9 @@ def _extract_usage_from_response_blob(blob: Any) -> dict[str, int] | None:
     def _candidate_usage(node: Any) -> dict[str, int] | None:
         if not isinstance(node, dict):
             return None
-        pt = node.get("prompt_tokens")
+        # A zero-filled prompt_tokens falls through to input_tokens, matching
+        # the pre-existing `or` chain semantics.
+        pt = node.get("prompt_tokens") or None
         it = node.get("input_tokens")
         ct = node.get("completion_tokens")
         if ct is None:

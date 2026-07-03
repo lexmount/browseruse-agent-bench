@@ -254,3 +254,35 @@ class TestExtractUsageFromResponseBlob:
         assert summary["total_prompt_cached_tokens"] == 200
         assert summary["total_prompt_cache_creation_tokens"] == 30
         assert summary["total_tokens"] == 340
+
+    def test_details_zero_falls_back_to_top_level_cache_keys(self) -> None:
+        from browseruse_bench.agents.skyvern import _extract_usage_from_response_blob
+
+        # Zero-filled details must not mask a real top-level cache counter.
+        blob = {
+            "usage": {
+                "prompt_tokens": 12000,
+                "completion_tokens": 300,
+                "prompt_tokens_details": {"cached_tokens": 0},
+                "cache_read_input_tokens": 9000,
+            }
+        }
+        usage = _extract_usage_from_response_blob(blob)
+        assert usage is not None
+        assert usage["cached_tokens"] == 9000
+
+    def test_zero_prompt_tokens_falls_back_to_input_tokens(self) -> None:
+        from browseruse_bench.agents.skyvern import _extract_usage_from_response_blob
+
+        blob = {
+            "usage": {
+                "prompt_tokens": 0,
+                "completion_tokens": 500,
+                "input_tokens": 8000,
+                "cache_read_input_tokens": 6000,
+            }
+        }
+        usage = _extract_usage_from_response_blob(blob)
+        assert usage is not None
+        assert usage["prompt_tokens"] == 14000  # anthropic-style fold
+        assert usage["cached_tokens"] == 6000
