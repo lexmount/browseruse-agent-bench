@@ -18,6 +18,8 @@ from browseruse_bench.utils.repo_root import REPO_ROOT
 _root_cfg = load_config_file(REPO_ROOT / "config.yaml")
 _FAILURE_TEMPERATURE: float = float(_root_cfg.get("eval", {}).get("temperature", 0))
 _FAILURE_MAX_TOKENS: int = int(_root_cfg.get("eval", {}).get("max_tokens") or 2048)
+# api_max_images=0 declares the judge model text-only (same switch as LexBench eval).
+_FAILURE_TEXT_ONLY: bool = int(_root_cfg.get("eval", {}).get("api_max_images", 50)) == 0
 
 # Sentinel written by LexBench coverage backfill for tasks that were never
 # judged; it must survive attribution so eval resume can find those records.
@@ -267,6 +269,19 @@ def classify_single_failure(
         agent_response=agent_response if agent_response else "No response",
         evaluator_response=evaluator_response if evaluator_response else "No evaluation feedback",
     )
+
+    if _FAILURE_TEXT_ONLY and screenshots:
+        logger.info(
+            "   Text-only judge: omitting %d screenshots from failure classification "
+            "(api_max_images=0)",
+            len(screenshots),
+        )
+        user_text += (
+            "\n\nNote: Screenshot images were omitted because the evaluation model is "
+            "text-only. Classify using the action history, agent answer, and evaluator "
+            "feedback."
+        )
+        screenshots = []
 
     # Prepare message content (text + image)
     content = [{"type": "text", "text": user_text}]

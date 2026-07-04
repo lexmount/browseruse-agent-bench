@@ -300,6 +300,7 @@ eval:
   base_url: $OPENAI_BASE_URL
   temperature: 1.0
   max_tries: 5
+  # Max images per judge request; 0 = text-only judge (LexBench eval omits screenshots).
   api_max_images: 50
   detail: high
   max_tokens: 4096

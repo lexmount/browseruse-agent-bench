@@ -428,8 +428,18 @@ def evaluate_task(
     # Record original count
     original_count = len(screenshot_paths)
 
+    _cfg_max_images: int = _EVAL_CFG.get("api_max_images", 50)
+    resolved_max_images = api_max_images if api_max_images is not None else _cfg_max_images
+    text_only_judge = resolved_max_images == 0
+
     # Select screenshots based on evaluation strategy
-    if eval_strategy == "final":
+    if text_only_judge:
+        # api_max_images=0 declares the judge model text-only: send no images.
+        screenshot_paths = []
+        logger.info(
+            f"   Text-only judge: omitting all {original_count} screenshots (api_max_images=0)"
+        )
+    elif eval_strategy == "final":
         # For final result evaluation, use only the last screenshot
         if screenshot_paths:
             screenshot_paths = [screenshot_paths[-1]]
@@ -438,8 +448,6 @@ def evaluate_task(
             )
     else:
         # For stepwise evaluation, sample if too many
-        _cfg_max_images: int = _EVAL_CFG.get("api_max_images", 50)
-        resolved_max_images = api_max_images if api_max_images is not None else _cfg_max_images
         effective_max = (
             min(max_screenshots, resolved_max_images)
             if max_screenshots is not None
@@ -461,6 +469,12 @@ def evaluate_task(
     prompt, prompt_params, template_content, template_ref = build_evaluation_prompt(
         task_data, agent_result, screenshot_count=len(screenshot_paths), eval_strategy=eval_strategy
     )
+    if text_only_judge and original_count:
+        prompt = (
+            f"{prompt}\n\n"
+            "Note: Screenshot images were omitted because the evaluation model is text-only. "
+            "Judge using the non-visual artifact evidence and the agent's final answer."
+        )
 
     # Detect language for system message — loaded from externalized prompt files
     language = detect_language(task_data)
