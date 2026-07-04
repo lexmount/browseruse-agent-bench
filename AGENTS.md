@@ -14,6 +14,7 @@ Python benchmark framework for browser agents and provider integrations.
 - Use `logger` for logs; do not use `print()`.
 - Catch specific exceptions only; do not use bare `except:` or `except Exception:`.
 - Before committing agent-touching changes, run a real `bubench run --agent <agent> --data LexBench-Browser --mode single` (not `--dry-run`, not pytest-only). See [Smoke Testing Before Commit](docs_4_codeagent/error-handling-testing.md#smoke-testing-before-commit).
+- Before opening or updating a PR, complete the [Mandatory Self-Review](CONTRIBUTING.md#mandatory-self-review-before-every-pr) and tick the self-review checklist in the PR template. This applies to humans and coding agents alike.
 
 ## Detailed Instructions
 
