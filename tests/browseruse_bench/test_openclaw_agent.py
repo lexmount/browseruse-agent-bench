@@ -742,13 +742,13 @@ class TestStopPredicate:
 
 
 class TestUsageFromTotalOnly:
-    def test_total_only_last_call_usage_preserved(self) -> None:
+    def test_total_only_last_call_usage_preserved(self, tmp_path: Path) -> None:
         from browseruse_bench.agents.openclaw import OpenClawAgent
 
         result_obj = {
             "meta": {"agentMeta": {"lastCallUsage": {"total": 5000}}},
         }
-        usage = OpenClawAgent._usage_from(result_obj)
+        usage = OpenClawAgent._usage_from(result_obj, tmp_path)
         assert usage is not None
         assert usage.total_tokens == 5000
 
@@ -969,3 +969,103 @@ class TestOutageRetryHardening:
         agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
         cfg = json.loads((tmp_path / ".openclaw-state" / "openclaw.json").read_text())
         assert "ssrfPolicy" not in cfg["browser"]
+
+
+def _write_bench_session(task_workspace: Path, session_id: str, rows: list[dict[str, Any]]) -> Path:
+    """Write a session JSONL at OpenClaw's per-task state-dir layout."""
+    session_file = (
+        task_workspace / ".openclaw-state" / "agents" / "main" / "sessions"
+        / f"{session_id}.jsonl"
+    )
+    session_file.parent.mkdir(parents=True, exist_ok=True)
+    session_file.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+    return session_file
+
+
+class TestFinalizeResultSessionFallback:
+    """Timeout / empty-payload runs must still recover data from the session JSONL."""
+
+    def _finalize(
+        self,
+        tmp_path: Path,
+        stdout_lines: list[str],
+        returncode: int | None,
+        execution_error: str | None,
+    ) -> AgentResult:
+        trajectory_dir = tmp_path / "trajectory"
+        trajectory_dir.mkdir(parents=True, exist_ok=True)
+        agent = OpenClawAgent()
+        return agent._finalize_result(
+            task_id="t1",
+            model="gpt-test",
+            rules="rules",
+            stdout_lines=stdout_lines,
+            returncode=returncode,
+            execution_error=execution_error,
+            duration_ms=1000,
+            task_workspace=tmp_path,
+            trajectory_dir=trajectory_dir,
+            session_id="bench-t1",
+        )
+
+    def test_timeout_mid_tool_loop_exports_session_items(self, tmp_path: Path) -> None:
+        # Timed-out run killed mid tool-loop: no stdout JSON, and the session's
+        # last message is a toolCall so there is no terminal answer either.
+        # The trajectory data must still be exported from the session JSONL.
+        rows: list[dict[str, Any]] = [
+            {"type": "message", "message": {"role": "user", "content": [
+                {"type": "text", "text": "go"}]}},
+            {"type": "message", "message": {"role": "assistant",
+                "usage": {"input": 100, "output": 20, "cacheRead": 40, "cacheWrite": 0},
+                "content": [
+                    {"type": "toolCall", "id": "c1", "name": "browser",
+                     "arguments": {"action": "open", "url": "https://example.com"}},
+                ]}},
+            {"type": "message", "message": {"role": "toolResult", "toolCallId": "c1",
+                "toolName": "browser", "content": [{"type": "text", "text": "opened"}]}},
+            {"type": "message", "message": {"role": "assistant",
+                "usage": {"input": 120, "output": 15, "cacheRead": 40, "cacheWrite": 0},
+                "content": [
+                    {"type": "toolCall", "id": "c2", "name": "browser",
+                     "arguments": {"action": "act", "kind": "click", "ref": "e1"}},
+                ]}},
+        ]
+        _write_bench_session(tmp_path, "bench-t1", rows)
+
+        result = self._finalize(
+            tmp_path, stdout_lines=[], returncode=None,
+            execution_error="Timeout: task exceeded 900s",
+        )
+
+        assert result.env_status == "success"
+        assert result.agent_done == "timeout"
+        assert result.metrics.steps == 2
+        assert list((tmp_path / "api_logs").glob("step_*.json"))
+        assert result.metrics.usage is not None
+        assert result.metrics.usage.entry_count == 2
+
+    def test_empty_payload_text_falls_back_to_session_answer(self, tmp_path: Path) -> None:
+        # The CLI sometimes emits the --json payload with text="" while the
+        # real final answer only exists as the session's terminal assistant
+        # message (observed on aborted runs). The answer must be recovered.
+        final_text = "Best-effort answer: blocked by captcha, no results visible."
+        rows: list[dict[str, Any]] = [
+            {"type": "message", "message": {"role": "assistant", "content": [
+                {"type": "toolCall", "id": "c1", "name": "browser",
+                 "arguments": {"action": "open", "url": "https://example.com"}},
+            ]}},
+            {"type": "message", "message": {"role": "toolResult", "toolCallId": "c1",
+                "toolName": "browser", "content": [{"type": "text", "text": "opened"}]}},
+            {"type": "message", "message": {"role": "assistant", "content": [
+                {"type": "text", "text": final_text}]}},
+        ]
+        session_file = _write_bench_session(tmp_path, "bench-t1", rows)
+
+        result = self._finalize(
+            tmp_path, stdout_lines=_result_stdout(session_file, answer=""),
+            returncode=0, execution_error=None,
+        )
+
+        assert result.answer == final_text
+        assert result.env_status == "success"
+        assert result.agent_done == "done"
