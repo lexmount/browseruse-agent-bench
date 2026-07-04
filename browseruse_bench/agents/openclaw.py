@@ -830,9 +830,12 @@ class OpenClawAgent(CLIAgent):
             answer = "\n".join(
                 str(p.get("text", "")) for p in payloads if isinstance(p, dict) and p.get("text")
             ).strip()
-        if not answer:
+        if result_obj and not answer and returncode in (0, None) and execution_error is None:
             # Aborted runs can emit the --json payload with text="" while the
-            # real final answer only exists in the session JSONL.
+            # real final answer only exists in the session JSONL. Recover it
+            # only for clean exits: on failed runs the "[Task Failed: ...]"
+            # sentinel must survive, and a recovered answer must never flip
+            # has_result for a crashed CLI.
             recovered = self._session_result(task_workspace, session_id)
             if recovered:
                 answer = str(recovered["payloads"][0].get("text") or "")
@@ -977,27 +980,41 @@ class OpenClawAgent(CLIAgent):
         return Path(str(session_file)) if session_file else None
 
     @staticmethod
+    def _resolve_session_file(
+        result_obj: dict[str, Any], task_workspace: Path, session_id: str
+    ) -> Path | None:
+        """Locate the session JSONL for a result.
+
+        Prefer the paths the CLI attested in agentMeta, then fall back to the
+        deterministic per-task layout (timed-out runs killed mid tool-loop
+        leave no result_obj at all). Candidates that do not exist on disk are
+        skipped rather than short-circuiting the fallback chain.
+        """
+        agent_meta = OpenClawAgent._agent_meta(result_obj) or {}
+        candidates: list[Path] = []
+        if agent_meta.get("sessionFile"):
+            candidates.append(Path(str(agent_meta["sessionFile"])))
+        if agent_meta.get("sessionId"):
+            candidates.append(_session_file_path(task_workspace, str(agent_meta["sessionId"])))
+        if session_id:
+            candidates.append(_session_file_path(task_workspace, session_id))
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        return None
+
+    @staticmethod
     def _session_items(
-        result_obj: dict[str, Any], task_workspace: Path, session_id: str = ""
+        result_obj: dict[str, Any], task_workspace: Path, session_id: str
     ) -> list[dict[str, Any]]:
-        session_file = OpenClawAgent._session_file_from(result_obj)
-        if session_file is not None:
-            return _normalize_session_items(session_file)
-        agent_meta = OpenClawAgent._agent_meta(result_obj)
-        # Timed-out runs killed mid tool-loop leave no result_obj at all; the
-        # caller-known session id still locates the on-disk session JSONL.
-        sid = (agent_meta.get("sessionId") if agent_meta else None) or session_id
-        if not sid:
-            return []
-        return _normalize_session_items(_session_file_path(task_workspace, str(sid)))
+        session_file = OpenClawAgent._resolve_session_file(result_obj, task_workspace, session_id)
+        return _normalize_session_items(session_file) if session_file else []
 
     @staticmethod
     def _usage_from(
-        result_obj: dict[str, Any], task_workspace: Path, session_id: str = ""
+        result_obj: dict[str, Any], task_workspace: Path, session_id: str
     ) -> AgentUsage | None:
-        session_file = OpenClawAgent._session_file_from(result_obj)
-        if session_file is None and session_id:
-            session_file = _session_file_path(task_workspace, session_id)
+        session_file = OpenClawAgent._resolve_session_file(result_obj, task_workspace, session_id)
         totals = _collect_session_usage(session_file)
         last_call: Any = None
         if not totals["entries"]:

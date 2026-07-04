@@ -13,6 +13,7 @@ from browseruse_bench.agents.openclaw import (
     OpenClawAgent,
     _collect_media_screenshots,
     _normalize_session_items,
+    _session_file_path,
     _stdout_json,
 )
 from browseruse_bench.schemas import AgentResult
@@ -743,12 +744,10 @@ class TestStopPredicate:
 
 class TestUsageFromTotalOnly:
     def test_total_only_last_call_usage_preserved(self, tmp_path: Path) -> None:
-        from browseruse_bench.agents.openclaw import OpenClawAgent
-
         result_obj = {
             "meta": {"agentMeta": {"lastCallUsage": {"total": 5000}}},
         }
-        usage = OpenClawAgent._usage_from(result_obj, tmp_path)
+        usage = OpenClawAgent._usage_from(result_obj, tmp_path, "bench-t1")
         assert usage is not None
         assert usage.total_tokens == 5000
 
@@ -973,10 +972,7 @@ class TestOutageRetryHardening:
 
 def _write_bench_session(task_workspace: Path, session_id: str, rows: list[dict[str, Any]]) -> Path:
     """Write a session JSONL at OpenClaw's per-task state-dir layout."""
-    session_file = (
-        task_workspace / ".openclaw-state" / "agents" / "main" / "sessions"
-        / f"{session_id}.jsonl"
-    )
+    session_file = _session_file_path(task_workspace, session_id)
     session_file.parent.mkdir(parents=True, exist_ok=True)
     session_file.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
     return session_file
@@ -1043,6 +1039,66 @@ class TestFinalizeResultSessionFallback:
         assert list((tmp_path / "api_logs").glob("step_*.json"))
         assert result.metrics.usage is not None
         assert result.metrics.usage.entry_count == 2
+
+    def test_failed_run_keeps_task_failed_sentinel(self, tmp_path: Path) -> None:
+        # A run with a non-timeout execution_error is env-failed; the session's
+        # terminal answer must NOT replace the "[Task Failed: ...]" sentinel
+        # when the CLI's payload text was empty, otherwise the judge grades an
+        # answer on a hard-failed run.
+        rows: list[dict[str, Any]] = [
+            {"type": "message", "message": {"role": "assistant", "content": [
+                {"type": "text", "text": "Interim note before the crash."}]}},
+        ]
+        _write_bench_session(tmp_path, "bench-t1", rows)
+
+        result = self._finalize(
+            tmp_path, stdout_lines=_result_stdout(answer=""), returncode=1,
+            execution_error="Process error: broken pipe",
+        )
+
+        assert result.env_status == "failed"
+        assert result.agent_done == "error"
+        assert result.answer.startswith("[Task Failed:")
+
+    def test_crashed_cli_with_empty_payload_stays_failed(self, tmp_path: Path) -> None:
+        # Nonzero exit without execution_error and an empty-text payload must
+        # keep the pre-recovery classification: the session's terminal answer
+        # must not flip has_result and mask the crash as (success, done).
+        rows: list[dict[str, Any]] = [
+            {"type": "message", "message": {"role": "assistant", "content": [
+                {"type": "text", "text": "Interim note before the crash."}]}},
+        ]
+        _write_bench_session(tmp_path, "bench-t1", rows)
+
+        result = self._finalize(
+            tmp_path, stdout_lines=_result_stdout(answer=""), returncode=2,
+            execution_error=None,
+        )
+
+        assert result.env_status == "failed"
+        assert result.agent_done == "error"
+        assert result.answer.startswith("[Task Failed:")
+
+    def test_dangling_session_file_falls_back_to_caller_session_id(self, tmp_path: Path) -> None:
+        # An attested sessionFile that does not exist must not short-circuit
+        # item export when the caller-known session id locates the real JSONL.
+        rows: list[dict[str, Any]] = [
+            {"type": "message", "message": {"role": "assistant", "content": [
+                {"type": "toolCall", "id": "c1", "name": "browser",
+                 "arguments": {"action": "open", "url": "https://example.com"}},
+            ]}},
+            {"type": "message", "message": {"role": "toolResult", "toolCallId": "c1",
+                "toolName": "browser", "content": [{"type": "text", "text": "opened"}]}},
+        ]
+        _write_bench_session(tmp_path, "bench-t1", rows)
+        result_obj = {
+            "meta": {"agentMeta": {"sessionId": "bench-t1",
+                                   "sessionFile": str(tmp_path / "absent.jsonl")}},
+        }
+
+        items = OpenClawAgent._session_items(result_obj, tmp_path, "bench-t1")
+
+        assert len(items) == 1
 
     def test_empty_payload_text_falls_back_to_session_answer(self, tmp_path: Path) -> None:
         # The CLI sometimes emits the --json payload with text="" while the
