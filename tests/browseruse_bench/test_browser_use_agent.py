@@ -3,17 +3,27 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from browser_use.llm.exceptions import ModelProviderError
 from pydantic import BaseModel, ValidationError
 
 from browseruse_bench.agents import browser_use as browser_use_module
 from browseruse_bench.agents.browser_use import BrowserUseAgent
 from browseruse_bench.browsers.types import BrowserSessionContext
+
+
+class _StubLLM:
+    async def ainvoke(self, *args: Any, **kwargs: Any) -> None:
+        return None
 
 
 def test_run_task_uses_backend_manager_session_context(
@@ -406,7 +416,7 @@ def test_run_task_async_tolerates_temp_dir_cleanup_error(
     monkeypatch.setattr(
         BrowserUseAgent,
         "_create_llm",
-        lambda self, model_type, model_id, agent_config, config_info: object(),
+        lambda self, model_type, model_id, agent_config, config_info: _StubLLM(),
     )
     caplog.set_level("WARNING")
 
@@ -473,7 +483,7 @@ def test_run_task_async_maps_early_unfinished_history_to_error(
     monkeypatch.setattr(
         BrowserUseAgent,
         "_create_llm",
-        lambda self, model_type, model_id, agent_config, config_info: object(),
+        lambda self, model_type, model_id, agent_config, config_info: _StubLLM(),
     )
 
     result = asyncio.run(
@@ -541,7 +551,7 @@ def test_run_task_async_keeps_real_max_steps_status(
     monkeypatch.setattr(
         BrowserUseAgent,
         "_create_llm",
-        lambda self, model_type, model_id, agent_config, config_info: object(),
+        lambda self, model_type, model_id, agent_config, config_info: _StubLLM(),
     )
 
     result = asyncio.run(
@@ -623,3 +633,221 @@ def test_create_browser_instance_no_proxy_omits_kwarg(
     finally:
         if temp_dir is not None:
             temp_dir.cleanup()
+
+
+# ---------------------------------------------------------------------------
+# Raw LLM response capture for failed/unparseable calls
+# ---------------------------------------------------------------------------
+
+
+_RAW_LLM_TEXT = '{"action": []}\n{"trailing": true}'
+_PARSE_FAIL_MESSAGE = "Invalid JSON: trailing characters at line 2 column 1"
+
+
+class _FakeUsage:
+    def model_dump(self) -> dict[str, Any]:
+        return {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}
+
+
+def _fake_chat_completion(raw_text: str) -> Any:
+    message = SimpleNamespace(content=raw_text)
+    return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=_FakeUsage())
+
+
+class _OpenAIStyleLLM:
+    """ChatOpenAI-shaped fake: get_client() serves a raw completion, ainvoke fails to parse it."""
+
+    def __init__(self, raw_text: str | None = _RAW_LLM_TEXT, fail: bool = True) -> None:
+        self.raw_text = raw_text
+        self.fail = fail
+
+    def get_client(self) -> Any:
+        async def create(*args: Any, **kwargs: Any) -> Any:
+            return _fake_chat_completion(self.raw_text or "")
+
+        completions = SimpleNamespace(create=create)
+        return SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+    async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:
+        if self.raw_text is not None:
+            await self.get_client().chat.completions.create()
+        if self.fail:
+            raise ModelProviderError(message=_PARSE_FAIL_MESSAGE, model="gpt-test")
+        return "parsed"
+
+
+def test_capture_llm_failures_records_raw_response_and_usage() -> None:
+    llm = _OpenAIStyleLLM()
+    recorder = browser_use_module._LLMFailureRecorder()
+    browser_use_module._capture_llm_failures(llm, recorder)
+
+    with pytest.raises(ModelProviderError):
+        asyncio.run(llm.ainvoke([]))
+
+    assert len(recorder.failures) == 1
+    failure = recorder.failures[0]
+    assert failure["raw_response"] == _RAW_LLM_TEXT
+    assert failure["usage"] == {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}
+    assert failure["error"] == _PARSE_FAIL_MESSAGE
+    assert failure["status_code"] == 502
+    assert isinstance(failure["timestamp"], float)
+
+
+def test_capture_llm_failures_keeps_no_records_on_success() -> None:
+    llm = _OpenAIStyleLLM(fail=False)
+    recorder = browser_use_module._LLMFailureRecorder()
+    browser_use_module._capture_llm_failures(llm, recorder)
+
+    assert asyncio.run(llm.ainvoke([])) == "parsed"
+    assert recorder.failures == []
+
+
+def test_capture_llm_failures_clears_stale_raw_response() -> None:
+    llm = _OpenAIStyleLLM(fail=False)
+    recorder = browser_use_module._LLMFailureRecorder()
+    browser_use_module._capture_llm_failures(llm, recorder)
+
+    asyncio.run(llm.ainvoke([]))
+
+    # Second call raises before any completion arrives; the first call's raw
+    # response must not leak into this failure record.
+    llm.raw_text = None
+    llm.fail = True
+    with pytest.raises(ModelProviderError):
+        asyncio.run(llm.ainvoke([]))
+
+    assert len(recorder.failures) == 1
+    assert recorder.failures[0]["raw_response"] is None
+    assert recorder.failures[0]["usage"] is None
+
+
+def test_capture_llm_failures_supports_llm_without_get_client() -> None:
+    class NoClientLLM:
+        async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:
+            raise ModelProviderError(message="provider down", model="other")
+
+    llm = NoClientLLM()
+    recorder = browser_use_module._LLMFailureRecorder()
+    browser_use_module._capture_llm_failures(llm, recorder)
+
+    with pytest.raises(ModelProviderError):
+        asyncio.run(llm.ainvoke([]))
+
+    assert recorder.failures[0]["error"] == "provider down"
+    assert recorder.failures[0]["raw_response"] is None
+
+
+def test_match_step_llm_failures_pops_only_step_window() -> None:
+    hist_item = SimpleNamespace(
+        metadata=SimpleNamespace(step_start_time=100.0, step_end_time=110.0)
+    )
+    pending = [
+        {"timestamp": 99.0, "error": "before"},
+        {"timestamp": 105.0, "error": "inside"},
+        {"timestamp": 111.0, "error": "after"},
+    ]
+
+    matched = browser_use_module._match_step_llm_failures(pending, hist_item)
+
+    assert [failure["error"] for failure in matched] == ["inside"]
+    assert [failure["error"] for failure in pending] == ["before", "after"]
+
+
+def test_match_step_llm_failures_without_metadata_returns_empty() -> None:
+    pending = [{"timestamp": 105.0, "error": "inside"}]
+
+    matched = browser_use_module._match_step_llm_failures(
+        pending,
+        SimpleNamespace(metadata=None),
+    )
+
+    assert matched == []
+    assert len(pending) == 1
+
+
+def test_run_task_async_writes_llm_failure_into_step_log(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class FakeActionResult:
+        extracted_content = None
+        error = "Could not parse response"
+        is_done = False
+
+    class FakeHistory:
+        def __init__(self, start: float, end: float) -> None:
+            self.history = [
+                SimpleNamespace(
+                    model_output=None,
+                    result=[FakeActionResult()],
+                    state=None,
+                    state_message=None,
+                    metadata=SimpleNamespace(step_start_time=start, step_end_time=end),
+                )
+            ]
+
+        def extracted_content(self) -> list[str]:
+            return []
+
+        def number_of_steps(self) -> int:
+            return 1
+
+        def screenshots(self) -> list[str]:
+            return []
+
+        def errors(self) -> list[str | None]:
+            return ["Could not parse response"]
+
+        def is_done(self) -> bool:
+            return False
+
+        def final_result(self) -> str:
+            return ""
+
+    class FakeAgent:
+        def __init__(self, **kwargs: Any) -> None:
+            self.llm = kwargs["llm"]
+            self.history: FakeHistory | None = None
+
+        async def run(self, max_steps: int) -> FakeHistory:
+            del max_steps
+            start = time.time()
+            with contextlib.suppress(ModelProviderError):
+                await self.llm.ainvoke([])
+            self.history = FakeHistory(start, time.time())
+            return self.history
+
+    class FakeBrowser:
+        async def stop(self) -> None:
+            return None
+
+    monkeypatch.setattr(browser_use_module, "Agent", FakeAgent)
+    monkeypatch.setattr(
+        BrowserUseAgent,
+        "_create_browser_instance",
+        staticmethod(lambda session_context: (FakeBrowser(), None)),
+    )
+    monkeypatch.setattr(
+        BrowserUseAgent,
+        "_create_llm",
+        lambda self, model_type, model_id, agent_config, config_info: _OpenAIStyleLLM(),
+    )
+
+    asyncio.run(
+        BrowserUseAgent()._run_task_async(
+            task_info={"task_id": "t-raw", "task_text": "search", "url": "https://example.com"},
+            task_workspace=tmp_path,
+            timeout=600,
+            flash_mode=False,
+            agent_config={"MODEL_TYPE": "OPENAI", "MODEL_ID": "gpt-test"},
+            session_context=BrowserSessionContext(backend_id="Chrome-Local", transport="local"),
+        )
+    )
+
+    step_data = json.loads((tmp_path / "api_logs" / "step_001.json").read_text())
+    assert len(step_data["llm_failures"]) == 1
+    failure = step_data["llm_failures"][0]
+    assert failure["raw_response"] == _RAW_LLM_TEXT
+    assert failure["usage"]["total_tokens"] == 10
+    assert failure["error"] == _PARSE_FAIL_MESSAGE
+    assert not (tmp_path / "api_logs" / "llm_failures_unmatched.json").exists()

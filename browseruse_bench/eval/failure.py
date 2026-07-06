@@ -17,6 +17,11 @@ from browseruse_bench.utils.repo_root import REPO_ROOT
 
 _root_cfg = load_config_file(REPO_ROOT / "config.yaml")
 _FAILURE_TEMPERATURE: float = float(_root_cfg.get("eval", {}).get("temperature", 0))
+_FAILURE_MAX_TOKENS: int = int(_root_cfg.get("eval", {}).get("max_tokens") or 2048)
+
+# Sentinel written by LexBench coverage backfill for tasks that were never
+# judged; it must survive attribution so eval resume can find those records.
+NOT_EVALUATED_SENTINEL = "not_evaluated"
 
 try:
     from openai import APIConnectionError, APIError, RateLimitError
@@ -44,39 +49,100 @@ MODEL_GENERATE_EXCEPTIONS: tuple[type[BaseException], ...] = tuple(
 # Failure Classification Constants
 # ============================================================================
 
-FAILURE_CLASSIFICATION_SYSTEM_PROMPT = """You are a professional browser Agent failure analysis expert. Your task is to analyze the root cause of the Agent's task failure based on the provided information and provide a specific classification category.
+FAILURE_TAXONOMY: dict[str, tuple[str, str]] = {
+    "H1": ("Harness", "Execution Defect"),
+    "H2": ("Harness", "Orchestration Guard Absence"),
+    "M1": ("Model", "Task Planning"),
+    "M2": ("Model", "Page Understanding & Grounding"),
+    "M3": ("Model", "Evidence Fidelity"),
+    "M4": ("Model", "Error Recovery"),
+    "M5": ("Model", "Tool/Structured Output"),
+    "M6": ("Model", "Model Service Error"),
+    "E1": ("Environment", "Bot Defense"),
+    "E2": ("Environment", "Access Barrier"),
+    "E3": ("Environment", "Site Limitation"),
+    "OTHER": ("Other", "Other"),
+}
 
-## Classification System
+# Deterministic mapping to the pre-fusion single-label codes, kept for
+# continuity of historical reports. "U" marks attribution-pipeline failures
+# and is never selectable by the judge.
+LEGACY_CATEGORY_MAP: dict[str, str] = {
+    "H1": "A2",
+    "H2": "A4",
+    "M1": "A1",
+    "M2": "A1",
+    "M3": "A1",
+    "M4": "A1",
+    "M5": "A2",
+    "M6": "A3",
+    "E1": "B1",
+    "E2": "B2",
+    "E3": "C2",
+    "OTHER": "OTHER",
+    "U": "U",
+}
 
-**A: Agent Causes**
-- **A1**: Agent capability insufficiency
-  - Model issues
-    - Environment understanding error: Visual/Page understanding error (Misreading DOM text, truncated extraction, screenshot misunderstanding)
-    - Plan error: Intent parsing/Task planning failure (Model misunderstood task, missed key conditions, unreasonable path planning or missing key steps)
-      - Leading to wrong results: Wrong input content, arriving at wrong page, unable to auto-login etc.
-  - Model service error: No response from model service due to context length exceeded or parameter error etc.
-  - Agent paradigm issues
-    - Context engineering issue: Redundant or overly long context leading to model errors
-    - Prompt engineering issue: Used plan-and-execute, react, reflexion paradigms but insufficient for complex problems, leading to inaccurate planning or sudden stop (no new steps planned)
 
-- **A2**: Agent Code BUG
-  - Coordinate mismatch between image and browser leading to wrong clicks, failed selection (dropdown) etc.
-  - Failed to parse model result, tool call failure etc., leading to execution failure or stuck
+def legacy_category(code: str) -> str:
+    """Map a unified taxonomy code to the pre-fusion A/B/C code."""
+    return LEGACY_CATEGORY_MAP.get(code, "U")
 
-**B: Browser Causes**
-- **B1**: Triggered bot detection (Direct access forbidden or CAPTCHA triggered)
-- **B2**: Unable to login (Session expired, login forbidden by risk control etc.)
 
-**C: Website Causes (Unreachable)**
-- **C1**: Network interruption, geo-blocking
-- **C2**: Website unavailable (Website itself is down)
+FAILURE_CLASSIFICATION_SYSTEM_PROMPT = """You are an expert browser-agent benchmark analyst. A browser agent failed a benchmark task. Classify the failure into the taxonomy below.
+
+Use the supplied task description, agent action history, agent final answer (including any runtime error), evaluator feedback, and screenshots. Prefer evidence from the trajectory and evaluator feedback over assumptions.
+
+## Taxonomy
+
+### H: Harness causes (the agent framework/scaffolding around the model)
+
+- **H1 Execution Defect**: The framework mishandles a VALID model decision: fails to parse or execute well-formed model output, coordinate-mapping defects (click lands on a different element than the model selected), artifact/file write failures, session plumbing bugs.
+- **H2 Orchestration Guard Absence**: The framework withholds information or guards the model needs: an action failure is never surfaced back to the model, no stuck-state detection despite the model being misled about page state, budget mismanagement. Only use when the framework side is provable from the trajectory.
+
+### M: Model causes (the LLM's own capability or service)
+
+- **M1 Task Planning**: Bad task decomposition or path planning; an EXPLICIT stated requirement ignored (required website, fields, output format, item count, safety/legal response). For requirement violations, point to the specific stated requirement. Do NOT use M1 merely because the task is incomplete - attribute the incompleteness to its cause.
+- **M2 Page Understanding & Grounding**: Misreads the page, DOM, or screenshot; selects the wrong element, entity, item, date, filter, or sort; fails to enforce "latest", "highest", "most viewed", "top N", date windows, or comparison criteria on usable pages.
+- **M3 Evidence Fidelity**: Fails to extract available information, extracts wrong fields, mixes fields across items, fabricates or hallucinates values, reports unverifiable data, or answers without enough evidence.
+- **M4 Error Recovery**: The failure signal was visible in the model's context, yet it repeats the same or equivalently futile actions, never switches strategy, wastes the step/time budget, or abandons remaining sub-items. Stuck loops belong here unless the framework provably hid the error (then H2).
+- **M5 Tool/Structured Output**: The model emits malformed action JSON or invalid tool calls, produces a final answer or required file in the wrong structure/format, or omits the final response.
+- **M6 Model Service Error**: The LLM service itself fails: no response, API timeout, provider rate limiting, context length exceeded, parameter error, or content-filter rejection of the agent's own model calls. Infrastructure failure, not reasoning quality.
+
+### E: Environment causes (the external web environment)
+
+- **E1 Bot Defense**: CAPTCHA, Cloudflare, PerimeterX, slider verification, "robot or human", 403 caused by automation, rate limits, "Too Many Requests", security-control pages, abnormal-traffic blocks.
+- **E2 Access Barrier**: Login walls, session expiry, SMS/QR authentication, membership, VIP, paywall, permissions, account-only views, paid downloads, copyright or regional access restrictions.
+- **E3 Site Limitation**: Site down, unreachable, 404/server errors, empty DOM or SPA rendering failure, missing filters/data, or the target content genuinely does not exist on the specified site.
+
+### OTHER
+Use OTHER only when none of the categories captures the core failure; then provide a short phrase in other_phrase.
+
+## Decision order (apply in this order)
+
+1. **Environment first**: Did the site/environment block or break the needed path (E1/E2/E3)? Include the E code whenever an external obstacle substantially contributed, even if the agent also made mistakes afterwards.
+2. **Harness second**: Did the framework mishandle a valid model decision (H1) or provably withhold needed feedback/guards (H2)? The criterion is objective: the model's intended action is visible in the action history and correct, yet the executed effect differs.
+3. **Model last**: Otherwise attribute to the model capability that failed: planning/requirements (M1), page understanding and grounding (M2), evidence fidelity (M3), error recovery (M4), tool/structured output (M5). Service-level failures are M6 regardless of order.
+
+Additional tie-breakers:
+- Stuck behavior: the failure was visible to the model yet behavior did not adapt -> M4; the framework hid the failure from the model -> H2.
+- Wrong element clicked: the model selected the wrong element -> M2; the model selected the right element but the click landed elsewhere -> H1.
+- Malformed output: emitted by the model -> M5; valid output mishandled by the framework -> H1.
+- "Task incomplete" is an outcome, not a category: code its cause.
+
+## Multi-label rules
+
+- Assign every category that substantially contributed to the failed outcome; one or multiple codes.
+- Choose primary_code as the most direct cause that explains why the run failed.
 
 ## Output Format
 
-Please strictly output a JSON object containing the following fields:
+Strictly output a JSON object:
 {
-  "reasoning": "<Detailed analysis process, explaining how you reached the conclusion based on task description, screenshots, action history and evaluation feedback>",
-  "category": "<Classification category, must be one of: A1, A2, B1, B2, C1, C2>"
+  "reasoning": "<How you reached the conclusion from task, screenshots, action history and evaluation feedback>",
+  "codes": ["<every contributing category code>"],
+  "primary_code": "<the single most direct cause>",
+  "other_phrase": "<short phrase when OTHER is used, else null>"
 }
 """
 
@@ -106,9 +172,15 @@ FAILURE_CLASSIFICATION_RESPONSE_FORMAT = {
             "type": "object",
             "properties": {
                 "reasoning": {"type": "string"},
-                "category": {"type": "string", "enum": ["A1", "A2", "B1", "B2", "C1", "C2"]},
+                "codes": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": list(FAILURE_TAXONOMY)},
+                    "minItems": 1,
+                },
+                "primary_code": {"type": "string", "enum": list(FAILURE_TAXONOMY)},
+                "other_phrase": {"type": ["string", "null"]},
             },
-            "required": ["reasoning", "category"],
+            "required": ["reasoning", "codes", "primary_code"],
             "additionalProperties": False,
         },
     },
@@ -240,50 +312,91 @@ def classify_single_failure(
 
         response = model.generate(
             messages,
-            max_tokens=768,
+            max_tokens=_FAILURE_MAX_TOKENS,
             temperature=temperature,
             response_format=FAILURE_CLASSIFICATION_RESPONSE_FORMAT,
         )
     except MODEL_GENERATE_EXCEPTIONS as exc:
         logger.error("   [FAILED] Classification failed: %s", exc)
         return {
-            "category": "A1",  # Default category
+            # "U" (unclassified) keeps classification-pipeline failures out of
+            # the H/M/E buckets; M6 is reserved for LLM service errors that
+            # happened during the agent run itself.
+            "category": "U",
+            "codes": [],
             "reasoning": f"Classification error: {exc}",
+            "other_phrase": None,
             "raw_response": "",
         }
 
     # Parse response
-    category = None
-    reasoning = ""
+    result = _parse_classification_response(response)
+    result["raw_response"] = response
+    return result
 
+
+_CODE_PATTERN = "|".join(sorted((re.escape(c) for c in FAILURE_TAXONOMY), key=len, reverse=True))
+_PRIMARY_FALLBACK_RE = re.compile(r'"primary_code"\s*:\s*"?(' + _CODE_PATTERN + r')(?![\w.])')
+_CODES_FALLBACK_RE = re.compile(r'"codes"\s*:\s*\[\s*"(' + _CODE_PATTERN + r')(?![\w.])')
+_JSON_FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$")
+
+
+def _parse_classification_response(response: str) -> dict[str, Any]:
+    """Parse a multi-label classification response, tolerating truncation."""
     try:
-        parsed = json.loads(response)
+        parsed = json.loads(_JSON_FENCE_RE.sub("", response))
     except json.JSONDecodeError:
         parsed = None
 
+    codes: list[str] = []
+    primary = None
+    reasoning = ""
+    other_phrase = None
     if isinstance(parsed, dict):
-        category = parsed.get("category")
+        codes = [c for c in parsed.get("codes") or [] if c in FAILURE_TAXONOMY]
+        primary = parsed.get("primary_code")
         reasoning = parsed.get("reasoning", "") or ""
+        other_phrase = parsed.get("other_phrase") or None
 
-    if not category:
-        category_match = re.search(r"Category[：:]\s*([ABC][123]?)", response, re.IGNORECASE)
-        if category_match:
-            category = category_match.group(1).upper()
+    if primary not in FAILURE_TAXONOMY:
+        # Recover from a max_tokens-truncated JSON response: grab the
+        # (possibly unterminated) primary_code or first codes entry directly.
+        match = _PRIMARY_FALLBACK_RE.search(response) or _CODES_FALLBACK_RE.search(response)
+        primary = match.group(1) if match else None
 
-    if not reasoning:
-        reasoning_match = re.search(
-            r"Reasoning[：:]\s*(.+?)(?=Category[：:]|$)", response, re.IGNORECASE | re.DOTALL
-        )
-        if reasoning_match:
-            reasoning = reasoning_match.group(1).strip()
+    if primary not in FAILURE_TAXONOMY and codes:
+        primary = codes[0]
+    if primary not in FAILURE_TAXONOMY:
+        logger.warning("   [WARNING] Invalid classification response, defaulting to U")
+        primary = "U"
+    if primary != "U" and primary not in codes:
+        codes.insert(0, primary)
 
-    # Validate category
-    valid_categories = ["A1", "A2", "B1", "B2", "C1", "C2"]
-    if category not in valid_categories:
-        logger.warning(f"   [WARNING] Invalid category: {category}, defaulting to U")
-        category = "U"
+    return {
+        "category": primary,
+        "codes": codes,
+        "reasoning": reasoning,
+        "other_phrase": other_phrase,
+    }
 
-    return {"category": category, "reasoning": reasoning, "raw_response": response}
+
+def _load_agent_result(trajectories_dir: Path, task_id: str) -> dict[str, Any]:
+    """Load the agent-side result.json for a task, if present.
+
+    Eval records do not carry the agent answer or action history for every
+    benchmark schema (LexBench keeps them only in the run artifacts), so the
+    classifier falls back to ``<trajectories_dir>/<task_id>/result.json``.
+    """
+    result_file = trajectories_dir / task_id / "result.json"
+    if not result_file.exists():
+        return {}
+    try:
+        with open(result_file, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("   [WARNING] Failed to load agent result %s: %s", result_file, exc)
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def classify_failure_case(
@@ -307,11 +420,22 @@ def classify_failure_case(
     task_id = result.get("task_id", "")
     logger.info(f"   [INFO] Classifying failure case: {task_id or '<unknown>'}")
 
+    has_inline_fields = bool(
+        (result.get("agent_response") or result.get("response")) and result.get("action_history")
+    )
+    agent_result = {} if has_inline_fields else _load_agent_result(trajectories_dir, task_id)
     task_description = result.get("task", "")
-    agent_response = result.get("agent_response", "") or result.get("response", "")
+    agent_response = (
+        result.get("agent_response") or result.get("response") or agent_result.get("answer") or ""
+    )
+    agent_error = agent_result.get("error")
+    if agent_error:
+        agent_response = f"{agent_response}\n[Agent runtime error]: {agent_error}".strip()
     evaluator_details = result.get("evaluation_details", {}) or {}
-    evaluator_response = evaluator_details.get("grader_response", "")
-    action_history = result.get("action_history", [])
+    evaluator_response = (
+        evaluator_details.get("grader_response") or evaluator_details.get("response") or ""
+    )
+    action_history = result.get("action_history") or agent_result.get("action_history") or []
     screenshots = _collect_task_screenshots(trajectories_dir, task_id)
 
     classification = classify_single_failure(
@@ -330,9 +454,8 @@ def classify_failure_case(
         details = {}
         result["evaluation_details"] = details
     details["failure_classification"] = {
-        "category": classification["category"],
-        "reasoning": classification["reasoning"],
-        "raw_response": classification["raw_response"],
+        **classification,
+        "legacy_category": legacy_category(classification["category"]),
     }
 
     logger.info(f"      Classification result: {classification['category']}")
@@ -375,8 +498,14 @@ def classify_failures_batch(
 
         failure_count += 1
 
-        # If classification exists and skip_existing=True, skip
-        if skip_existing and result.get("failure_category"):
+        existing = result.get("failure_category")
+        # Synthetic never-judged placeholders must keep their sentinel so eval
+        # resume can re-judge them; "U" marks an attribution-pipeline failure
+        # and is always retried.
+        if existing == NOT_EVALUATED_SENTINEL:
+            updated_results.append(result)
+            continue
+        if skip_existing and existing and existing != "U":
             updated_results.append(result)
             continue
 

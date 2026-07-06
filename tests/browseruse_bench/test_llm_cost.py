@@ -93,6 +93,88 @@ def test_enrich_usage_with_cached_tokens() -> None:
     assert enriched["total_cost"] == pytest.approx(0.0022)
 
 
+def test_enrich_usage_bills_cache_creation_tokens() -> None:
+    price_table = {
+        "claude-x": {
+            "input_cost_per_token": 2e-06,
+            "output_cost_per_token": 8e-06,
+            "cache_read_input_token_cost": 5e-07,
+            "cache_creation_input_token_cost": 2.5e-06,
+        }
+    }
+    # prompt_tokens includes cached reads and cache-creation tokens.
+    usage = {
+        "total_prompt_tokens": 1000,
+        "total_prompt_cached_tokens": 400,
+        "total_prompt_cache_creation_tokens": 200,
+        "total_completion_tokens": 100,
+        "total_tokens": 1100,
+    }
+
+    enriched = enrich_usage_with_litellm_pricing(
+        usage=usage,
+        model_name="claude-x",
+        price_table=price_table,
+    )
+
+    assert enriched["total_prompt_cache_creation_tokens"] == 200
+    # 400 non-cached * 2e-6 + 400 cached * 5e-7 + 200 creation * 2.5e-6
+    assert enriched["total_prompt_cost"] == pytest.approx(0.0015)
+    assert enriched["total_prompt_cache_creation_cost"] == pytest.approx(0.0005)
+    assert enriched["total_cost"] == pytest.approx(0.0023)
+
+
+def test_enrich_usage_cache_creation_rate_falls_back_to_input_rate() -> None:
+    usage = {
+        "total_prompt_tokens": 1000,
+        "total_prompt_cache_creation_tokens": 200,
+        "total_completion_tokens": 0,
+    }
+
+    enriched = enrich_usage_with_litellm_pricing(
+        usage=usage,
+        model_name="gpt-4.1",
+        price_table=TEST_PRICE_TABLE,
+    )
+
+    # No cache_creation rate configured: creation tokens bill at the input rate,
+    # so the prompt cost matches 1000 tokens at 2e-6.
+    assert enriched["total_prompt_cost"] == pytest.approx(0.002)
+    assert enriched["total_prompt_cache_creation_cost"] == pytest.approx(0.0004)
+
+
+def test_custom_pricing_reads_cache_creation_per_million(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    custom_price_file = tmp_path / "model_pricing.yaml"
+    custom_price_file.write_text(
+        "my-model:\n"
+        "  input_cost_per_million_tokens: 2\n"
+        "  output_cost_per_million_tokens: 8\n"
+        "  cache_read_input_cost_per_million_tokens: 0.5\n"
+        "  cache_creation_input_cost_per_million_tokens: 2.5\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(llm_cost, "DEFAULT_CUSTOM_MODEL_PRICING_FILE", custom_price_file)
+
+    usage = {
+        "total_prompt_tokens": 1000,
+        "total_prompt_cached_tokens": 400,
+        "total_prompt_cache_creation_tokens": 200,
+        "total_completion_tokens": 0,
+    }
+
+    enriched = enrich_usage_with_litellm_pricing(
+        usage=usage,
+        model_name="my-model",
+        price_table={},
+    )
+
+    assert enriched["total_prompt_cost"] == pytest.approx(0.0015)
+    assert enriched["total_prompt_cache_creation_cost"] == pytest.approx(0.0005)
+
+
 def test_enrich_usage_keeps_complete_usage_without_force() -> None:
     usage = {
         "total_prompt_tokens": 50,

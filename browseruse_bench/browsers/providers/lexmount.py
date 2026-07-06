@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import base64
 import logging
 import os
+import socket
+import ssl
+import time
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -90,6 +94,60 @@ def _coerce_bool(value: Any, *, default: bool) -> bool:
 
 _ANSI_GREEN = "\033[32m"
 _ANSI_RESET = "\033[0m"
+
+# Lexmount sessions can be created while the browser behind them is still
+# booting; during that window (observed 15-30s) every CDP attach fails and
+# agents with short hardcoded connect timeouts (e.g. OpenClaw's browser open)
+# burn their first calls. Poll the endpoint until it accepts a WebSocket
+# upgrade before handing the session to the agent.
+_DEFAULT_CDP_READY_TIMEOUT_SECONDS = 60.0
+_CDP_READY_POLL_SECONDS = 2.0
+_CDP_HANDSHAKE_TIMEOUT_SECONDS = 10.0
+
+
+def _cdp_handshake_ok(cdp_url: str, *, verify_ssl: bool = True) -> bool:
+    """Attempt one WebSocket upgrade against the CDP endpoint."""
+    parsed = urlparse(cdp_url)
+    host = parsed.hostname or ""
+    port = parsed.port or (443 if parsed.scheme == "wss" else 80)
+    resource = parsed.path or "/"
+    if parsed.query:
+        resource = f"{resource}?{parsed.query}"
+    key = base64.b64encode(os.urandom(16)).decode()
+    request = (
+        f"GET {resource} HTTP/1.1\r\n"
+        f"Host: {host}\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        f"Sec-WebSocket-Key: {key}\r\n"
+        "Sec-WebSocket-Version: 13\r\n\r\n"
+    )
+    try:
+        with socket.create_connection((host, port), timeout=_CDP_HANDSHAKE_TIMEOUT_SECONDS) as raw_sock:
+            sock = raw_sock
+            if parsed.scheme == "wss":
+                context = ssl.create_default_context()
+                if not verify_ssl:
+                    context.check_hostname = False
+                    context.verify_mode = ssl.CERT_NONE
+                sock = context.wrap_socket(raw_sock, server_hostname=host)
+            sock.settimeout(_CDP_HANDSHAKE_TIMEOUT_SECONDS)
+            sock.sendall(request.encode())
+            status_parts = sock.recv(256).split(b"\r\n", 1)[0].split()
+            return len(status_parts) >= 2 and status_parts[1] == b"101"
+    except OSError:
+        return False
+
+
+def _wait_for_cdp_ready(cdp_url: str, timeout_seconds: float, *, verify_ssl: bool = True) -> bool:
+    """Poll until the CDP endpoint accepts a WebSocket upgrade."""
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        if _cdp_handshake_ok(cdp_url, verify_ssl=verify_ssl):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(_CDP_READY_POLL_SECONDS)
 
 
 def _build_debug_url(base_url: str, session_id: str) -> str:
@@ -239,6 +297,24 @@ class LexmountBackend(BrowserBackend):
                 )
             )
             raise RuntimeError("Lexmount session creation failed: connect_url is empty")
+
+        ready_timeout = float(
+            agent_config.get("lexmount_cdp_ready_timeout", _DEFAULT_CDP_READY_TIMEOUT_SECONDS) or 0
+        )
+        if ready_timeout > 0 and not _wait_for_cdp_ready(
+            str(cdp_url), ready_timeout, verify_ssl=verify_ssl
+        ):
+            self.close(
+                BrowserSessionContext(
+                    backend_id=self.backend_id,
+                    transport="cdp",
+                    cdp_url=str(cdp_url),
+                    metadata=metadata,
+                )
+            )
+            raise RuntimeError(
+                f"Lexmount session {session_id} CDP endpoint not ready within {ready_timeout:.0f}s"
+            )
 
         logger.info("[SUCCESS] Lexmount session created: %s", str(cdp_url))
         logger.info("[SUCCESS] Lexmount session_id: %s", session_id)

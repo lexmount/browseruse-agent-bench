@@ -97,3 +97,104 @@ class TestCalculateSuccess:
         """Test with custom threshold."""
         assert calculate_success(70, threshold=70) is True
         assert calculate_success(69, threshold=70) is False
+
+
+class TestEvaluationCostPricing:
+    """Judge-model cost must come from the shared pricing tables (USD), not hardcoded rates."""
+
+    PRICE_TABLE = {
+        "judge-model": {
+            "input_cost_per_token": 2e-06,
+            "output_cost_per_token": 8e-06,
+            "cache_read_input_token_cost": 5e-07,
+        }
+    }
+
+    def test_cost_resolved_from_pricing_table(self):
+        from browseruse_bench.eval.summary import calculate_evaluation_cost
+
+        usage = {
+            "prompt_tokens": 1000,
+            "completion_tokens": 100,
+            "prompt_tokens_details": {"cached_tokens": 400},
+        }
+        cost = calculate_evaluation_cost(
+            usage, model_name="judge-model", price_table=self.PRICE_TABLE
+        )
+        assert cost is not None
+        assert cost["prompt_tokens"] == 1000
+        assert cost["cached_tokens"] == 400
+        assert cost["non_cached_prompt"] == 600
+        # 600 * 2e-6 + 400 * 5e-7 + 100 * 8e-6
+        assert cost["costs"]["input"] == pytest.approx(0.0012)
+        assert cost["costs"]["cached"] == pytest.approx(0.0002)
+        assert cost["costs"]["output"] == pytest.approx(0.0008)
+        assert cost["costs"]["total"] == pytest.approx(0.0022)
+
+    def test_unknown_model_costs_zero(self):
+        from browseruse_bench.eval.summary import calculate_evaluation_cost
+
+        usage = {"prompt_tokens": 1000, "completion_tokens": 100}
+        cost = calculate_evaluation_cost(
+            usage, model_name="unknown-model", price_table={}
+        )
+        assert cost is not None
+        assert cost["costs"]["total"] == 0.0
+
+    def test_aggregate_threads_model_pricing(self):
+        from browseruse_bench.eval.summary import aggregate_evaluation_costs
+
+        usages = [
+            {"prompt_tokens": 1000, "completion_tokens": 100},
+            {"prompt_tokens": 500, "completion_tokens": 50},
+        ]
+        agg = aggregate_evaluation_costs(
+            usages, model_name="judge-model", price_table=self.PRICE_TABLE
+        )
+        assert agg["total_prompt_tokens"] == 1500
+        assert agg["total_completion_tokens"] == 150
+        # 1500 * 2e-6 + 150 * 8e-6
+        assert agg["costs"]["total"] == pytest.approx(0.0042)
+
+
+class TestEvaluationCostRobustness:
+    def test_zero_token_usage_with_total_cost_returns_none(self):
+        from browseruse_bench.eval.summary import calculate_evaluation_cost
+
+        # Already-enriched zero-token usage that carries a total_cost key must
+        # not crash on the enriched-only keys it lacks.
+        usage = {
+            "total_prompt_tokens": 0,
+            "total_completion_tokens": 0,
+            "total_tokens": 0,
+            "total_cost": 0.02,
+        }
+        assert calculate_evaluation_cost(usage, model_name="judge-model", price_table={}) is None
+
+    def test_aggregate_accounts_cache_creation_consistently(self):
+        from browseruse_bench.eval.summary import aggregate_evaluation_costs
+
+        price_table = {
+            "judge-model": {
+                "input_cost_per_token": 2e-06,
+                "output_cost_per_token": 8e-06,
+                "cache_read_input_token_cost": 5e-07,
+                "cache_creation_input_token_cost": 2.5e-06,
+            }
+        }
+        usages = [
+            {
+                "total_prompt_tokens": 1000,
+                "total_prompt_cached_tokens": 400,
+                "total_prompt_cache_creation_tokens": 200,
+                "total_completion_tokens": 0,
+            }
+        ] * 2
+        agg = aggregate_evaluation_costs(usages, model_name="judge-model", price_table=price_table)
+        assert agg["total_cache_creation_tokens"] == 400
+        # non-cached prompt excludes cached AND creation tokens
+        assert agg["total_non_cached_prompt"] == 800
+        # cached bucket is cache reads only; creation has its own bucket
+        assert agg["costs"]["cached"] == pytest.approx(2 * 400 * 5e-07)
+        assert agg["costs"]["cache_creation"] == pytest.approx(2 * 200 * 2.5e-06)
+        assert agg["costs"]["total"] == pytest.approx(2 * (400 * 2e-06 + 400 * 5e-07 + 200 * 2.5e-06))

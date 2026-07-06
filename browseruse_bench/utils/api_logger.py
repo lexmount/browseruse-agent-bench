@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +61,7 @@ class APICallLogger:
         action_results: list[Any] | None,
         state: Any | None,
         state_message: str | None,
+        llm_failures: list[dict[str, Any]] | None = None,
     ) -> None:
         """
         Log a single LLM API call step.
@@ -71,8 +72,10 @@ class APICallLogger:
             action_results: Results from executing the actions.
             state: Browser state information.
             state_message: Complete state message sent to LLM (contains browser_state, agent_history, etc.).
+            llm_failures: Failed LLM call records for this step (raw response text,
+                token usage, error) captured before the SDK discarded them.
         """
-        timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        timestamp = datetime.now(UTC).isoformat(timespec="seconds")
 
         # Extract URL from state if available
         url = None
@@ -99,6 +102,7 @@ class APICallLogger:
             },
             "output": output_data,
             "action_results": results_data,
+            "llm_failures": llm_failures or [],
         }
 
         self.steps.append(step_data)
@@ -190,6 +194,48 @@ class APICallLogger:
             results.append(result_data)
 
         return results
+
+    def log_unmatched_llm_failures(self, failures: list[dict[str, Any]]) -> None:
+        """
+        Write failed LLM call records that could not be attributed to a step.
+
+        Args:
+            failures: Failure records (raw response text, usage, error) whose
+                timestamps fell outside every step window.
+        """
+        if not failures:
+            return
+
+        failures_file = self.api_logs_dir / "llm_failures_unmatched.json"
+        try:
+            failures_file.write_text(json.dumps(failures, ensure_ascii=False, indent=2))
+        except (OSError, TypeError) as exc:
+            logger.warning(f"Failed to write llm_failures_unmatched.json: {exc}")
+
+    @staticmethod
+    def _render_llm_failures(llm_failures: list[dict[str, Any]]) -> list[str]:
+        """Render failed LLM call records as summary.md lines."""
+        lines = ["### LLM Failures", ""]
+        for failure in llm_failures:
+            lines.append(f"- **Error**: {failure.get('error')}")
+            raw_response = failure.get("raw_response")
+            if not raw_response:
+                continue
+            lines.extend(
+                [
+                    "",
+                    "<details>",
+                    "<summary>Raw LLM response</summary>",
+                    "",
+                    "```",
+                    raw_response,
+                    "```",
+                    "",
+                    "</details>",
+                ]
+            )
+        lines.append("")
+        return lines
 
     def finalize(self, usage_data: dict[str, Any] | None = None) -> None:
         """
@@ -325,6 +371,11 @@ class APICallLogger:
                     if is_done:
                         lines.append(f"- **Done**: {is_done}")
                 lines.append("")
+
+            # === LLM FAILURES SECTION ===
+            llm_failures = step_data.get("llm_failures") or []
+            if llm_failures:
+                lines.extend(self._render_llm_failures(llm_failures))
 
             lines.append("---\n")
 

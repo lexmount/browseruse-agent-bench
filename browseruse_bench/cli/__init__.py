@@ -5,6 +5,7 @@ import sys
 import textwrap
 from typing import Any, Dict, List, Optional
 
+from browseruse_bench.cli.attribute import attribute_command, configure_attribute_parser
 from browseruse_bench.cli.eval import configure_eval_parser, eval_command
 from browseruse_bench.cli.leaderboard import configure_leaderboard_parser, leaderboard_command
 from browseruse_bench.cli.list_cmd import configure_list_parser, list_command
@@ -84,6 +85,11 @@ def _build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
     )
     configure_list_parser(list_parser, config)
     list_parser.set_defaults(handler=list_command)
+    attribute_parser = subparsers.add_parser(
+        "attribute", help="Label failure causes on existing eval results"
+    )
+    configure_attribute_parser(attribute_parser, config)
+    attribute_parser.set_defaults(handler=attribute_command)
 
     leaderboard_parser = subparsers.add_parser("leaderboard", help="Generate leaderboard HTML")
     configure_leaderboard_parser(leaderboard_parser, config)

@@ -3,8 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import time
+import tomllib
+from pathlib import Path
 
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
+
+from browseruse_bench.agents import skyvern as skyvern_module
 from browseruse_bench.agents.skyvern import SkyvernAgent, _build_local_chromium_args
+from browseruse_bench.utils import REPO_ROOT
 
 
 def test_close_runtime_resources_closes_browser_and_client() -> None:
@@ -161,3 +170,284 @@ def test_build_local_chromium_args_username_only_no_password() -> None:
         },
     )
     assert args == ["--proxy-server=http://alice@proxy.corp:3128"]
+
+
+# ---------------------------------------------------------------------------
+# Local artifact matching / collection (timeout-path regression: a task_v2 run
+# spreads steps across several tsk_ dirs; only the first embeds the user
+# prompt, and the client-side timeout branch must still collect usage/steps).
+# ---------------------------------------------------------------------------
+
+
+def _write_artifact_task_dir(
+    org_dir: Path,
+    name: str,
+    prompt_text: str | None,
+    step_count: int = 1,
+) -> None:
+    task_dir = org_dir / name
+    for i in range(step_count):
+        step_dir = task_dir / f"{i:02d}_0_stp_{name.removeprefix('tsk_')}{i}"
+        step_dir.mkdir(parents=True)
+        if prompt_text is not None and i == 0:
+            (step_dir / "a_llm_prompt.txt").write_text(prompt_text, encoding="utf-8")
+        (step_dir / "a_llm_response.json").write_text(
+            json.dumps({"usage": {"prompt_tokens": 10, "completion_tokens": 5}}),
+            encoding="utf-8",
+        )
+        (step_dir / "a_llm_response_parsed.json").write_text(
+            json.dumps({"actions": [{"action_type": "CLICK", "id": f"{name}-{i}"}]}),
+            encoding="utf-8",
+        )
+        (step_dir / "a_screenshot_action.png").write_bytes(b"png")
+
+
+def _patch_artifacts_base(monkeypatch, base: Path) -> None:
+    monkeypatch.setattr(skyvern_module, "_get_skyvern_artifacts_base", lambda: base)
+
+
+def test_resolve_artifact_task_dirs_expands_to_sibling_dirs(tmp_path, monkeypatch) -> None:
+    """A prompt-anchored v2 run must claim every new in-window tsk_ dir."""
+    prompt = "Find the highest rated braised pork recipe"
+    org_dir = tmp_path / "o_test"
+    org_dir.mkdir()
+    # Numeric ids chosen so lexicographic order would be wrong (1000 < 900).
+    _write_artifact_task_dir(org_dir, "tsk_900", prompt)
+    _write_artifact_task_dir(org_dir, "tsk_1000", "planner sub-goal, no user prompt")
+    _write_artifact_task_dir(org_dir, "tsk_1100", "extraction sub-goal")
+    _patch_artifacts_base(monkeypatch, tmp_path)
+
+    now = time.time()
+    dirs = skyvern_module._resolve_artifact_task_dirs(
+        now - 50,
+        now + 50,
+        org_id="o_test",
+        existing_dirs_before_task=set(),
+        task_prompt=prompt,
+        include_sibling_dirs=True,
+    )
+
+    assert [d.name for d in dirs] == ["tsk_900", "tsk_1000", "tsk_1100"]
+
+
+def test_resolve_artifact_task_dirs_default_keeps_anchor_only(tmp_path, monkeypatch) -> None:
+    prompt = "Find the highest rated braised pork recipe"
+    org_dir = tmp_path / "o_test"
+    org_dir.mkdir()
+    _write_artifact_task_dir(org_dir, "tsk_900", prompt)
+    _write_artifact_task_dir(org_dir, "tsk_1000", "planner sub-goal, no user prompt")
+    _patch_artifacts_base(monkeypatch, tmp_path)
+
+    now = time.time()
+    dirs = skyvern_module._resolve_artifact_task_dirs(
+        now - 50,
+        now + 50,
+        org_id="o_test",
+        existing_dirs_before_task=set(),
+        task_prompt=prompt,
+    )
+
+    assert [d.name for d in dirs] == ["tsk_900"]
+
+
+def test_resolve_artifact_task_dirs_sibling_expansion_skips_preexisting(
+    tmp_path, monkeypatch
+) -> None:
+    prompt = "Find the highest rated braised pork recipe"
+    org_dir = tmp_path / "o_test"
+    org_dir.mkdir()
+    _write_artifact_task_dir(org_dir, "tsk_800", "leftover from a previous task")
+    _write_artifact_task_dir(org_dir, "tsk_900", prompt)
+    _write_artifact_task_dir(org_dir, "tsk_1000", "planner sub-goal")
+    _patch_artifacts_base(monkeypatch, tmp_path)
+
+    now = time.time()
+    dirs = skyvern_module._resolve_artifact_task_dirs(
+        now - 50,
+        now + 50,
+        org_id="o_test",
+        existing_dirs_before_task={"tsk_800"},
+        task_prompt=prompt,
+        include_sibling_dirs=True,
+    )
+
+    assert [d.name for d in dirs] == ["tsk_900", "tsk_1000"]
+
+
+def test_collect_run_artifacts_aggregates_across_sibling_dirs(tmp_path, monkeypatch) -> None:
+    """The shared collection helper (used by the timeout path) must aggregate
+    screenshots, steps, actions, and usage across every matched tsk_ dir."""
+    prompt = "Find the highest rated braised pork recipe"
+    org_dir = tmp_path / "artifacts" / "o_test"
+    org_dir.mkdir(parents=True)
+    _write_artifact_task_dir(org_dir, "tsk_900", prompt, step_count=2)
+    _write_artifact_task_dir(org_dir, "tsk_1000", None, step_count=3)
+    _patch_artifacts_base(monkeypatch, tmp_path / "artifacts")
+
+    trajectory_dir = tmp_path / "trajectory"
+    trajectory_dir.mkdir()
+    now = time.time()
+
+    screenshot_count, steps, action_history, usage = skyvern_module._collect_run_artifacts(
+        trajectory_dir,
+        now - 50,
+        now + 50,
+        org_id="o_test",
+        existing_dirs_before_task=set(),
+        task_prompt=prompt,
+        include_sibling_dirs=True,
+    )
+
+    assert screenshot_count == 5
+    assert steps == 5
+    assert len(action_history) == 5
+    assert usage["total_prompt_tokens"] == 50
+    assert usage["total_completion_tokens"] == 25
+    assert usage["entry_count"] == 5
+
+
+class TestExtractUsageFromResponseBlob:
+    """Usage extraction must not mix OpenAI and Anthropic token semantics."""
+
+    def test_openai_style_prompt_includes_cached(self) -> None:
+        from browseruse_bench.agents.skyvern import _extract_usage_from_response_blob
+
+        blob = {
+            "usage": {
+                "prompt_tokens": 500,
+                "completion_tokens": 20,
+                "prompt_tokens_details": {"cached_tokens": 300},
+            }
+        }
+        usage = _extract_usage_from_response_blob(blob)
+        assert usage == {
+            "prompt_tokens": 500,
+            "completion_tokens": 20,
+            "cached_tokens": 300,
+            "cache_creation_tokens": 0,
+            "total_tokens": 520,
+        }
+
+    def test_anthropic_style_adds_cache_components_to_prompt(self) -> None:
+        from browseruse_bench.agents.skyvern import _extract_usage_from_response_blob
+
+        # Anthropic input_tokens EXCLUDES cache reads/writes; the normalized
+        # prompt count must include them so downstream cost math (which
+        # subtracts cached from prompt) stays correct.
+        blob = {
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 20,
+                "cache_read_input_tokens": 400,
+                "cache_creation_input_tokens": 50,
+            }
+        }
+        usage = _extract_usage_from_response_blob(blob)
+        assert usage == {
+            "prompt_tokens": 550,
+            "completion_tokens": 20,
+            "cached_tokens": 400,
+            "cache_creation_tokens": 50,
+            "total_tokens": 570,
+        }
+
+    def test_responses_api_style_input_already_includes_cached(self) -> None:
+        from browseruse_bench.agents.skyvern import _extract_usage_from_response_blob
+
+        # OpenAI Responses API: input_tokens INCLUDES cached tokens.
+        blob = {
+            "usage": {
+                "input_tokens": 500,
+                "output_tokens": 20,
+                "input_tokens_details": {"cached_tokens": 300},
+            }
+        }
+        usage = _extract_usage_from_response_blob(blob)
+        assert usage == {
+            "prompt_tokens": 500,
+            "completion_tokens": 20,
+            "cached_tokens": 300,
+            "cache_creation_tokens": 0,
+            "total_tokens": 520,
+        }
+
+    def test_collect_usage_sums_cache_creation(self, tmp_path) -> None:
+        import json
+
+        from browseruse_bench.agents.skyvern import collect_usage_from_skyvern_artifacts
+
+        step_dir = tmp_path / "tsk_1" / "a_stp_001"
+        step_dir.mkdir(parents=True)
+        (step_dir / "raw_llm_response.json").write_text(
+            json.dumps(
+                {
+                    "usage": {
+                        "input_tokens": 100,
+                        "output_tokens": 10,
+                        "cache_read_input_tokens": 200,
+                        "cache_creation_input_tokens": 30,
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        summary = collect_usage_from_skyvern_artifacts([tmp_path / "tsk_1"])
+        assert summary["total_prompt_tokens"] == 330
+        assert summary["total_prompt_cached_tokens"] == 200
+        assert summary["total_prompt_cache_creation_tokens"] == 30
+        assert summary["total_tokens"] == 340
+
+    def test_details_zero_falls_back_to_top_level_cache_keys(self) -> None:
+        from browseruse_bench.agents.skyvern import _extract_usage_from_response_blob
+
+        # Zero-filled details must not mask a real top-level cache counter.
+        blob = {
+            "usage": {
+                "prompt_tokens": 12000,
+                "completion_tokens": 300,
+                "prompt_tokens_details": {"cached_tokens": 0},
+                "cache_read_input_tokens": 9000,
+            }
+        }
+        usage = _extract_usage_from_response_blob(blob)
+        assert usage is not None
+        assert usage["cached_tokens"] == 9000
+
+    def test_zero_prompt_tokens_falls_back_to_input_tokens(self) -> None:
+        from browseruse_bench.agents.skyvern import _extract_usage_from_response_blob
+
+        blob = {
+            "usage": {
+                "prompt_tokens": 0,
+                "completion_tokens": 500,
+                "input_tokens": 8000,
+                "cache_read_input_tokens": 6000,
+            }
+        }
+        usage = _extract_usage_from_response_blob(blob)
+        assert usage is not None
+        assert usage["prompt_tokens"] == 14000  # anthropic-style fold
+        assert usage["cached_tokens"] == 6000
+
+
+def test_skyvern_extra_provides_psycopg_on_all_supported_pythons() -> None:
+    # Temporary-Postgres mode imports psycopg v3 regardless of Python version,
+    # so the skyvern extra must install it on every version we support. A
+    # python_full_version marker here once skipped psycopg on 3.11/3.12 and
+    # broke every first `bubench run --agent skyvern`.
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    skyvern_deps = pyproject["project"]["optional-dependencies"]["skyvern"]
+    psycopg_reqs = [
+        req for req in map(Requirement, skyvern_deps) if canonicalize_name(req.name) == "psycopg"
+    ]
+
+    assert psycopg_reqs, "skyvern extra must declare psycopg for temporary Postgres mode"
+    for minor in (11, 12, 13):
+        environment = {
+            "python_version": f"3.{minor}",
+            "python_full_version": f"3.{minor}.0",
+        }
+        assert any(
+            req.marker is None or req.marker.evaluate(environment) for req in psycopg_reqs
+        ), f"skyvern extra does not install psycopg on Python 3.{minor}"
