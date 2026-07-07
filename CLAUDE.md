@@ -21,6 +21,7 @@ The sections below are bootstrap context specific to Claude Code sessions — ar
 - Run then evaluate in one call: `uv run scripts/run_and_eval.py --agent <agent> --data <bench> --mode <mode>` (equivalent: `bubench run-eval ...`). Forwards run flags to the run stage, then derives the run's model_id and chains `eval` with an explicit `--model-id` (so passthrough models line up). `--skip-eval` stops after the run; eval is skipped if the run hard-fails.
 - Submit a LexBench job (not local run): `bubench submit ...`.
 - Leaderboard / viz: `bubench leaderboard`, `bubench server`, `bubench viz --watch`.
+- Discover available benchmarks/splits, agents, and browser backends: `bubench list` (`--json` for machine-readable output).
 - All tests: `uv run pytest tests/`.
 - Single test: `uv run pytest tests/browseruse_bench/test_task.py -v` or `... -k <pattern>`.
 - Integration tests (marked `integration`, require external tools / API keys) live under `tests/integration/`.

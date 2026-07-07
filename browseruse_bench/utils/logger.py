@@ -182,9 +182,12 @@ def setup_logger(
         logger.handlers.clear()
 
     if console_output:
-        console_handler = logging.StreamHandler(sys.stdout)
+        # Logs go to stderr so that machine-readable stdout (e.g. `bubench
+        # list --json`, `bubench login list --json`) stays pipeable.
+        console_handler = logging.StreamHandler(sys.stderr)
         console_handler.setFormatter(_make_formatter(format_mode))
         setattr(console_handler, _CONSOLE_HANDLER_ATTR, True)
+
         logger.addHandler(console_handler)
         _attach_console_handler_to_root(console_handler, level)
 

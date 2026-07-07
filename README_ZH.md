@@ -174,7 +174,16 @@ bubench skills
 
 将预置的开发者友好 Skills 包（`browseruse_bench/skills/`）安装到 Agent 工具链中。
 
-**5. 运行 & 评估**
+**5. 查看可用的 Benchmark、Agent 与浏览器后端**
+
+```bash
+bubench list           # 列出 benchmark（含 splits）、agent 与浏览器后端
+bubench list --json    # 机器可读输出
+```
+
+运行前用它确认 `--data`、`--agent`、`--browser-id` 可以填哪些值。
+
+**6. 运行 & 评估**
 
 **运行**
 

@@ -97,3 +97,9 @@ def get_backend(browser_id: str) -> BrowserBackend:
         available = ", ".join(sorted(_BACKEND_FACTORIES.keys()))
         raise ValueError(f"Unknown browser backend: '{browser_id}'. Available: {available}")
     return factory()
+
+
+def list_backends() -> list[str]:
+    """Return all registered browser backend ids."""
+    _register_default_backends()
+    return sorted(_BACKEND_FACTORIES)
