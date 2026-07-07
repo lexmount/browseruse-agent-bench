@@ -760,6 +760,40 @@ def configure_run_parser(parser: argparse.ArgumentParser, config: dict[str, Any]
     )
 
 
+def _resolve_run_output_dir(output_base: Path, args: argparse.Namespace) -> Path | None:
+    """Resolve the run output directory, claiming a fresh one when needed.
+
+    Dry runs must leave the experiments tree untouched — an empty timestamp
+    dir left behind would pollute find-latest and leaderboard scans — so no
+    directory is claimed and ``None`` is returned. Resuming an existing
+    ``--timestamp`` directory is read-only here, so it is still resolved
+    (and validated) for dry runs.
+    """
+    if args.timestamp:
+        timestamp = args.timestamp.strip()
+        if not re.match(r"^\d{8}_\d{6}$", timestamp):
+            raise SystemExit("[FAILED] --timestamp format must be YYYYMMDD_HHmmss")
+        output_dir = output_base / timestamp
+        if not output_dir.exists():
+            raise SystemExit(f"[FAILED] Specified timestamp directory does not exist: {output_dir}")
+        logger.info("Resuming/Running in existing timestamp directory: %s", timestamp)
+        return output_dir
+    if args.dry_run:
+        return None
+    return _claim_unique_run_dir(output_base)
+
+
+def _write_output_dir_marker(marker_path: str | None, output_dir: Path) -> None:
+    """Emit the resolved output dir for run-eval to bind to deterministically
+    (concurrency-safe: each caller passes its own marker file path)."""
+    if not marker_path:
+        return
+    try:
+        Path(marker_path).write_text(str(output_dir), encoding="utf-8")
+    except OSError as exc:
+        logger.error("Failed to write --write-output-dir marker: %s", exc)
+
+
 def _claim_unique_run_dir(output_base: Path, max_seconds: int = 600) -> Path:
     """Atomically create a fresh ``YYYYMMDD_HHMMSS`` run dir under *output_base*.
 
@@ -827,32 +861,18 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
         )
     output_base = REPO_ROOT / "experiments" / benchmark_name / args.split / agent_name / model_id
 
-    if args.timestamp:
-        timestamp = args.timestamp.strip()
-        if not re.match(r"^\d{8}_\d{6}$", timestamp):
-            raise SystemExit("[FAILED] --timestamp format must be YYYYMMDD_HHmmss")
-        output_dir = output_base / timestamp
-        if not output_dir.exists():
-            raise SystemExit(f"[FAILED] Specified timestamp directory does not exist: {output_dir}")
-        logger.info("Resuming/Running in existing timestamp directory: %s", timestamp)
-        output_dir.mkdir(parents=True, exist_ok=True)
-    else:
-        output_dir = _claim_unique_run_dir(output_base)
-        timestamp = output_dir.name
-
-    add_file_handler(logger, output_dir / "run.log", format_mode="plain")
-
-    # Emit the resolved output dir for run-eval to bind to deterministically
-    # (concurrency-safe: each caller passes its own marker file path).
-    write_output_dir = getattr(args, "write_output_dir", None)
-    if write_output_dir:
-        try:
-            Path(write_output_dir).write_text(str(output_dir), encoding="utf-8")
-        except OSError as exc:
-            logger.warning("Failed to write --write-output-dir marker: %s", exc)
+    # Dry runs claim no directory and write no run files (output_dir is None
+    # unless resuming an existing --timestamp directory).
+    output_dir = _resolve_run_output_dir(output_base, args)
+    if not args.dry_run:
+        add_file_handler(logger, output_dir / "run.log", format_mode="plain")
+    # The marker is emitted even on dry runs so run-eval stays on the
+    # authoritative marker binding path instead of its mtime fallback; the
+    # unclaimed output_base has no tasks/ subdir, so run-eval binds nothing.
+    _write_output_dir_marker(getattr(args, "write_output_dir", None), output_dir or output_base)
 
     logger.info("Running %s on %s", agent_name, benchmark_name)
-    logger.info("   Output: %s", output_dir)
+    logger.info("   Output: %s", output_dir or output_base)
     include_raw_machine_identifiers = bool(
         getattr(args, "include_raw_machine_identifiers", False)
         or str(os.getenv(INCLUDE_RAW_MACHINE_IDENTIFIERS_ENV_KEY) or "").strip().lower()
@@ -888,7 +908,9 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
     task_id = getattr(args, "id", None)
     tasks_to_run = filter_tasks(tasks, args.mode, args.count, args.task_ids, task_id)
 
-    if args.skip_completed:
+    # output_dir is None only on a fresh dry run, where nothing can be
+    # completed yet.
+    if args.skip_completed and output_dir is not None:
         tasks_to_run, skipped = filter_completed_tasks(
             tasks_to_run,
             output_dir,
@@ -937,8 +959,7 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
     venv_path = resolve_agent_venv_path(agent_config_dict)
     use_uv = check_uv_available()
     ensure_venv(venv_path, use_uv)
-    if not args.dry_run:
-        install_agent_dependencies(venv_path, extra_name, use_uv, install_targets)
+    install_agent_dependencies(venv_path, extra_name, use_uv, install_targets)
 
     # Prepare environment
     env = os.environ.copy()
@@ -1190,34 +1211,32 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
         success_count,
         failed_count,
     )
-    # Skip manifest for dry runs: there is no real run to record and the
-    # tasks_success/failed counters would be misleadingly zero.
-    if not getattr(args, "dry_run", False):
-        try:
-            _write_run_manifest(
-                output_dir,
-                resolved_agent_config=agent_cfg,
-                run_context={
-                    "agent": agent_name,
-                    "benchmark": benchmark_name,
-                    "split": args.split,
-                    "model_id": model_id,
-                    "machine_id": machine_identity.get("machine_id"),
-                    "timestamp": timestamp,
-                    "model_name_override": getattr(args, "model_name", None),
-                    "browser_id_override": getattr(args, "browser_id", None),
-                    "mode": getattr(args, "mode", None),
-                    "task_ids": getattr(args, "task_ids", None),
-                    "task_id": getattr(args, "id", None),
-                    "count": getattr(args, "count", None),
-                    "region": getattr(args, "region", None),
-                    "concurrency": getattr(args, "concurrency", None),
-                    "agent_config_path": str(getattr(args, "agent_config", None) or ""),
-                },
-                machine_identity=machine_identity,
-            )
-        except (OSError, KeyError, AttributeError, TypeError) as exc:
-            logger.warning("Failed to finalize run manifest: %s", exc)
+    # Dry runs returned earlier, so this always records a real run.
+    try:
+        _write_run_manifest(
+            output_dir,
+            resolved_agent_config=agent_cfg,
+            run_context={
+                "agent": agent_name,
+                "benchmark": benchmark_name,
+                "split": args.split,
+                "model_id": model_id,
+                "machine_id": machine_identity.get("machine_id"),
+                "timestamp": output_dir.name,
+                "model_name_override": getattr(args, "model_name", None),
+                "browser_id_override": getattr(args, "browser_id", None),
+                "mode": getattr(args, "mode", None),
+                "task_ids": getattr(args, "task_ids", None),
+                "task_id": getattr(args, "id", None),
+                "count": getattr(args, "count", None),
+                "region": getattr(args, "region", None),
+                "concurrency": getattr(args, "concurrency", None),
+                "agent_config_path": str(getattr(args, "agent_config", None) or ""),
+            },
+            machine_identity=machine_identity,
+        )
+    except (OSError, KeyError, AttributeError, TypeError) as exc:
+        logger.warning("Failed to finalize run manifest: %s", exc)
     return 0 if failed_count == 0 else 1
 
 
