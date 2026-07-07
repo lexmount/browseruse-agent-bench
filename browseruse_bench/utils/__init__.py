@@ -60,6 +60,7 @@ from browseruse_bench.eval.score import calculate_success, extract_score_from_re
 from browseruse_bench.eval.summary import (
     aggregate_evaluation_costs,
     calculate_evaluation_cost,
+    dedupe_records_keep_newest,
     normalized_results_file,
 )
 from browseruse_bench.utils.image_utils import (
@@ -197,6 +198,7 @@ __all__ = [
     "aggregate_evaluation_costs",
     "calculate_success",
     "find_latest_tasks_dir",
+    "dedupe_records_keep_newest",
     "normalized_results_file",
     # Failure classification
     "classify_failure_case",

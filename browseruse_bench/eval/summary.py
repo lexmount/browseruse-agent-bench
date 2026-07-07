@@ -184,6 +184,25 @@ def _convert_json_to_jsonl(results_file: Path) -> Optional[Path]:
     return temp_path
 
 
+def dedupe_records_keep_newest(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Collapse duplicate task_id records, keeping the newest occurrence.
+
+    Results JSONL files are append-only, so a later record for the same
+    task_id supersedes an earlier one (e.g. a synthetic placeholder that was
+    re-judged on resume). Order of first appearance is preserved; records
+    without a string task_id are kept unchanged after the deduped ones.
+    """
+    by_task_id: Dict[str, Dict[str, Any]] = {}
+    extras: List[Dict[str, Any]] = []
+    for record in records:
+        task_id = record.get("task_id")
+        if isinstance(task_id, str):
+            by_task_id[task_id] = record
+        else:
+            extras.append(record)
+    return list(by_task_id.values()) + extras
+
+
 @contextmanager
 def normalized_results_file(results_file: Path) -> Iterator[Path]:
     """Yield a path that is guaranteed to be JSONL-like, cleaning up temp files."""
