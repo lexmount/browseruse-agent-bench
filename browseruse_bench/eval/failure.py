@@ -18,8 +18,11 @@ from browseruse_bench.utils.repo_root import REPO_ROOT
 _root_cfg = load_config_file(REPO_ROOT / "config.yaml")
 _FAILURE_TEMPERATURE: float = float(_root_cfg.get("eval", {}).get("temperature", 0))
 _FAILURE_MAX_TOKENS: int = int(_root_cfg.get("eval", {}).get("max_tokens") or 2048)
-# api_max_images=0 declares the judge model text-only (same switch as LexBench eval).
-_FAILURE_TEXT_ONLY: bool = int(_root_cfg.get("eval", {}).get("api_max_images", 50)) == 0
+# api_max_images=0 declares the judge model text-only (same switch as LexBench
+# eval). None-check rather than `or`: a bare `api_max_images:` key must fall
+# back to the default without turning a meaningful 0 into it.
+_raw_max_images = _root_cfg.get("eval", {}).get("api_max_images")
+_FAILURE_TEXT_ONLY: bool = int(50 if _raw_max_images is None else _raw_max_images) == 0
 
 # Sentinel written by LexBench coverage backfill for tasks that were never
 # judged; it must survive attribution so eval resume can find those records.

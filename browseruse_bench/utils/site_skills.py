@@ -12,8 +12,9 @@ hostname or a suffix.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Set, Tuple
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -30,13 +31,23 @@ _SECTION_HEADER = (
     "http_get(), ...); adapt them to your own tools.\n"
 )
 _TRUNCATION_NOTICE = "\n[site knowledge truncated: max_chars budget reached]\n"
+# Below this budget the section is all header/notice boilerplate with no
+# actual knowledge; _resolve_site_skills fails fast on smaller values so a
+# treated experiment arm can never silently deliver no treatment.
+MIN_MAX_CHARS = len(_SECTION_HEADER) + len(_TRUNCATION_NOTICE) + 500
+
+# Some dataset rows carry noisy site values ("www.xiaohongshu.com或其他");
+# keep the hostname-looking prefix, same tolerance as login-context routing.
+_HOST_PREFIX_RE = re.compile(r"[A-Za-z0-9._\-:/]+")
 
 
 def _hostname(url_or_host: str | None) -> str:
-    """Lowercased hostname without ``www.``; accepts bare domains."""
+    """Lowercased hostname without ``www.``; accepts bare and noisy domains."""
     value = (url_or_host or "").strip()
-    if not value:
+    match = _HOST_PREFIX_RE.match(value)
+    if not match:
         return ""
+    value = match.group(0)
     parsed = urlparse(value if "://" in value else f"https://{value}")
     return (parsed.hostname or "").removeprefix("www.").lower()
 
@@ -99,10 +110,19 @@ def task_target_urls(task_info: Dict[str, Any]) -> List[str]:
     return [single] if isinstance(single, str) and single.strip() else []
 
 
-def build_skills_section(files: List[Path], skills_dir: Path, max_chars: int) -> str:
-    """Markdown section with the files' content, truncated at *max_chars*."""
+def build_skills_section(
+    files: List[Path], skills_dir: Path, max_chars: int
+) -> Tuple[str, List[Path], bool]:
+    """Markdown section with the files' content, truncated at *max_chars*.
+
+    Returns ``(section, included_files, truncated)`` — *included_files* lists
+    only the files whose content (fully or partially) made it into the
+    section, so callers never report skills the agent could not see.
+    """
     parts = [_SECTION_HEADER]
     used = len(_SECTION_HEADER)
+    included: List[Path] = []
+    truncated = False
     for path in files:
         try:
             text = path.read_text(encoding="utf-8")
@@ -112,11 +132,15 @@ def build_skills_section(files: List[Path], skills_dir: Path, max_chars: int) ->
         block = f"\n### {path.relative_to(skills_dir)}\n\n{text.strip()}\n"
         budget = max_chars - used - len(_TRUNCATION_NOTICE)
         if len(block) > budget:
-            parts.append(block[:max(budget, 0)] + _TRUNCATION_NOTICE)
+            truncated = True
+            if budget > 0:
+                parts.append(block[:budget] + _TRUNCATION_NOTICE)
+                included.append(path)
             break
         parts.append(block)
         used += len(block)
-    return "".join(parts)
+        included.append(path)
+    return "".join(parts), included, truncated
 
 
 def apply_site_skills(
@@ -127,9 +151,10 @@ def apply_site_skills(
 ) -> Dict[str, Dict[str, Any]]:
     """Append matched skill sections to each task's prompt, in place.
 
-    Returns a per-task summary ``{task_id: {"files": [...], "chars": int}}``
-    for the run manifest and for caller-side logging (module loggers duplicate
-    in the CLI parent process, so per-task lines are logged by the caller). A
+    Returns a per-task summary ``{task_id: {"files": [...], "chars": int,
+    "truncated": bool}}`` for the run manifest and for caller-side logging
+    (module loggers duplicate in the CLI parent process, so per-task lines are
+    logged by the caller). ``files`` lists only content actually injected; a
     miss means the skill library has a coverage gap.
     """
     summary: Dict[str, Dict[str, Any]] = {}
@@ -140,14 +165,18 @@ def apply_site_skills(
             matched.update(match_skill_files(url, skills_dir, max_files))
         files = sorted(matched)[:max_files]
         if not files:
-            summary[task_id] = {"files": [], "chars": 0}
+            summary[task_id] = {"files": [], "chars": 0, "truncated": False}
             continue
-        section = build_skills_section(files, skills_dir, max_chars)
-        rel_files = [str(f.relative_to(skills_dir)) for f in files]
+        section, included, truncated = build_skills_section(files, skills_dir, max_chars)
+        info = {
+            "files": [str(f.relative_to(skills_dir)) for f in included],
+            "chars": len(section),
+            "truncated": truncated,
+        }
         # Keep the pre-injection prompt so result.json can record the clean
         # task separately from the injected knowledge.
         task["prompt_base"] = task.get("prompt", "")
         task["prompt"] = f"{task.get('prompt', '')}\n\n{section}".strip()
-        task["site_skills"] = {"files": rel_files, "chars": len(section)}
-        summary[task_id] = {"files": rel_files, "chars": len(section)}
+        task["site_skills"] = info
+        summary[task_id] = info
     return summary

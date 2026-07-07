@@ -294,6 +294,8 @@ site_skills:
   dir: browseruse_bench/agents/site_skills/domain-skills
   # Budget for the injected section per task, in characters.
   max_chars: 30000
+  # Cap on matched skill files injected per task.
+  max_files: 10
 eval:
   model: gpt-5.4
   api_key: $OPENAI_API_KEY

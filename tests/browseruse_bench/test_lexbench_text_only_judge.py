@@ -10,6 +10,7 @@ pytest.importorskip("PIL")
 
 from PIL import Image
 
+from browseruse_bench.eval import failure
 from browseruse_bench.eval.lexbench_browser.lexmount_eval import evaluate_task
 
 
@@ -91,8 +92,6 @@ def test_api_max_images_positive_still_sends_images(task_data, screenshots):
 
 
 def test_failure_classification_text_only(monkeypatch, screenshots):
-    from browseruse_bench.eval import failure
-
     model = FakeJudgeModel()
     model.generate = lambda messages, **kwargs: (
         model.calls.append(messages) or '{"category": "M2", "reasoning": "misread page"}'
