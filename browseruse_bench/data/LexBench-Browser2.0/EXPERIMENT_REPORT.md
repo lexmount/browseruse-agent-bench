@@ -1,7 +1,8 @@
 # LexBench-Browser2.0 Experiment Report
 
-This note summarizes the initial validation run used to check whether LexBench-Browser2.0
-separates stronger and weaker browser agents in a meaningful way.
+This is the experiment report for **LexBench-Browser2.0**. It summarizes the initial
+validation run used to check whether LexBench-Browser2.0 separates stronger and weaker
+browser agents in a meaningful way.
 
 ## Setup
 
