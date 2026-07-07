@@ -329,6 +329,11 @@ def load_agent_registry(agent: str) -> dict[str, Any]:
     return all_registries.get(agent, {})
 
 
+def load_agent_registry_names() -> list[str]:
+    """Return all agent names declared in configs/agent_registry.yaml."""
+    return sorted(load_config_file(_AGENT_REGISTRY_PATH), key=str.lower)
+
+
 def _resolve_agent_key(agent: str, agents: dict[str, Any]) -> str:
     """Return the canonical agent key from *agents* dict, matching case-insensitively.
 

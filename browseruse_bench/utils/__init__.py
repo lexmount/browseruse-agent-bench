@@ -24,6 +24,7 @@ from browseruse_bench.utils.config_loader import (
     get_default_version,
     load_agent_config_from_path,
     load_agent_registry,
+    load_agent_registry_names,
     load_config_file,
     load_data_info,
     load_eval_config,
@@ -60,6 +61,7 @@ from browseruse_bench.eval.score import calculate_success, extract_score_from_re
 from browseruse_bench.eval.summary import (
     aggregate_evaluation_costs,
     calculate_evaluation_cost,
+    dedupe_records_keep_newest,
     normalized_results_file,
 )
 from browseruse_bench.utils.image_utils import (
@@ -68,7 +70,11 @@ from browseruse_bench.utils.image_utils import (
     strip_base64_prefix,
 )
 from browseruse_bench.utils.json_io import load_task_file
-from browseruse_bench.utils.logger import add_file_handler, setup_logger
+from browseruse_bench.utils.logger import (
+    add_file_handler,
+    add_script_log_handler,
+    setup_logger,
+)
 from browseruse_bench.utils.parse_utils import find_key_recursive, load_json_records, safe_int
 from browseruse_bench.utils.prompt_loader import (
     load_prompt,
@@ -141,6 +147,7 @@ __all__ = [
     "load_config_file",
     "load_eval_config",
     "load_agent_registry",
+    "load_agent_registry_names",
     "resolve_agent_entry",
     "resolve_agent_inline_config",
     "resolve_output_model_id",
@@ -167,6 +174,7 @@ __all__ = [
     # Logger
     "setup_logger",
     "add_file_handler",
+    "add_script_log_handler",
     # Constants
     "IS_WINDOWS",
     "EXPERIMENTS_DIR",
@@ -197,6 +205,7 @@ __all__ = [
     "aggregate_evaluation_costs",
     "calculate_success",
     "find_latest_tasks_dir",
+    "dedupe_records_keep_newest",
     "normalized_results_file",
     # Failure classification
     "classify_failure_case",

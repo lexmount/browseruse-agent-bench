@@ -178,7 +178,16 @@ bubench skills
 
 Installs the prebuilt developer-friendly skills pack (`browseruse_bench/skills/`) into your agent toolchain.
 
-**5. Run & Evaluate**
+**5. Discover available benchmarks, agents, and browsers**
+
+```bash
+bubench list           # benchmarks (with splits), agents, and browser backends
+bubench list --json    # machine-readable output
+```
+
+Use this to see what you can pass to `--data`, `--agent`, and `--browser-id` before running.
+
+**6. Run & Evaluate**
 
 **Run**
 ```bash

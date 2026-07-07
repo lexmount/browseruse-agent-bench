@@ -16,6 +16,7 @@ from browseruse_bench.utils import (
     DataSource,
     add_eval_args,
     classify_failures_batch,
+    dedupe_records_keep_newest,
     find_latest_tasks_dir,
     get_env_var,
     handle_cli_errors,
@@ -55,12 +56,17 @@ def run_failure_classification(
     model: str,
     api_key: str,
     base_url: str,
-    skip_existing: bool = False,
+    skip_existing: bool = True,
     num_workers: int = 4,
     max_samples: int | None = None,
     temperature: float | None = None,
 ) -> int:
-    """Run failure classification on results file (post-evaluation)."""
+    """Run failure classification on results file (post-evaluation).
+
+    skip_existing defaults to True so resume evals do not re-classify records
+    that already carry a failure_category; use `bubench attribute --force` to
+    re-label everything.
+    """
     if not results_file.exists():
         logger.warning("Results file not found, skipping failure classification: %s", results_file)
         return 1
@@ -83,6 +89,14 @@ def run_failure_classification(
     if not eval_results:
         logger.warning("Evaluation results empty, skipping failure classification: %s", results_file)
         return 0
+
+    deduped = dedupe_records_keep_newest(eval_results)
+    if len(deduped) != len(eval_results):
+        logger.info(
+            "Deduplicated results before classification: %d -> %d records",
+            len(eval_results), len(deduped),
+        )
+        eval_results = deduped
 
     model_instance = load_evaluation_model(model, api_key, base_url, temperature=temperature)
     logger.info("Starting failure classification: %s records", len(eval_results))
@@ -383,6 +397,7 @@ def run_evaluation(
         split=args.split,
         data_source=getattr(args, "data_source", DataSource.LOCAL),
         mode=eval_mode,
+        force_reeval=bool(getattr(args, "force_reeval", False)),
         extra=extra,
     )
 
@@ -429,6 +444,7 @@ def run_evaluation(
         model_name,
         api_key,
         base_url,
+        skip_existing=True,
         temperature=temperature,
     ) if results_file else 0
 
@@ -481,7 +497,11 @@ def configure_eval_parser(parser: argparse.ArgumentParser, config: dict[str, Any
     parser.add_argument(
         "--force-reeval",
         action="store_true",
-        help="Rerun evaluation (default reuses existing results, only runs failure classification)",
+        help=(
+            "Archive existing eval results (timestamped .bak) and re-judge every task. "
+            "Default resumes: keeps existing records, evaluates missing tasks, and skips "
+            "already-classified failures (use `bubench attribute --force` to re-label those)."
+        ),
     )
     parser.add_argument(
         "--agent-config",

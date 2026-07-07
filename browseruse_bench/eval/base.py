@@ -5,6 +5,7 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar, Dict, Iterator, List, Optional, Set
 
@@ -13,6 +14,7 @@ import openai
 from browseruse_bench.eval.model import EvaluationModel, current_task_id
 from browseruse_bench.eval.summary import (
     aggregate_evaluation_costs,
+    dedupe_records_keep_newest,
     generate_evaluation_summary,
 )
 from browseruse_bench.schemas.eval_result import EvalResult
@@ -36,6 +38,7 @@ class EvaluatorArgs:
     split: str
     data_source: str
     mode: str
+    force_reeval: bool = False
     extra: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -120,6 +123,10 @@ class BaseEvaluator(ABC):
     def run(self) -> int:
         self.args.output_path.mkdir(parents=True, exist_ok=True)
         tasks = self.load_tasks()
+        # Archive only after load_tasks succeeded, so a startup failure (bad
+        # split, missing dataset) leaves the previous results untouched.
+        if self.args.force_reeval:
+            self._discard_existing_results()
         completed = self.list_completed_tasks()
         already = self._resume_skip_set()
         pending = [
@@ -129,21 +136,79 @@ class BaseEvaluator(ABC):
         logger.info("Evaluating %d tasks (skip %d already done)", len(pending), len(already))
         for result in self._run_iteration(pending, tasks):
             self._append_result(result)
-        # Hook runs before summary so subclasses (e.g. LexBench coverage backfill)
-        # can mutate the JSONL on disk; we re-read after the hook to pick up any
-        # records the hook added.
+        # Hook runs before the dedupe/summary pass so subclasses (e.g. LexBench
+        # coverage backfill) can mutate the JSONL on disk; _dedupe_results_file
+        # then re-reads the file, collapses duplicate task_ids (newest wins),
+        # and returns the records the summary is built from.
         records = self._load_all_records()
         self.post_eval_hook(records)
-        records = self._load_all_records()
+        records = self._dedupe_results_file()
         self._generate_summary(records)
         return 0
 
+    def _discard_existing_results(self) -> None:
+        """Archive the pre-reeval results file so the run starts from scratch.
+
+        The backup keeps a .bak suffix so it never matches the *_results.json
+        globs that leaderboard/visualization use to locate canonical results.
+        """
+        path = self.results_path()
+        if not path.exists():
+            return
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        backup = path.with_name(f"{path.name}.{stamp}.bak")
+        counter = 1
+        while backup.exists():
+            backup = path.with_name(f"{path.name}.{stamp}-{counter}.bak")
+            counter += 1
+        path.replace(backup)
+        logger.info("force-reeval: archived existing results file to %s", backup.name)
+
+    def _dedupe_results_file(self) -> List[Dict[str, Any]]:
+        """Collapse duplicate task_id records and return the deduped list.
+
+        Resume runs can legitimately re-judge a task that already has a line on
+        disk (e.g. a synthetic placeholder whose trajectory appeared later), and
+        _append_result then leaves both lines; without dedupe the summary and
+        every downstream reader would double-count that task. The file is only
+        rewritten when duplicates were dropped and every line parsed — with
+        unparseable lines present the rewrite would silently destroy them, so
+        dedupe then applies to the returned records only.
+        """
+        records, malformed = self._load_records_counting_malformed()
+        deduped = dedupe_records_keep_newest(records)
+        if len(deduped) == len(records):
+            return records
+        if malformed:
+            logger.warning(
+                "Results file %s has %d unparseable lines; skipped dedupe rewrite to preserve them",
+                self.results_path().name, malformed,
+            )
+            return deduped
+        self._write_records(deduped)
+        logger.info("Deduplicated results file: %d -> %d records", len(records), len(deduped))
+        return deduped
+
+    def _write_records(self, records: List[Dict[str, Any]]) -> None:
+        """Atomically replace the results JSONL with the given records."""
+        path = self.results_path()
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            for record in records:
+                fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        tmp_path.replace(path)
+
     def _load_all_records(self) -> List[Dict[str, Any]]:
         """Load every record currently appended to the results JSONL on disk."""
+        return self._load_records_counting_malformed()[0]
+
+    def _load_records_counting_malformed(self) -> tuple[List[Dict[str, Any]], int]:
+        """Load results records, also counting lines that failed to parse."""
         path = self.results_path()
         records: List[Dict[str, Any]] = []
+        malformed = 0
         if not path.exists():
-            return records
+            return records, malformed
         with open(path, encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
@@ -152,10 +217,13 @@ class BaseEvaluator(ABC):
                 try:
                     record = json.loads(line)
                 except json.JSONDecodeError:
+                    malformed += 1
                     continue
                 if isinstance(record, dict):
                     records.append(record)
-        return records
+                else:
+                    malformed += 1
+        return records, malformed
 
     def _resume_skip_set(self) -> Set[str]:
         path = self.results_path()
