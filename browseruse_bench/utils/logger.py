@@ -16,6 +16,8 @@ _NOISY_THIRD_PARTY_LOGGERS = (
 
 _RUN_LOG_HANDLER_ATTR = "_run_log_file_handler"
 
+_CONSOLE_HANDLER_ATTR = "_browseruse_bench_console_handler"
+
 
 def _resolve_log_level(level_text: str, default_level: int) -> int:
     """Resolve a text log level into a logging constant."""
@@ -97,6 +99,30 @@ def add_file_handler(
     return handler
 
 
+def _attach_handlers_to_root(handlers: List[logging.Handler], level: int) -> None:
+    """Attach handlers to the root logger so propagating module-level loggers
+    are captured, keeping at most one console handler on root.
+
+    Every CLI submodule calls ``setup_logger`` at import time; without the
+    marker-based dedupe the root logger would accumulate one console handler
+    per call and print every propagated line that many times. The first
+    console handler to reach root owns the format and stream of propagated
+    output; later ``format_mode`` choices apply only to their named logger.
+    """
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    root_has_console = any(
+        getattr(existing, _CONSOLE_HANDLER_ATTR, False)
+        for existing in root_logger.handlers
+    )
+    for handler in handlers:
+        is_console = getattr(handler, _CONSOLE_HANDLER_ATTR, False)
+        if is_console and root_has_console:
+            continue
+        root_logger.addHandler(handler)
+        root_has_console = root_has_console or is_console
+
+
 def setup_logger(
     name: str = __name__,
     log_dir: Optional[str] = None,
@@ -137,6 +163,7 @@ def setup_logger(
     if console_output:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
+        setattr(console_handler, _CONSOLE_HANDLER_ATTR, True)
         logger.addHandler(console_handler)
         handlers.append(console_handler)
 
@@ -163,11 +190,7 @@ def setup_logger(
             logger.warning(f"[WARNING] Failed to setup file logging: {e}")
 
     if handlers:
-        root_logger = logging.getLogger()
-        root_logger.setLevel(level)
-        for handler in handlers:
-            if handler not in root_logger.handlers:
-                root_logger.addHandler(handler)
+        _attach_handlers_to_root(handlers, level)
 
     _configure_third_party_loggers()
 
