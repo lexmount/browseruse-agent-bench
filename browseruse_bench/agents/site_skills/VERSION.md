@@ -11,7 +11,10 @@ refreshing this record in the same commit.
   (branch tip containing the 2026-07-07 lexbench report; skill content last
   touched by `c9ea510` "add image.baidu.com and fanyi.baidu.com skills")
 - Synced: 2026-07-07
-- Contents: 182 site directories, 203 files (191 skill .md + hosts alias files)
+- Contents: 182 site directories, 203 files (191 skill .md, 8 `hosts` alias
+  files, 2 .py helper scripts referenced by their skill docs, 2 .gitkeep).
+  Only `*.md` files are ever matched/injected; the .py helpers are kept so
+  the snapshot stays byte-identical to the source for future syncs.
 - Verified: `diff -rq` clean against the source at sync time
 
 Sync command:
