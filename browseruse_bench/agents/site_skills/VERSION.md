@@ -18,5 +18,5 @@ Sync command:
 
 ```bash
 rsync -a --delete ~/lexmount/browser-harness/agent-workspace/domain-skills/ \
-    browseruse_bench/data/site_skills/domain-skills/
+    browseruse_bench/agents/site_skills/domain-skills/
 ```
