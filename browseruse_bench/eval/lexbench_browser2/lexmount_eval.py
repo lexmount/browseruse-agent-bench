@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Binary LLM-as-judge for LexBench2.0 synthetic tasks.
+"""Binary LLM-as-judge for LexBench-Browser2.0 tasks.
 
 Reads rubrics from the task JSONL, reads agent answers and screenshots from trajectory
-result directories, calls GPT-4.1 to decide success/failure per task, and reports
+result directories, calls an LLM to decide success/failure per task, and reports
 success rate + avg steps.
 """
 
@@ -33,10 +33,10 @@ from browseruse_bench.eval.lexbench_browser.screenshot_cleaner import clean_scre
 from browseruse_bench.eval.model import encode_image  # noqa: E402
 
 TASKS_JSONL = (
-    REPO_ROOT / "browseruse_bench" / "data" / "LexBench2.0" / "synthetic" / "lexbench2_synthetic_tasks.jsonl"
+    REPO_ROOT / "browseruse_bench" / "data" / "LexBench-Browser2.0" / "task.jsonl"
 )
 
-LOGGER = logging.getLogger("lexbench2-judge")
+LOGGER = logging.getLogger("lexbench-browser2-judge")
 
 NUM_WORKERS = 15
 JUDGE_MODEL = "gpt-5.5"
@@ -79,7 +79,7 @@ Respond in JSON with this exact schema:
 RESPONSE_FORMAT = {
     "type": "json_schema",
     "json_schema": {
-        "name": "lexbench2_judge",
+        "name": "lexbench_browser2_judge",
         "schema": {
             "type": "object",
             "properties": {
@@ -367,18 +367,18 @@ def _load_existing(path: Path) -> dict[str, dict[str, Any]]:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Judge LexBench2.0 synthetic run results.")
+    parser = argparse.ArgumentParser(description="Judge LexBench-Browser2.0 run results.")
     parser.add_argument(
         "--tasks-jsonl",
         type=Path,
         default=TASKS_JSONL,
-        help="LexBench2.0 task JSONL file.",
+        help="LexBench-Browser2.0 task JSONL file.",
     )
     parser.add_argument(
         "--trajectories-dir",
         type=Path,
         required=True,
-        help="Run tasks directory, e.g. experiments/LexBench2.0/synthetic/browser-use/<model>/<timestamp>/tasks.",
+        help="Run tasks directory, e.g. experiments/LexBench-Browser2.0/All/browser-use/<model>/<timestamp>/tasks.",
     )
     parser.add_argument(
         "--output-path",
