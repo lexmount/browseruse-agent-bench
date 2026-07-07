@@ -1,0 +1,13 @@
+{
+  "default_split": "All",
+  "split": {
+    "All": "task.jsonl"
+  },
+  "version_info": {
+    "LexBench-Browser2.0": {
+      "total_tasks": 100,
+      "version": "2.0",
+      "description": "LexBench-Browser 2.0 tasks."
+    }
+  }
+}
