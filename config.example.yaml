@@ -288,8 +288,10 @@ agents:
 # (hostname / dotted suffix / single label, `.-_` ignored, `hosts` aliases).
 site_skills:
   enabled: false
-  # Skill library root; relative paths resolve against the repo root.
-  dir: ../browser-harness/agent-workspace/domain-skills
+  # Skill library root; relative paths resolve against the repo root. The
+  # default is the vendored, versioned copy (see its VERSION.md) so runs
+  # depend on a static skill snapshot rather than a live external checkout.
+  dir: browseruse_bench/data/site_skills/domain-skills
   # Budget for the injected section per task, in characters.
   max_chars: 30000
 eval:
