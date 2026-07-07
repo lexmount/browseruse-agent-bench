@@ -7,8 +7,6 @@ import pytest
 from browseruse_bench.cli.run import _resolve_site_skills
 from browseruse_bench.utils.site_skills import (
     apply_site_skills,
-    attach_native_site_skills,
-    build_native_skill_package,
     build_skills_section,
     match_skill_files,
     task_target_urls,
@@ -134,36 +132,6 @@ class TestApplySiteSkills:
         }
         summary = apply_site_skills([task], skills_dir)
         assert summary["t3"]["files"] == ["bilibili/navigation.md", "job-boards/search.md"]
-
-
-class TestNativeMode:
-    def test_attach_sets_paths_without_touching_prompt(self, skills_dir: Path) -> None:
-        task = {"task_id": "t1", "prompt": "P", "urls": ["https://bilibili.com/"]}
-        summary = attach_native_site_skills([task], skills_dir)
-        assert task["prompt"] == "P"
-        assert "site_skills_native" in task
-        assert task["site_skills_native"]["files"][0].endswith("navigation.md")
-        assert summary["t1"]["files"] == ["bilibili/navigation.md"]
-        assert summary["t1"]["chars"] == 0
-
-    def test_attach_miss_sets_nothing(self, skills_dir: Path) -> None:
-        task = {"task_id": "t2", "prompt": "P", "urls": ["https://unknown-site.io/"]}
-        attach_native_site_skills([task], skills_dir)
-        assert "site_skills_native" not in task
-
-    def test_package_has_frontmatter_and_content(self, skills_dir: Path) -> None:
-        files = match_skill_files("bilibili.com", skills_dir)
-        md = build_native_skill_package(files)
-        assert md.startswith("---\nname: site-knowledge\n")
-        assert "description: Field-tested browsing knowledge for bilibili" in md
-        assert "# bilibili nav" in md
-
-    def test_package_truncates(self, tmp_path: Path) -> None:
-        root = tmp_path / "domain-skills"
-        (root / "example-com").mkdir(parents=True)
-        (root / "example-com" / "big.md").write_text("A" * 5000, encoding="utf-8")
-        md = build_native_skill_package(match_skill_files("example.com", root), max_chars=1000)
-        assert "truncated" in md
 
 
 class TestResolveSiteSkills:

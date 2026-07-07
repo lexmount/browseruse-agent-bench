@@ -119,62 +119,6 @@ def build_skills_section(files: List[Path], skills_dir: Path, max_chars: int) ->
     return "".join(parts)
 
 
-def attach_native_site_skills(
-    tasks: List[Dict[str, Any]],
-    skills_dir: Path,
-    max_files: int = DEFAULT_MAX_FILES,
-) -> Dict[str, Dict[str, Any]]:
-    """Attach matched skill file paths to each task without touching prompts.
-
-    Native mode: the agent adapter (currently openclaw) installs the files
-    into the agent's own skill-discovery directory, and the model decides
-    whether to read them. Returns the same per-task summary shape as
-    :func:`apply_site_skills`.
-    """
-    summary: Dict[str, Dict[str, Any]] = {}
-    for task in tasks:
-        task_id = str(task.get("task_id", "?"))
-        matched: Set[Path] = set()
-        for url in task_target_urls(task):
-            matched.update(match_skill_files(url, skills_dir, max_files))
-        files = sorted(matched)[:max_files]
-        rel_files = [str(f.relative_to(skills_dir)) for f in files]
-        if files:
-            task["site_skills_native"] = {"files": [str(f) for f in files]}
-        summary[task_id] = {"files": rel_files, "chars": 0}
-    return summary
-
-
-def build_native_skill_package(files: List[Path], max_chars: int = DEFAULT_MAX_CHARS) -> str:
-    """SKILL.md content (frontmatter + concatenated skill docs) for native mode."""
-    sites = sorted({f.parent.name for f in files})
-    header = (
-        "---\n"
-        "name: site-knowledge\n"
-        f"description: Field-tested browsing knowledge for {', '.join(sites)}: "
-        "URL patterns, anti-bot workarounds, API fallbacks. Read this before "
-        "browsing these sites.\n"
-        "user-invocable: false\n"
-        "---\n\n# Site knowledge (pre-collected)\n"
-    )
-    parts = [header]
-    used = len(header)
-    for path in files:
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            logger.error("[SITE-SKILLS] Unreadable skill file %s: %s", path, exc)
-            continue
-        block = f"\n## {path.parent.name}/{path.name}\n\n{text.strip()}\n"
-        budget = max_chars - used - len(_TRUNCATION_NOTICE)
-        if len(block) > budget:
-            parts.append(block[:max(budget, 0)] + _TRUNCATION_NOTICE)
-            break
-        parts.append(block)
-        used += len(block)
-    return "".join(parts)
-
-
 def apply_site_skills(
     tasks: List[Dict[str, Any]],
     skills_dir: Path,
