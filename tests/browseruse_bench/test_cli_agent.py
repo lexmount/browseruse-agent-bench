@@ -68,6 +68,20 @@ class TestRunSubprocess:
         assert rc == 0
         assert err is None
 
+    def test_stdin_is_devnull_not_inherited(self, tmp_path: Path) -> None:
+        """CLIs that read piped stdin until EOF (codex exec) must get an
+        immediate EOF, not the parent's open stdin, or they hang for the
+        whole task timeout under batch scripts."""
+        agent = self._agent()
+        rc, lines, err = agent._run_subprocess(
+            [sys.executable, "-c", "import sys; print(repr(sys.stdin.read()))"],
+            timeout=10,
+            task_workspace=tmp_path,
+        )
+        assert rc == 0
+        assert err is None
+        assert "''" in "".join(lines)
+
     def test_stdout_collected(self, tmp_path: Path) -> None:
         agent = self._agent()
         _, lines, _ = agent._run_subprocess(

@@ -136,6 +136,11 @@ class CLIAgent(BaseAgent):
             ):
                 # FileNotFoundError propagates to caller if exe not found
                 popen_kwargs: dict[str, object] = {
+                    # DEVNULL, not inherited: CLIs that read piped stdin until
+                    # EOF (codex exec prints "Reading additional input from
+                    # stdin..." and blocks) hang for the full task timeout when
+                    # the parent's stdin is open, e.g. under a batch script.
+                    "stdin": subprocess.DEVNULL,
                     "stdout": subprocess.PIPE,
                     "stderr": subprocess.PIPE,
                     "text": True,
