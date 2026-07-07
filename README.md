@@ -201,6 +201,29 @@ bubench eval --agent browser-use --data LexBench-Browser --model-id gpt-4.1
 > `--split` is optional — the benchmark's `default_split` (from `data_info.json`) is used automatically. Pass `--split <name>` only to override the default.
 > For the full parameter reference, see the [Quickstart docs](https://docs.bubench.lexmount.io/en/quickstart).
 
+**Site skills (optional, off by default)**
+
+`bubench run` can inject pre-collected per-site knowledge (URL patterns,
+anti-bot workarounds, API fallbacks) into each task's prompt. The library
+lives in `browseruse_bench/agents/site_skills/` (vendored snapshot of
+browser-harness domain-skills; see its `VERSION.md` for provenance and the
+sync command). Matching is by the task's declared target site.
+
+```bash
+# A/B experiment: control arm vs skill arm on the same tasks
+bubench run --agent browser-use --data LexBench-Browser --mode first_n --count 20 --site-skills off
+bubench run --agent browser-use --data LexBench-Browser --mode first_n --count 20 --site-skills on
+```
+
+- Default: **off** (`site_skills.enabled: false` in `config.yaml`); the CLI
+  flag overrides the config per run.
+- Config keys: `site_skills.enabled`, `site_skills.dir` (library root,
+  relative paths resolve against the repo root), `site_skills.max_chars`
+  (per-task injection budget).
+- Per-task hits (matched files, injected size) are logged, recorded in the
+  run's `config_snapshot.json`, and in each task's `result.json` under
+  `site_skills`; the `task` field stays the clean pre-injection prompt.
+
 ## Data Loading
 
 Use `--data-source` to control where benchmark data is loaded from:
