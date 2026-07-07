@@ -174,6 +174,15 @@ models:
     # reasoning: true                # mark the model as a reasoning model
     # supports_reasoning_effort: true
     # thinking: medium               # OpenClaw --thinking level (off|minimal|low|medium|high|xhigh)
+  # Hermes Agent CLI model. Only supported by the hermes agent; the agent
+  # writes a per-task Hermes provider config from these values
+  # (OpenAI-compatible endpoints work, e.g. a LiteLLM proxy).
+  hermes:
+    model_type: OPENAI
+    model_id: gpt-5.4
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+    # reasoning_effort: medium       # forwarded to agent.reasoning_effort in the per-task config
 browsers:
   lexmount:
     browser_id: lexmount
@@ -276,6 +285,10 @@ agents:
   openclaw:
     active_model: openclaw
     timeout: 600
+  hermes:
+    active_model: hermes
+    timeout: 600
+    # toolsets: browser              # Hermes toolsets enabled for the run (comma-separated)
   deepbrowse:
     use_vision: auto
     max_steps: 50
