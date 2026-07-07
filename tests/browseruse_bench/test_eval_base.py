@@ -1,6 +1,7 @@
 """Tests for BaseEvaluator scaffolding."""
 from __future__ import annotations
 
+import json
 from dataclasses import fields, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +14,7 @@ from browseruse_bench.schemas import (
     EvalDetails,
     EvalResult,
 )
+from browseruse_bench.utils.json_io import load_jsonl
 
 
 def test_evaluator_args_is_dataclass():
@@ -29,7 +31,7 @@ def test_evaluator_args_required_fields():
     assert expected.issubset(field_names)
 
 
-def _make_args(tmp_path: Path) -> EvaluatorArgs:
+def _make_args(tmp_path: Path, force_reeval: bool = False) -> EvaluatorArgs:
     traj = tmp_path / "tasks"
     traj.mkdir()
     out = tmp_path / "out"
@@ -47,6 +49,7 @@ def _make_args(tmp_path: Path) -> EvaluatorArgs:
         split="All",
         data_source="local",
         mode="fake_mode",
+        force_reeval=force_reeval,
     )
 
 
@@ -118,6 +121,133 @@ def test_run_resumes_already_evaluated(tmp_path):
     ev.run()
     assert "evaluate:t1" not in ev.calls
     assert "evaluate:t2" in ev.calls
+
+
+def test_force_reeval_discards_stale_results(tmp_path):
+    """--force-reeval must re-judge every task; no stale record may survive."""
+    args = _make_args(tmp_path, force_reeval=True)
+    _seed_trajectories(args, ("t1", "t2"))
+    out = args.output_path / "Fake_fake-model_results.json"
+    out.write_text(
+        '{"task_id": "t1", "predicted_label": 0, "stale": true}\n', encoding="utf-8"
+    )
+    tasks = {"t1": {"desc": "one"}, "t2": {"desc": "two"}}
+    ev = _FakeEvaluator(args, model=None, tasks=tasks)
+    assert ev.run() == 0
+    assert "evaluate:t1" in ev.calls
+    assert "evaluate:t2" in ev.calls
+    records = load_jsonl(out)
+    assert sorted(r["task_id"] for r in records) == ["t1", "t2"]
+    assert not any(r.get("stale") for r in records)
+    summary = json.loads(ev.summary_path().read_text(encoding="utf-8"))
+    assert summary["overall_statistics"]["evaluated_tasks"] == 2
+    assert summary["task_list"]["failed_task_ids"] == []
+
+
+def test_force_reeval_archives_old_results_as_backup(tmp_path):
+    """The pre-reeval file is renamed to a .bak sidecar, not destroyed.
+
+    The backup must not be picked up by the canonical results glob that
+    leaderboard/visualization use, or it would be double-counted.
+    """
+    args = _make_args(tmp_path, force_reeval=True)
+    _seed_trajectories(args, ("t1",))
+    out = args.output_path / "Fake_fake-model_results.json"
+    stale_line = '{"task_id": "t1", "predicted_label": 0, "stale": true}\n'
+    out.write_text(stale_line, encoding="utf-8")
+    ev = _FakeEvaluator(args, model=None, tasks={"t1": {"desc": "one"}})
+    assert ev.run() == 0
+    backups = list(args.output_path.glob("*.bak"))
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8") == stale_line
+    assert list(args.output_path.glob("*_results.json")) == [out]
+
+
+def test_force_reeval_keeps_results_when_load_tasks_fails(tmp_path):
+    """A force-reeval that fails during startup must not touch the results file."""
+    args = _make_args(tmp_path, force_reeval=True)
+    _seed_trajectories(args, ("t1",))
+    out = args.output_path / "Fake_fake-model_results.json"
+    stale_line = '{"task_id": "t1", "predicted_label": 1}\n'
+    out.write_text(stale_line, encoding="utf-8")
+
+    class _BrokenTasksEvaluator(_FakeEvaluator):
+        def load_tasks(self):
+            raise ValueError("bad split")
+
+    ev = _BrokenTasksEvaluator(args, model=None, tasks={})
+    with pytest.raises(ValueError):
+        ev.run()
+    assert out.read_text(encoding="utf-8") == stale_line
+    assert list(args.output_path.glob("*.bak")) == []
+
+
+def test_force_reeval_backup_names_do_not_collide(tmp_path, monkeypatch):
+    """Two archives within the same second must keep both backups."""
+    import browseruse_bench.eval.base as eval_base
+
+    fixed = datetime(2026, 7, 7, 12, 0, 0, tzinfo=timezone.utc)
+
+    class _FixedDatetime:
+        @staticmethod
+        def now(tz):
+            return fixed
+
+    monkeypatch.setattr(eval_base, "datetime", _FixedDatetime)
+    args = _make_args(tmp_path, force_reeval=True)
+    ev = _FakeEvaluator(args, model=None, tasks={})
+    out = ev.results_path()
+    for content in ("first", "second"):
+        out.write_text(content, encoding="utf-8")
+        ev._discard_existing_results()
+    backups = sorted(args.output_path.glob("*.bak"))
+    assert len(backups) == 2
+    assert {b.read_text(encoding="utf-8") for b in backups} == {"first", "second"}
+
+
+def test_summary_dedupes_duplicate_records_keeping_newest(tmp_path):
+    """Duplicate JSONL lines for one task_id must not inflate the summary."""
+    args = _make_args(tmp_path)
+    _seed_trajectories(args, ("t2",))
+    out = args.output_path / "Fake_fake-model_results.json"
+    out.write_text(
+        '{"task_id": "t1", "predicted_label": 0}\n'
+        '{"task_id": "t1", "predicted_label": 1}\n',
+        encoding="utf-8",
+    )
+    tasks = {"t1": {"desc": "one"}, "t2": {"desc": "two"}}
+    ev = _FakeEvaluator(args, model=None, tasks=tasks)
+    assert ev.run() == 0
+    records = load_jsonl(out)
+    assert [r["task_id"] for r in records] == ["t1", "t2"]
+    assert records[0]["predicted_label"] == 1
+    summary = json.loads(ev.summary_path().read_text(encoding="utf-8"))
+    assert summary["overall_statistics"]["evaluated_tasks"] == 2
+    assert summary["task_list"]["successful_task_ids"] == ["t1", "t2"]
+    assert summary["task_list"]["failed_task_ids"] == []
+
+
+def test_dedupe_preserves_file_with_malformed_lines(tmp_path):
+    """Unparseable lines block the rewrite but not the in-memory dedupe."""
+    args = _make_args(tmp_path)
+    _seed_trajectories(args, ("t2",))
+    out = args.output_path / "Fake_fake-model_results.json"
+    out.write_text(
+        '{"task_id": "t1", "predicted_label": 0}\n'
+        '{"task_id": "t1", "predicted_label": 1}{"broken": \n'
+        '{"task_id": "t1", "predicted_label": 1}\n',
+        encoding="utf-8",
+    )
+    tasks = {"t1": {"desc": "one"}, "t2": {"desc": "two"}}
+    ev = _FakeEvaluator(args, model=None, tasks=tasks)
+    assert ev.run() == 0
+    lines = [
+        line for line in out.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
+    assert len(lines) == 4  # 3 original lines (1 malformed kept) + appended t2
+    summary = json.loads(ev.summary_path().read_text(encoding="utf-8"))
+    assert summary["overall_statistics"]["evaluated_tasks"] == 2
+    assert summary["task_list"]["successful_task_ids"] == ["t1", "t2"]
 
 
 def test_run_skips_unknown_completed_dirs(tmp_path):

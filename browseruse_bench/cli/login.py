@@ -33,11 +33,17 @@ from browseruse_bench.browsers.login_contexts import (
     upsert_profile,
 )
 from browseruse_bench.browsers.providers.lexmount import _build_debug_url, normalize_profile_keys
-from browseruse_bench.utils import REPO_ROOT, handle_cli_errors, load_env_file, setup_logger
+from browseruse_bench.utils import (
+    REPO_ROOT,
+    add_script_log_handler,
+    handle_cli_errors,
+    load_env_file,
+    setup_logger,
+)
 
 load_env_file(REPO_ROOT / ".env")
 
-logger = setup_logger("login", log_dir="output/logs", format_mode="plain")
+logger = setup_logger("login", format_mode="plain")
 
 _ANSI_GREEN = "\033[32m"
 _ANSI_YELLOW = "\033[33m"
@@ -653,6 +659,9 @@ def _cmd_remove(args: argparse.Namespace, _config: dict[str, Any]) -> int:
 
 @handle_cli_errors
 def login_command(args: argparse.Namespace, _config: dict[str, Any]) -> int:
+    add_script_log_handler(
+        logger, REPO_ROOT / "output" / "logs", "login", format_mode="plain"
+    )
     action = getattr(args, "login_action", None)
     if action == "add":
         return _cmd_add(args, _config)

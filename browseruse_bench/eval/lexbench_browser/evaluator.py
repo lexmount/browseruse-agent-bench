@@ -581,9 +581,7 @@ class LexBenchBrowserEvaluator(BaseEvaluator):
             synthetic = self._build_synthetic_failure(tid, tasks[tid])
             records_by_task_id[tid] = synthetic
         ordered = [records_by_task_id[tid] for tid in expected]
-        with open(self.results_path(), "w", encoding="utf-8") as fh:
-            for record in ordered:
-                fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        self._write_records(ordered)
         logger.info("Backfilled %d synthetic failure records", len(missing))
 
     def _build_synthetic_failure(self, task_id: str, task_data: dict[str, Any]) -> dict[str, Any]:
