@@ -284,8 +284,10 @@ agents:
 # Site-skills prompt injection (agent-agnostic). When enabled, `bubench run`
 # matches each task's declared target site against the per-site skill library
 # and appends the matched markdown files to the task prompt. Override per run
-# with `--site-skills on|off`. Matching mirrors browser-harness domain-skills
-# (hostname / dotted suffix / single label, `.-_` ignored, `hosts` aliases).
+# with `--site-skills on|off|native` (native: install matched skills into the
+# agent's own skill directory instead of the prompt; openclaw only). Matching
+# mirrors browser-harness domain-skills (hostname / dotted suffix / single
+# label, `.-_` ignored, `hosts` aliases).
 site_skills:
   enabled: false
   # Skill library root; relative paths resolve against the repo root. The

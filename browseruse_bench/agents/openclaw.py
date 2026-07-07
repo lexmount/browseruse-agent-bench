@@ -37,6 +37,7 @@ from browseruse_bench.schemas import AgentMetrics, AgentResult, AgentUsage
 from browseruse_bench.utils import IS_WINDOWS
 from browseruse_bench.utils.image_utils import decode_base64_to_file
 from browseruse_bench.utils.parse_utils import safe_int
+from browseruse_bench.utils.site_skills import build_native_skill_package
 
 logger = logging.getLogger(__name__)
 
@@ -597,6 +598,7 @@ class OpenClawAgent(CLIAgent):
         trajectory_dir.mkdir(parents=True, exist_ok=True)
         state_dir = task_workspace / ".openclaw-state"
         self._write_state_config(agent_config, task_workspace, state_dir, model, cdp_url)
+        self._install_native_site_skills(task_info, task_workspace)
         cmd = self._build_command(f"{rules}\n\n{prompt}", task_id, timeout, agent_config, attempt)
 
         env = _subprocess_env(state_dir)
@@ -692,6 +694,31 @@ class OpenClawAgent(CLIAgent):
         except (TypeError, ValueError) as exc:
             logger.warning("Invalid timeout for task %s (%r): %s", task_id, timeout_val, exc)
             return 600
+
+    @staticmethod
+    def _install_native_site_skills(task_info: dict[str, Any], task_workspace: Path) -> None:
+        """Install matched site skills as an OpenClaw workspace skill.
+
+        Native site-skills mode (`bubench run --site-skills native`): cli/run.py
+        attaches the matched skill file paths; here they become a workspace
+        skill package (`<workspace>/skills/<name>/SKILL.md`), which OpenClaw
+        indexes (source "openclaw-workspace") so the model can read it on
+        demand. plugin-skills/ is NOT scanned — entries there come from the
+        plugin registry only.
+        """
+        native = task_info.get("site_skills_native") or {}
+        files = [Path(f) for f in native.get("files") or []]
+        if not files:
+            return
+        skill_dir = task_workspace / ".openclaw-workspace" / "skills" / "site-knowledge"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(
+            build_native_skill_package(files), encoding="utf-8"
+        )
+        logger.info(
+            "[SITE-SKILLS] Installed native workspace skill (%d file(s)) for task %s",
+            len(files), task_info.get("task_id"),
+        )
 
     @staticmethod
     def _write_state_config(

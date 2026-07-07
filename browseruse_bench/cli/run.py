@@ -66,7 +66,11 @@ from browseruse_bench.utils.run_identity import (
     MACHINE_IDENTITY_ENV_KEY,
     collect_machine_identity,
 )
-from browseruse_bench.utils.site_skills import DEFAULT_MAX_CHARS, apply_site_skills
+from browseruse_bench.utils.site_skills import (
+    DEFAULT_MAX_CHARS,
+    apply_site_skills,
+    attach_native_site_skills,
+)
 
 CONFIG_PATH = REPO_ROOT / "config.yaml"
 
@@ -756,12 +760,14 @@ def configure_run_parser(parser: argparse.ArgumentParser, config: dict[str, Any]
     parser.add_argument(
         "--site-skills",
         dest="site_skills",
-        choices=["on", "off"],
+        choices=["on", "off", "native"],
         default=None,
         help=(
-            "Inject pre-collected site skills into task prompts "
-            "(overrides config site_skills.enabled; library path comes from "
-            "config site_skills.dir)."
+            "Site-skills mode: on = inject matched skills into task prompts; "
+            "native = install matched skills into the agent's own skill "
+            "directory (openclaw only) without touching prompts; off = none. "
+            "Overrides config site_skills.enabled; library path comes from "
+            "config site_skills.dir."
         ),
     )
     parser.add_argument(
@@ -780,7 +786,7 @@ def _resolve_site_skills(config: dict[str, Any], cli_value: str | None) -> tuple
     corrupt the comparison.
     """
     cfg = config.get("site_skills") or {}
-    enabled = bool(cfg.get("enabled", False)) if cli_value is None else cli_value == "on"
+    enabled = bool(cfg.get("enabled", False)) if cli_value is None else cli_value in ("on", "native")
     if not enabled:
         return None
     raw_dir = cfg.get("dir")
@@ -947,17 +953,34 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
             ),
         )
 
-    site_skills_settings = _resolve_site_skills(config, getattr(args, "site_skills", None))
-    site_skills_manifest: dict[str, Any] = {"enabled": site_skills_settings is not None}
+    site_skills_mode = getattr(args, "site_skills", None)
+    if site_skills_mode == "native" and agent_name != "openclaw":
+        raise SystemExit(
+            "[FAILED] --site-skills native is only supported by the openclaw agent "
+            "(other agents have no native skill-discovery directory)."
+        )
+    site_skills_settings = _resolve_site_skills(config, site_skills_mode)
+    site_skills_manifest: dict[str, Any] = {
+        "enabled": site_skills_settings is not None,
+        "mode": site_skills_mode or ("on" if site_skills_settings else "off"),
+    }
     if site_skills_settings:
         skills_dir, skills_max_chars = site_skills_settings
-        logger.info("[SITE-SKILLS] Enabled: dir=%s max_chars=%d", skills_dir, skills_max_chars)
-        skills_by_task = apply_site_skills(tasks_to_run, skills_dir, skills_max_chars)
+        logger.info(
+            "[SITE-SKILLS] Enabled (mode=%s): dir=%s max_chars=%d",
+            site_skills_manifest["mode"], skills_dir, skills_max_chars,
+        )
+        if site_skills_mode == "native":
+            skills_by_task = attach_native_site_skills(tasks_to_run, skills_dir)
+        else:
+            skills_by_task = apply_site_skills(tasks_to_run, skills_dir, skills_max_chars)
         for skill_task_id, hit in skills_by_task.items():
             if hit["files"]:
                 logger.info(
-                    "[SITE-SKILLS] %s: injected %d file(s), %d chars: %s",
-                    skill_task_id, len(hit["files"]), hit["chars"], ", ".join(hit["files"]),
+                    "[SITE-SKILLS] %s: %s %d file(s), %d chars: %s",
+                    skill_task_id,
+                    "attached (native)" if site_skills_mode == "native" else "injected",
+                    len(hit["files"]), hit["chars"], ", ".join(hit["files"]),
                 )
             else:
                 logger.warning(
