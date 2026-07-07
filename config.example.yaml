@@ -281,6 +281,17 @@ agents:
     browser_control: hybrid
     timeout: 300
     max_turns: 50
+# Site-skills prompt injection (agent-agnostic). When enabled, `bubench run`
+# matches each task's declared target site against the per-site skill library
+# and appends the matched markdown files to the task prompt. Override per run
+# with `--site-skills on|off`. Matching mirrors browser-harness domain-skills
+# (hostname / dotted suffix / single label, `.-_` ignored, `hosts` aliases).
+site_skills:
+  enabled: false
+  # Skill library root; relative paths resolve against the repo root.
+  dir: ../browser-harness/agent-workspace/domain-skills
+  # Budget for the injected section per task, in characters.
+  max_chars: 30000
 eval:
   model: gpt-5.4
   api_key: $OPENAI_API_KEY

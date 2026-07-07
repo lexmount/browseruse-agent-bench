@@ -66,6 +66,7 @@ from browseruse_bench.utils.run_identity import (
     MACHINE_IDENTITY_ENV_KEY,
     collect_machine_identity,
 )
+from browseruse_bench.utils.site_skills import DEFAULT_MAX_CHARS, apply_site_skills
 
 CONFIG_PATH = REPO_ROOT / "config.yaml"
 
@@ -753,11 +754,45 @@ def configure_run_parser(parser: argparse.ArgumentParser, config: dict[str, Any]
         ),
     )
     parser.add_argument(
+        "--site-skills",
+        dest="site_skills",
+        choices=["on", "off"],
+        default=None,
+        help=(
+            "Inject pre-collected site skills into task prompts "
+            "(overrides config site_skills.enabled; library path comes from "
+            "config site_skills.dir)."
+        ),
+    )
+    parser.add_argument(
         "--write-output-dir",
         dest="write_output_dir",
         default=None,
         help=argparse.SUPPRESS,  # internal: run-eval reads the exact run dir from here
     )
+
+
+def _resolve_site_skills(config: dict[str, Any], cli_value: str | None) -> tuple[Path, int] | None:
+    """Resolve site-skills settings, or None when the feature is off.
+
+    Fails fast when enabled but misconfigured: an experiment arm whose skill
+    directory silently resolves to nothing would run as a control arm and
+    corrupt the comparison.
+    """
+    cfg = config.get("site_skills") or {}
+    enabled = bool(cfg.get("enabled", False)) if cli_value is None else cli_value == "on"
+    if not enabled:
+        return None
+    raw_dir = cfg.get("dir")
+    if not raw_dir:
+        raise SystemExit("[FAILED] site_skills enabled but site_skills.dir is not configured")
+    skills_dir = Path(str(raw_dir)).expanduser()
+    if not skills_dir.is_absolute():
+        skills_dir = (REPO_ROOT / skills_dir).resolve()
+    if not skills_dir.is_dir():
+        raise SystemExit(f"[FAILED] site_skills.dir not found: {skills_dir}")
+    max_chars = int(cfg.get("max_chars", DEFAULT_MAX_CHARS))
+    return skills_dir, max_chars
 
 
 def _claim_unique_run_dir(output_base: Path, max_seconds: int = 600) -> Path:
@@ -911,6 +946,28 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
                 ) or "~",
             ),
         )
+
+    site_skills_settings = _resolve_site_skills(config, getattr(args, "site_skills", None))
+    site_skills_manifest: dict[str, Any] = {"enabled": site_skills_settings is not None}
+    if site_skills_settings:
+        skills_dir, skills_max_chars = site_skills_settings
+        logger.info("[SITE-SKILLS] Enabled: dir=%s max_chars=%d", skills_dir, skills_max_chars)
+        skills_by_task = apply_site_skills(tasks_to_run, skills_dir, skills_max_chars)
+        for skill_task_id, hit in skills_by_task.items():
+            if hit["files"]:
+                logger.info(
+                    "[SITE-SKILLS] %s: injected %d file(s), %d chars: %s",
+                    skill_task_id, len(hit["files"]), hit["chars"], ", ".join(hit["files"]),
+                )
+            else:
+                logger.warning(
+                    "[SITE-SKILLS] %s: no skill matched (coverage gap)", skill_task_id
+                )
+        site_skills_manifest.update({
+            "dir": str(skills_dir),
+            "max_chars": skills_max_chars,
+            "tasks": skills_by_task,
+        })
 
     if args.dry_run:
         logger.info("   [DRY RUN] Would run %s tasks using agent_runner.py", len(tasks_to_run))
@@ -1213,6 +1270,7 @@ def run_agent(agent_name: str, benchmark_name: str, config: dict[str, Any], args
                     "region": getattr(args, "region", None),
                     "concurrency": getattr(args, "concurrency", None),
                     "agent_config_path": str(getattr(args, "agent_config", None) or ""),
+                    "site_skills": site_skills_manifest,
                 },
                 machine_identity=machine_identity,
             )
