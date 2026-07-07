@@ -39,6 +39,22 @@ class TestBuildTaskPrompt:
         prompt = AGENT.build_task_prompt(task_info)
         assert "Alt key task" in prompt
 
+    def test_prebuilt_prompt_wins_over_rebuild(self):
+        """A prompt pre-formatted by cli/run.py (constraints + optional
+        site-skills injection) must pass through verbatim — rebuilding from
+        task_text would silently drop the injected content."""
+        task_info = {
+            "task_text": "Find the price",
+            "url": "https://example.com",
+            "prompt": "Find the price\nUse only ...\n## Site knowledge (pre-collected)\nnotes",
+        }
+        assert AGENT.build_task_prompt(task_info) == task_info["prompt"]
+
+    def test_custom_template_overrides_prebuilt_prompt(self):
+        task_info = {"task_text": "Buy milk", "url": "https://s.com", "prompt": "PREBUILT"}
+        prompt = AGENT.build_task_prompt(task_info, template="T: {task_text}")
+        assert prompt == "T: Buy milk"
+
     def test_custom_template(self):
         task_info = {"task_text": "Buy milk", "url": "https://shop.com"}
         prompt = AGENT.build_task_prompt(task_info, template="Task: {task_text} | URL: {url}")

@@ -68,6 +68,13 @@ class BaseAgent(ABC):
         Returns:
             Formatted prompt ready to pass to the agent.
         """
+        # cli/run.py pre-formats task_info["prompt"] (site constraint,
+        # avoid-loops reminder, optional site-skills injection). Rebuilding
+        # from task_text would silently drop those, so a pre-built prompt
+        # wins unless the caller asks for a custom template.
+        prebuilt = task_info.get("prompt")
+        if prebuilt and template is None:
+            return prebuilt
         task_text = task_info.get("task_text") or task_info.get("prompt", "")
         url = task_info.get("url", "")
         if template:
