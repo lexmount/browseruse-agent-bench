@@ -1,0 +1,14 @@
+{
+  "default_split": "synthetic",
+  "split": {
+    "synthetic": "synthetic/lexbench2_synthetic_tasks.jsonl",
+    "synthetic_10_5zh_5en": "synthetic/lexbench2_synthetic_10_5zh_5en.jsonl"
+  },
+  "version_info": {
+    "LexBench2.0": {
+      "total_tasks": 100,
+      "version": "2.0",
+      "description": "LexBench 2.0 synthetic tasks."
+    }
+  }
+}
