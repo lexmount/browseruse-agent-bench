@@ -154,6 +154,29 @@ skill 越换效率;老实型 harness(openclaw)不论模型强弱都靠 skill 换
 5. openclaw 的 token 成本本身是 browser-use 的 ~5 倍,skill 未改善之,
    若在意成本应优先优化其浏览循环而非 skill。
 
+## 追加:openclaw 第三 arm — native 自管 skill(20260707_162026)
+
+`--site-skills native`:命中 skill 安装为 OpenClaw workspace skill
+(`<workspace>/skills/site-knowledge/SKILL.md`,`openclaw skills list` 确认
+indexed/ready),prompt 不注入,模型自行决定是否 `read`。
+
+```
+通过:   对照 9/20 | 注入 11/20 | native 8/20
+步数:   285      | 306        | 329
+token:  5.86M    | 6.78M      | 8.40M
+skill 阅读率(native): 13/20 主动读取
+读取与通过无相关: 读且过 5/13(38%) vs 未读且过 3/7(43%)
+```
+
+关键差异 case:amazon(注入翻正,native 没读 skill → 败)、youtube(native
+读了仍败)、crunchyroll/baidu(native 败于对照/注入都过的题,疑似运行波动)。
+
+结论:**在 gpt-5.4 + openclaw 上,自管模式是"两头亏"**——付出了 skill 索引
+的系统开销 + 读取回合 + 中途注入的上下文(token 比注入 arm 还高 24%),但
+知识进入上下文的时机晚于规划期(注入 arm 在第一步前就有知识),且 35% 的
+任务根本没读。单次运行方差不小(2 题疑似波动),但方向明确:**如果要给
+openclaw 上 skill,推荐 prompt 注入而非自管发现**。
+
 ## 建议下一步
 
 1. browser-use + openclaw 全量 split(约 210 题)复跑两 arm,固化结论;
