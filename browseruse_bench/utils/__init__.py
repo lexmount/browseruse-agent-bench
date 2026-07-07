@@ -68,7 +68,11 @@ from browseruse_bench.utils.image_utils import (
     strip_base64_prefix,
 )
 from browseruse_bench.utils.json_io import load_task_file
-from browseruse_bench.utils.logger import add_file_handler, setup_logger
+from browseruse_bench.utils.logger import (
+    add_file_handler,
+    add_script_log_handler,
+    setup_logger,
+)
 from browseruse_bench.utils.parse_utils import find_key_recursive, load_json_records, safe_int
 from browseruse_bench.utils.prompt_loader import (
     load_prompt,
@@ -167,6 +171,7 @@ __all__ = [
     # Logger
     "setup_logger",
     "add_file_handler",
+    "add_script_log_handler",
     # Constants
     "IS_WINDOWS",
     "EXPERIMENTS_DIR",

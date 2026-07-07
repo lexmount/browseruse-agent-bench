@@ -5,7 +5,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 _NOISY_THIRD_PARTY_LOGGERS = (
     "httpx",
@@ -14,7 +14,7 @@ _NOISY_THIRD_PARTY_LOGGERS = (
     "openai._base_client",
 )
 
-_RUN_LOG_HANDLER_ATTR = "_run_log_file_handler"
+_FILE_HANDLER_ATTR_TEMPLATE = "_{slot}_file_handler"
 
 _CONSOLE_HANDLER_ATTR = "_browseruse_bench_console_handler"
 
@@ -61,6 +61,7 @@ def add_file_handler(
     level: int = logging.INFO,
     format_mode: Optional[str] = None,
     also_root: bool = True,
+    slot: str = "run_log",
 ) -> logging.FileHandler:
     """Dynamically attach a file handler to an existing logger.
 
@@ -74,6 +75,9 @@ def add_file_handler(
         format_mode: Formatter mode (``"plain"`` or default structured).
         also_root: If True, also attach the handler to the root logger so
             that logs from all modules are captured.
+        slot: Replacement key; a later call with the same slot replaces the
+            previous handler, different slots coexist (e.g. the per-command
+            script log and the experiment run.log).
 
     Returns:
         The created ``FileHandler`` (caller can close it later if needed).
@@ -83,15 +87,16 @@ def add_file_handler(
     handler.setLevel(level)
     handler.setFormatter(_make_formatter(format_mode))
 
-    # Remove a previous run-log handler if one was attached
-    prev = getattr(logger_instance, _RUN_LOG_HANDLER_ATTR, None)
+    # Remove the previous handler occupying this slot, if any
+    slot_attr = _FILE_HANDLER_ATTR_TEMPLATE.format(slot=slot)
+    prev = getattr(logger_instance, slot_attr, None)
     if prev is not None:
         logger_instance.removeHandler(prev)
         logging.getLogger().removeHandler(prev)
         prev.close()
 
     logger_instance.addHandler(handler)
-    setattr(logger_instance, _RUN_LOG_HANDLER_ATTR, handler)
+    setattr(logger_instance, slot_attr, handler)
 
     if also_root:
         logging.getLogger().addHandler(handler)
@@ -99,43 +104,71 @@ def add_file_handler(
     return handler
 
 
-def _attach_handlers_to_root(handlers: List[logging.Handler], level: int) -> None:
-    """Attach handlers to the root logger so propagating module-level loggers
-    are captured, keeping at most one console handler on root.
+def add_script_log_handler(
+    logger_instance: logging.Logger,
+    log_dir: Path,
+    name: str,
+    *,
+    format_mode: Optional[str] = None,
+) -> Optional[logging.FileHandler]:
+    """Attach the per-command script log (``<log_dir>/<name>/<timestamp>.log``).
+
+    Called at command execution time so only the active command's script log
+    exists in the process; via the root attachment it captures the command's
+    own lines plus root-propagated module-level output. The script log is
+    auxiliary: if the location is unwritable, the command continues
+    console-only and this returns None.
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = Path(log_dir) / name / f"{timestamp}.log"
+    try:
+        handler = add_file_handler(
+            logger_instance, log_file, format_mode=format_mode, slot="script_log"
+        )
+    except OSError as e:
+        logger_instance.warning(f"[WARNING] Failed to set up script log {log_file}: {e}")
+        return None
+    logger_instance.info(f"[INFO] Logging to file: {log_file}")
+    return handler
+
+
+def _attach_console_handler_to_root(handler: logging.Handler, level: int) -> None:
+    """Attach a console handler to the root logger so propagating module-level
+    loggers are captured, keeping at most one console handler on root.
 
     Every CLI submodule calls ``setup_logger`` at import time; without the
     marker-based dedupe the root logger would accumulate one console handler
     per call and print every propagated line that many times. The first
     console handler to reach root owns the format and stream of propagated
     output; later ``format_mode`` choices apply only to their named logger.
+    File handlers never attach here: root-wide file capture belongs to
+    ``add_file_handler``.
     """
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
-    root_has_console = any(
+    if any(
         getattr(existing, _CONSOLE_HANDLER_ATTR, False)
         for existing in root_logger.handlers
-    )
-    for handler in handlers:
-        is_console = getattr(handler, _CONSOLE_HANDLER_ATTR, False)
-        if is_console and root_has_console:
-            continue
-        root_logger.addHandler(handler)
-        root_has_console = root_has_console or is_console
+    ):
+        return
+    root_logger.addHandler(handler)
 
 
 def setup_logger(
     name: str = __name__,
-    log_dir: Optional[str] = None,
     level: int = logging.INFO,
     console_output: bool = True,
     format_mode: Optional[str] = None
 ) -> logging.Logger:
     """
-    Setup a logger with console and file handlers.
-    
+    Setup a named logger with a console handler.
+
+    File logging is an execution-time concern: use ``add_script_log_handler``
+    for the per-command script log and ``add_file_handler`` for the
+    experiment run.log.
+
     Args:
         name: Logger name
-        log_dir: Optional directory to save log files
         level: Logging level
         console_output: Whether to output to console
         format_mode: Optional formatter mode (e.g., "plain" for message-only logs)
@@ -143,54 +176,17 @@ def setup_logger(
     logger = logging.getLogger(name)
     logger.setLevel(level)
     logger.propagate = False
-    
+
     # Remove existing handlers to avoid duplicates
     if logger.handlers:
         logger.handlers.clear()
 
-    formatter = _make_formatter(format_mode)
-
-    handlers: List[logging.Handler] = []
-
-    env_announce = os.getenv("BROWSERUSE_BENCH_LOG_ANNOUNCE", "").strip().lower()
-    if env_announce in {"0", "false", "no", "off"}:
-        announce_log_file = False
-    elif env_announce in {"1", "true", "yes", "on"}:
-        announce_log_file = True
-    else:
-        announce_log_file = "skills" not in sys.argv
-
     if console_output:
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(formatter)
+        console_handler.setFormatter(_make_formatter(format_mode))
         setattr(console_handler, _CONSOLE_HANDLER_ATTR, True)
         logger.addHandler(console_handler)
-        handlers.append(console_handler)
-
-    if log_dir:
-        try:
-            # Create log directory with subdirectory for each logger
-            log_path = Path(log_dir) / name
-            log_path.mkdir(parents=True, exist_ok=True)
-            
-            # Create log file with timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            log_file = log_path / f"{timestamp}.log"
-            
-            file_handler = logging.FileHandler(log_file, encoding="utf-8")
-            file_handler.setFormatter(formatter)
-            logger.addHandler(file_handler)
-            handlers.append(file_handler)
-            
-            # If console output is enabled, print where the log file is
-            if console_output and announce_log_file:
-                logger.info(f"[INFO] Logging to file: {log_file}")
-                
-        except (OSError, ValueError) as e:
-            logger.warning(f"[WARNING] Failed to setup file logging: {e}")
-
-    if handlers:
-        _attach_handlers_to_root(handlers, level)
+        _attach_console_handler_to_root(console_handler, level)
 
     _configure_third_party_loggers()
 

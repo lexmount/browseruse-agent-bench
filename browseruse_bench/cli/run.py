@@ -35,6 +35,7 @@ from browseruse_bench.utils import (
     DataSource,
     add_common_task_args,
     add_file_handler,
+    add_script_log_handler,
     apply_skyvern_env,
     check_uv_available,
     ensure_venv,
@@ -73,7 +74,7 @@ CONFIG_PATH = REPO_ROOT / "config.yaml"
 load_env_file(REPO_ROOT / ".env")
 
 # Setup logger
-logger = setup_logger("run", log_dir="output/logs")
+logger = setup_logger("run")
 
 
 def resolve_lexmount_routing_for_task(
@@ -1254,6 +1255,7 @@ def _canonicalize_cli_browser_id(browser_id: str | None, source_cfg: dict[str, A
 
 def run_command(args: argparse.Namespace, config: dict[str, Any]) -> int:
     """Entry point for the run subcommand."""
+    add_script_log_handler(logger, REPO_ROOT / "output" / "logs", "run")
     logger.info("Starting run command")
     args.agent = normalize_agent_name(args.agent, config)
     source_cfg = config
