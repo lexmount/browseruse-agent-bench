@@ -143,7 +143,11 @@ def apply_site_skills(
             summary[task_id] = {"files": [], "chars": 0}
             continue
         section = build_skills_section(files, skills_dir, max_chars)
-        task["prompt"] = f"{task.get('prompt', '')}\n\n{section}".strip()
         rel_files = [str(f.relative_to(skills_dir)) for f in files]
+        # Keep the pre-injection prompt so result.json can record the clean
+        # task separately from the injected knowledge.
+        task["prompt_base"] = task.get("prompt", "")
+        task["prompt"] = f"{task.get('prompt', '')}\n\n{section}".strip()
+        task["site_skills"] = {"files": rel_files, "chars": len(section)}
         summary[task_id] = {"files": rel_files, "chars": len(section)}
     return summary

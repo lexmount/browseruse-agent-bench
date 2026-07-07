@@ -101,6 +101,23 @@ class TestApplySiteSkills:
         assert summary["t1"]["files"] == ["bilibili/navigation.md"]
         assert summary["t1"]["chars"] > 0
 
+    def test_records_clean_prompt_and_injection_separately(self, skills_dir: Path) -> None:
+        task = {
+            "task_id": "t1",
+            "prompt": "Find the top video.",
+            "urls": ["https://www.bilibili.com/"],
+        }
+        apply_site_skills([task], skills_dir)
+        assert task["prompt_base"] == "Find the top video."
+        assert task["site_skills"]["files"] == ["bilibili/navigation.md"]
+        assert task["site_skills"]["chars"] > 0
+
+    def test_miss_sets_no_injection_fields(self, skills_dir: Path) -> None:
+        task = {"task_id": "t2", "prompt": "P", "urls": ["https://unknown-site.io/"]}
+        apply_site_skills([task], skills_dir)
+        assert "prompt_base" not in task
+        assert "site_skills" not in task
+
     def test_miss_keeps_prompt_untouched(self, skills_dir: Path) -> None:
         task = {"task_id": "t2", "prompt": "P", "urls": ["https://unknown-site.io/"]}
         summary = apply_site_skills([task], skills_dir)

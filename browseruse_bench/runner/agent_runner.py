@@ -89,7 +89,13 @@ def _build_error_result(
     agent_done: str = "error",
 ) -> dict[str, Any]:
     """Build a minimal structured error result compatible with evaluators."""
-    task_text = task_info.get("prompt") or task_info.get("task_text") or task_info.get("task") or ""
+    task_text = (
+        task_info.get("prompt_base")
+        or task_info.get("prompt")
+        or task_info.get("task_text")
+        or task_info.get("task")
+        or ""
+    )
     return {
         "task_id": task_info.get("task_id", "unknown"),
         "task": task_text,
@@ -199,9 +205,15 @@ def main() -> int:
         else:
             raise ValueError("Agent must return an AgentResult or dictionary")
 
-        # Ensure task text is always populated in result.json (used by evaluator)
-        if not result_data.get("task"):
+        # Ensure task text is always populated in result.json (used by evaluator).
+        # With site-skills injection, "task" records the clean pre-injection
+        # prompt; the injected knowledge is recorded separately (site_skills).
+        if task_info.get("prompt_base"):
+            result_data["task"] = task_info["prompt_base"]
+        elif not result_data.get("task"):
             result_data["task"] = task_info.get("prompt") or task_info.get("task_text") or task_info.get("task", "")
+        if task_info.get("site_skills"):
+            result_data["site_skills"] = task_info["site_skills"]
 
         # Enrich usage cost if SDK didn't provide complete cost data
         result_data = enrich_result_usage_cost_if_needed(
