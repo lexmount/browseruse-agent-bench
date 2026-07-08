@@ -102,6 +102,14 @@ description: "Create and integrate new modular agents for browseruse-bench (Base
 - Keep provider-specific session create/delete logic in `browseruse_bench/browsers/providers/*.py`; do not duplicate this in agent modules.
 - In agent code, branch by `session_context.transport` (`local` / `cdp` / `cloud_native`) instead of hardcoding provider SDK logic.
 - History handling: decode base64 screenshots to `trajectory/`, collect basic actions, steps, end-to-end ms; keep result dict small.
+- Trajectory screenshots are an expected artifact, not an optional extra: `AgentResult.screenshots`
+  must list the files saved under `trajectory/`. If the agent framework can capture screenshots,
+  make the default rules ask for at least one after reaching the main page and one after finding
+  the answer (see the openclaw/hermes default rules). If capturing is deliberately disabled — for
+  example the only screenshot path also triggers a vision-model call the bench model cannot serve
+  (hermes `browser_vision`) — record that trade-off in the agent module's default rules or a module
+  comment so a run with zero screenshots is explainable, and still keep the collection code path
+  working for the day it is re-enabled.
 - For provider semantics, routing, workspace, and missing-file edge cases, follow the guidance in
   `SDK Integration Pitfalls` below instead of repeating those rules in the generated agent.
 - Error handling: catch specific expected failures (`asyncio.TimeoutError`, `TimeoutError`, `ValueError`, `RuntimeError`), set `status`/`error`; no bare `except`.
