@@ -85,6 +85,14 @@ dmx-claude-sonnet-4-6:
   cache_read_input_cost_per_million_tokens: 0.3
 
 # =====================================================================
+# xAI Grok (USD list price, docs.x.ai/developers/pricing)
+# =====================================================================
+grok-4.5:
+  input_cost_per_million_tokens: 2.0
+  output_cost_per_million_tokens: 6.0
+  cache_read_input_cost_per_million_tokens: 0.5
+
+# =====================================================================
 # Google Gemini (USD list price, ai.google.dev/gemini-api/docs/pricing)
 # Base tier (<=200K prompt); cache_read ~= 10% of input.
 # =====================================================================
