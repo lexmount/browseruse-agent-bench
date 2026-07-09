@@ -136,6 +136,7 @@ vim .env
 | ------------------------------------------ | ------------------------------ | ----------------------------------------------------------- | ------------------- |
 | `OPENAI_API_KEY`                           | Agent 与评估用 API Key             | [platform.openai.com](https://platform.openai.com/api-keys) | ✅                   |
 | `OPENAI_BASE_URL`                          | 自定义 API Base URL（如 LiteLLM 代理） | —                                                           | 可选                  |
+| `XAI_API_KEY`                              | `models.grok-4.5` 使用的 xAI Grok API Key | [console.x.ai](https://console.x.ai/)                       | 使用 Grok 时          |
 | `LEXMOUNT_API_KEY` + `LEXMOUNT_PROJECT_ID` | lexmount 云端浏览器                 | [browser.lexmount.cn](https://browser.lexmount.cn/)         | 使用 lexmount 时       |
 | `BROWSER_USE_API_KEY`                      | Browser Use 云端浏览器              | [browser-use.com](https://www.browser-use.com/)             | 使用 browser-use-cloud 时 |
 | `AGENTBAY_API_KEY`                         | AgentBay 云端浏览器                 | [agentbay.ai](https://agentbay.ai/)                         | 使用 agentbay 时       |

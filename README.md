@@ -138,6 +138,7 @@ vim .env
 |----------|-------------|---------|----------|
 | `OPENAI_API_KEY` | API key for agents and evaluation | [platform.openai.com](https://platform.openai.com/api-keys) | ✅ |
 | `OPENAI_BASE_URL` | Custom API base URL (e.g. LiteLLM proxy) | — | Optional |
+| `XAI_API_KEY` | xAI Grok API key for `models.grok-4.5` | [console.x.ai](https://console.x.ai/) | When using Grok |
 | `LEXMOUNT_API_KEY` + `LEXMOUNT_PROJECT_ID` | Lexmount cloud browser | [browser.lexmount.cn](https://browser.lexmount.cn/) | When using lexmount |
 | `BROWSER_USE_API_KEY` | Browser Use cloud browser | [browser-use.com](https://www.browser-use.com/) | When using browser-use-cloud |
 | `AGENTBAY_API_KEY` | AgentBay cloud browser | [agentbay.ai](https://agentbay.ai/) | When using agentbay |

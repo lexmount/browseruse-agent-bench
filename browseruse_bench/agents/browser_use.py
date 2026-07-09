@@ -15,6 +15,7 @@ import tempfile
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -29,7 +30,10 @@ from browser_use import ChatOpenAI as BrowserUseSDKChatOpenAI
 from browser_use.browser import session as browser_use_session_module
 from browser_use.browser.profile import ProxySettings as BrowserUseProxySettings
 from browser_use.llm.exceptions import ModelError as BrowserUseModelError
+from browser_use.llm.exceptions import ModelProviderError, ModelRateLimitError
+from browser_use.llm.openai.responses_serializer import ResponsesAPIMessageSerializer
 from browser_use.llm.schema import SchemaOptimizer
+from browser_use.llm.views import ChatInvokeCompletion, ChatInvokeUsage
 from pydantic import BaseModel as _PydanticBaseModel
 
 from browseruse_bench.agents.base import BaseAgent
@@ -183,6 +187,7 @@ def _patch_agent_output_json_parsers(agent: Any) -> None:
 
 _PATCHED_SCHEMA_OPTIMIZER_ATTR = "_browseruse_bench_strip_numeric_bounds_patched"
 _VALID_REASONING_EFFORTS = ("minimal", "low", "medium", "high")
+_NON_IDENTIFIER_CHARS_RE = re.compile(r"[^a-zA-Z0-9_-]+")
 
 
 def _is_claude_model(model_id: str | None) -> bool:
@@ -324,6 +329,158 @@ def _capture_llm_failures(llm: Any, recorder: _LLMFailureRecorder) -> None:
             raise
 
     llm.ainvoke = ainvoke_with_failure_capture
+
+
+@dataclass
+class _BrowserUseResponsesLLM:
+    """browser-use LLM adapter for OpenAI-compatible Responses API endpoints."""
+
+    model: str
+    api_key: str | None = None
+    base_url: str | None = None
+    temperature: float | None = None
+    max_output_tokens: int | None = None
+    add_schema_to_system_prompt: bool = True
+
+    @property
+    def provider(self) -> str:
+        return "openai"
+
+    @property
+    def name(self) -> str:
+        return self.model
+
+    @property
+    def model_name(self) -> str:
+        return self.model
+
+    def get_client(self) -> Any:
+        from openai import AsyncOpenAI
+
+        client_kwargs: dict[str, Any] = {}
+        if self.api_key:
+            client_kwargs["api_key"] = self.api_key
+        if self.base_url:
+            client_kwargs["base_url"] = self.base_url
+        return AsyncOpenAI(**client_kwargs)
+
+    def _model_params(self) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if self.temperature is not None:
+            params["temperature"] = self.temperature
+        if self.max_output_tokens is not None:
+            params["max_output_tokens"] = self.max_output_tokens
+        return params
+
+    @staticmethod
+    def _schema_name(output_format: type[Any]) -> str:
+        raw_name = getattr(output_format, "__name__", "agent_output")
+        name = _NON_IDENTIFIER_CHARS_RE.sub("_", raw_name).strip("_")
+        return name[:64] or "agent_output"
+
+    @classmethod
+    def _text_format(cls, output_format: type[Any]) -> dict[str, Any]:
+        return {
+            "format": {
+                "type": "json_schema",
+                "name": cls._schema_name(output_format),
+                "schema": SchemaOptimizer.create_optimized_json_schema(output_format),
+                "strict": True,
+            }
+        }
+
+    @staticmethod
+    def _with_schema_prompt(messages: list[Any], output_format: type[Any]) -> list[Any]:
+        schema = SchemaOptimizer.create_optimized_json_schema(output_format)
+        instruction = (
+            "Return only valid JSON matching this schema. Do not wrap it in markdown.\n"
+            f"<json_schema>\n{json.dumps(schema, ensure_ascii=False)}\n</json_schema>"
+        )
+        serialized = ResponsesAPIMessageSerializer.serialize_messages(messages)
+        if serialized and serialized[0].get("role") == "system":
+            content = serialized[0].get("content")
+            if isinstance(content, str):
+                serialized[0]["content"] = f"{content}\n\n{instruction}"
+            elif isinstance(content, list):
+                serialized[0]["content"] = [
+                    *content,
+                    {"type": "input_text", "text": f"\n\n{instruction}"},
+                ]
+            else:
+                serialized.insert(0, {"role": "system", "content": instruction})
+            return serialized
+        return [{"role": "system", "content": instruction}, *serialized]
+
+    @staticmethod
+    def _usage(response: Any) -> ChatInvokeUsage | None:
+        raw_usage = getattr(response, "usage", None)
+        if raw_usage is None:
+            return None
+        input_tokens = int(getattr(raw_usage, "input_tokens", 0) or 0)
+        output_tokens = int(getattr(raw_usage, "output_tokens", 0) or 0)
+        cached_tokens = None
+        input_details = getattr(raw_usage, "input_tokens_details", None)
+        if input_details is not None:
+            cached = getattr(input_details, "cached_tokens", None)
+            cached_tokens = int(cached) if cached is not None else None
+        return ChatInvokeUsage(
+            prompt_tokens=input_tokens,
+            prompt_cached_tokens=cached_tokens,
+            prompt_cache_creation_tokens=None,
+            prompt_image_tokens=None,
+            completion_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+        )
+
+    async def ainvoke(
+        self,
+        messages: list[Any],
+        output_format: type[Any] | None = None,
+        **kwargs: Any,
+    ) -> ChatInvokeCompletion[Any]:
+        from openai import APIConnectionError, APIStatusError, RateLimitError
+
+        del kwargs
+        if output_format is None:
+            responses_input = ResponsesAPIMessageSerializer.serialize_messages(messages)
+            model_params = self._model_params()
+        else:
+            responses_input = self._with_schema_prompt(messages, output_format)
+            model_params = {
+                **self._model_params(),
+                "text": self._text_format(output_format),
+            }
+
+        try:
+            response = await self.get_client().responses.create(
+                model=self.model,
+                input=responses_input,
+                **model_params,
+            )
+        except RateLimitError as exc:
+            raise ModelRateLimitError(message=exc.message, model=self.name) from exc
+        except APIConnectionError as exc:
+            raise ModelProviderError(message=str(exc), model=self.name) from exc
+        except APIStatusError as exc:
+            raise ModelProviderError(
+                message=exc.message,
+                status_code=exc.status_code,
+                model=self.name,
+            ) from exc
+
+        text = getattr(response, "output_text", "") or ""
+        usage = self._usage(response)
+        if output_format is None:
+            return ChatInvokeCompletion(completion=text, usage=usage, stop_reason=None)
+
+        parsed = _validate_json_candidates(output_format, _iter_json_candidates(text))
+        if parsed is None:
+            raise ModelProviderError(
+                message="Responses API model returned no valid structured output",
+                status_code=500,
+                model=self.name,
+            )
+        return ChatInvokeCompletion(completion=parsed, usage=usage, stop_reason=None)
 
 
 def _match_step_llm_failures(
@@ -783,8 +940,12 @@ class BrowserUseAgent(BaseAgent):
             config_info["claude_schema_numeric_bounds_stripped"] = True
 
         llm_class = provider_classes[model_type]
-        kwargs = provider_builders[model_type](model_id, agent_config, config_info)
-        llm = llm_class(**kwargs)
+        if model_type == "OPENAI" and agent_config.get("model_api_style") == "responses":
+            kwargs = self._build_openai_responses_kwargs(model_id, agent_config, config_info)
+            llm = _BrowserUseResponsesLLM(**kwargs)
+        else:
+            kwargs = provider_builders[model_type](model_id, agent_config, config_info)
+            llm = llm_class(**kwargs)
 
         if is_claude and model_type in ("OPENAI", "AZURE"):
             thinking_enabled = _get_config_value(
@@ -864,6 +1025,36 @@ class BrowserUseAgent(BaseAgent):
         if agent_config.get("remove_defaults_from_schema"):
             openai_kwargs["remove_defaults_from_schema"] = True
         return openai_kwargs
+
+    @staticmethod
+    def _build_openai_responses_kwargs(
+        model_id: str,
+        agent_config: dict[str, Any],
+        config_info: dict[str, Any],
+    ) -> dict[str, Any]:
+        responses_kwargs: dict[str, Any] = {
+            "model": model_id,
+            "api_key": (
+                agent_config.get("api_key")
+                or os.getenv("XAI_API_KEY")
+                or os.getenv("GROK_API_KEY")
+                or os.getenv("OPENAI_API_KEY")
+            ),
+            "base_url": agent_config.get("base_url") or os.getenv("OPENAI_BASE_URL"),
+            "add_schema_to_system_prompt": True,
+        }
+        config_info["model_api_style"] = "responses"
+        config_info["add_schema_prompt"] = True
+        if "temperature" in agent_config:
+            responses_kwargs["temperature"] = agent_config["temperature"]
+            config_info["temperature"] = agent_config["temperature"]
+        if agent_config.get("max_tokens") is not None:
+            responses_kwargs["max_output_tokens"] = agent_config["max_tokens"]
+            config_info["max_tokens"] = agent_config["max_tokens"]
+        elif agent_config.get("max_completion_tokens") is not None:
+            responses_kwargs["max_output_tokens"] = agent_config["max_completion_tokens"]
+            config_info["max_completion_tokens"] = agent_config["max_completion_tokens"]
+        return responses_kwargs
 
     @staticmethod
     def _build_azure_kwargs(

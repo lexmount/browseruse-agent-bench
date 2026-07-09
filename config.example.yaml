@@ -120,6 +120,20 @@ models:
     dont_force_structured_output: false
     add_schema_to_system_prompt: true
 
+  # xAI Grok via the OpenAI-compatible Responses API.
+  # Use the API root as base_url; Responses clients append /responses themselves.
+  grok-4.5:
+    model_type: OPENAI
+    model_provider: openai
+    model_id: grok-4.5
+    api_key: $XAI_API_KEY
+    base_url: https://api.x.ai/v1
+    model_api_style: responses
+    api: openai-responses
+    frequency_penalty: null
+    dont_force_structured_output: true
+    add_schema_to_system_prompt: true
+
   openrouter:
     model_type: OPENROUTER
     model_id: openai/gpt-5.4

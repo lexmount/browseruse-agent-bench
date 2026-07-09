@@ -55,6 +55,9 @@ icon: "rocket"
     OPENAI_API_KEY=your-openai-api-key-here
     # OPENAI_BASE_URL=https://api.openai.com/v1    # Optional: custom / OpenAI-compatible gateway
 
+    ### xAI API (Grok, OpenAI-compatible Responses API)
+    # XAI_API_KEY=your-xai-api-key-here
+
     ### OpenAI-compatible gateway (Skyvern, and any agent using openai_compatible_*)
     # OPENAI_COMPATIBLE_API_KEY=your-gateway-api-key
     # OPENAI_COMPATIBLE_API_BASE=https://your-gateway.example.com/v1
@@ -102,6 +105,13 @@ icon: "rocket"
         model_id: gpt-5.4
         api_key: $OPENAI_API_KEY
         base_url: $OPENAI_BASE_URL
+      grok-4.5:
+        model_type: OPENAI
+        model_id: grok-4.5
+        api_key: $XAI_API_KEY
+        base_url: https://api.x.ai/v1  # API root; do not include /responses
+        model_api_style: responses
+        api: openai-responses
       browser-use:
         model_type: BROWSER_USE
         model_id: bu-2-0

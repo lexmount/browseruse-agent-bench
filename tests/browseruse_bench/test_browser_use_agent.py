@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 from browser_use.llm.exceptions import ModelProviderError
+from browser_use.llm.messages import SystemMessage, UserMessage
 from pydantic import BaseModel, ValidationError
 
 from browseruse_bench.agents import browser_use as browser_use_module
@@ -353,6 +354,95 @@ def test_create_llm_enables_claude_schema_and_thinking(
     assert captured["kwargs"]["model"] == "openrouter/claude-opus-4.8"
     assert config_info["claude_schema_numeric_bounds_stripped"] is True
     assert config_info["claude_reasoning_effort"] == "medium"
+
+
+def test_create_llm_uses_responses_adapter_for_responses_api_style() -> None:
+    config_info: dict[str, Any] = {}
+
+    llm = BrowserUseAgent()._create_llm(
+        "OPENAI",
+        "grok-4.5",
+        {
+            "api_key": "xai-key",
+            "base_url": "https://api.x.ai/v1",
+            "model_api_style": "responses",
+            "max_tokens": 1234,
+        },
+        config_info,
+    )
+
+    assert isinstance(llm, browser_use_module._BrowserUseResponsesLLM)
+    assert llm.model == "grok-4.5"
+    assert llm.api_key == "xai-key"
+    assert llm.base_url == "https://api.x.ai/v1"
+    assert llm.max_output_tokens == 1234
+    assert config_info["model_api_style"] == "responses"
+
+
+def test_responses_adapter_parses_structured_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class FakeResponses:
+        async def create(self, **kwargs: Any) -> Any:
+            captured["kwargs"] = kwargs
+            return SimpleNamespace(
+                output_text='{"memory": "ok", "action": [{"done": {"text": "done"}}]}',
+                usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+            )
+
+    class FakeClient:
+        responses = FakeResponses()
+
+    llm = browser_use_module._BrowserUseResponsesLLM(
+        model="grok-4.5",
+        api_key="xai-key",
+        base_url="https://api.x.ai/v1",
+        max_output_tokens=100,
+    )
+    monkeypatch.setattr(llm, "get_client", lambda: FakeClient())
+
+    result = asyncio.run(
+        llm.ainvoke(
+            [SystemMessage(content="system"), UserMessage(content="task")],
+            output_format=_OutputForParserTest,
+        )
+    )
+
+    assert result.completion.memory == "ok"
+    assert result.usage is not None
+    assert result.usage.prompt_tokens == 10
+    assert result.usage.completion_tokens == 5
+    assert captured["kwargs"]["model"] == "grok-4.5"
+    assert captured["kwargs"]["max_output_tokens"] == 100
+    assert captured["kwargs"]["text"]["format"]["type"] == "json_schema"
+    assert captured["kwargs"]["text"]["format"]["name"] == "OutputForParserTest"
+    assert captured["kwargs"]["text"]["format"]["strict"] is True
+    assert captured["kwargs"]["text"]["format"]["schema"]["type"] == "object"
+
+
+def test_responses_adapter_does_not_force_text_format_without_output_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class FakeResponses:
+        async def create(self, **kwargs: Any) -> Any:
+            captured["kwargs"] = kwargs
+            return SimpleNamespace(
+                output_text="plain text",
+                usage=SimpleNamespace(input_tokens=3, output_tokens=2),
+            )
+
+    class FakeClient:
+        responses = FakeResponses()
+
+    llm = browser_use_module._BrowserUseResponsesLLM(model="grok-4.5")
+    monkeypatch.setattr(llm, "get_client", lambda: FakeClient())
+
+    result = asyncio.run(llm.ainvoke([UserMessage(content="task")]))
+
+    assert result.completion == "plain text"
+    assert "text" not in captured["kwargs"]
 
 
 def test_create_browser_instance_rejects_cloud_transport_for_unknown_backend() -> None:
