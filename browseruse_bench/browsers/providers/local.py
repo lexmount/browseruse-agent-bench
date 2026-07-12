@@ -10,6 +10,12 @@ _logger = logging.getLogger(__name__)
 _warned_agents: set[str] = set()
 
 
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in ("false", "0", "no", "off")
+
+
 def warn_if_local_proxy_unsupported(agent_config: Dict[str, Any], agent_name: str) -> None:
     """One-shot warning for agents whose local-Chrome launch path can't honour
     `local_proxy_*`.
@@ -71,6 +77,11 @@ class LocalBackend(BrowserBackend):
 
     def open(self, agent_name: str, agent_config: Dict[str, Any]) -> BrowserSessionContext:
         metadata: Dict[str, Any] = {}
+        if agent_config.get("headless") not in (None, ""):
+            metadata["headless"] = _coerce_bool(agent_config["headless"])
+        executable_path = str(agent_config.get("local_executable_path") or "").strip()
+        if executable_path:
+            metadata["executable_path"] = executable_path
         proxy = _extract_local_proxy(agent_config)
         if proxy is not None:
             metadata["local_proxy"] = proxy

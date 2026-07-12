@@ -725,6 +725,31 @@ def test_create_browser_instance_no_proxy_omits_kwarg(
             temp_dir.cleanup()
 
 
+def test_create_browser_instance_uses_local_headless_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class FakeBrowser:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(browser_use_module, "Browser", FakeBrowser)
+
+    ctx = BrowserSessionContext(
+        backend_id="local",
+        transport="local",
+        metadata={"headless": True, "executable_path": "/opt/chrome"},
+    )
+    _, temp_dir = BrowserUseAgent._create_browser_instance(session_context=ctx)
+    try:
+        assert captured["headless"] is True
+        assert captured["executable_path"] == "/opt/chrome"
+    finally:
+        if temp_dir is not None:
+            temp_dir.cleanup()
+
+
 # ---------------------------------------------------------------------------
 # Raw LLM response capture for failed/unparseable calls
 # ---------------------------------------------------------------------------
