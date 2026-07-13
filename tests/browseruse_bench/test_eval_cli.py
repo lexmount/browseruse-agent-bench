@@ -160,3 +160,19 @@ def test_run_failure_classification_dedupes_records(tmp_path, monkeypatch) -> No
         if line.strip()
     ]
     assert len(lines) == 1
+
+
+def test_api_key_default_does_not_shadow_config_eval_key(monkeypatch) -> None:
+    """An OPENAI_API_KEY in the environment must not become an implicit
+    --api-key default: that would win over config.yaml eval.api_key in the
+    resolution chain (args.api_key or eval_cfg or env fallback)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-stale-env-key")
+    parser = argparse.ArgumentParser()
+    eval_cli.configure_eval_parser(parser, {})
+    args = parser.parse_args(["--agent", "hermes", "--data", "LexBench-Browser"])
+
+    assert args.api_key == ""
+
+    eval_cfg = {"api_key": "sk-config-key"}
+    resolved = args.api_key or eval_cfg.get("api_key") or "sk-stale-env-key"
+    assert resolved == "sk-config-key"

@@ -512,9 +512,12 @@ def configure_eval_parser(parser: argparse.ArgumentParser, config: dict[str, Any
             "config.yaml). Its `eval` section overrides the defaults from root config.yaml."
         ),
     )
+    # api_key default must stay empty: an env-derived default would count as an
+    # explicit --api-key and override config.yaml eval.api_key in the resolution
+    # chain. OPENAI_API_KEY remains the last-resort fallback at resolution time.
     parser.set_defaults(
         model="",
-        api_key=get_env_var("OPENAI_API_KEY", ""),
+        api_key="",
         base_url="",
     )
 
