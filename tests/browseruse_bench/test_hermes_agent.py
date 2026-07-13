@@ -169,6 +169,12 @@ class TestStateConfig:
         config = _state_config("m", "u", {"use_vision": True, "vision_temperature": 0.3})
         assert config["auxiliary"]["vision"]["temperature"] == 0.3
 
+    def test_null_vision_temperature_falls_back(self) -> None:
+        # An explicit null in config.yaml (key present, value None) must fall
+        # back to the default, not crash float(None).
+        config = _state_config("m", "u", {"use_vision": True, "vision_temperature": None})
+        assert config["auxiliary"]["vision"]["temperature"] == 1.0
+
 
 class TestRulesSelection:
     def test_default_rules_forbid_vision(self) -> None:

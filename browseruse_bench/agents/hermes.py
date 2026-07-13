@@ -40,7 +40,8 @@ from browseruse_bench.utils.parse_utils import safe_int
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_RULES = (
+# Shared rule prefix for every run; the final reading rule differs by mode.
+_RULES_PREFIX = (
     "You are a browser automation agent. "
     "You MUST use ONLY the browser_* tools for ALL browser interactions."
     "\n\nTask completion rules:\n"
@@ -50,6 +51,9 @@ _DEFAULT_RULES = (
     "- If you encounter a CAPTCHA, verification page, login wall, or access restriction: "
     "go back to the previous page and use the data already collected to answer.\n"
     "- Do NOT get stuck retrying the same blocked action. One retry max, then fall back.\n"
+)
+
+_DEFAULT_RULES = _RULES_PREFIX + (
     "- Read pages with browser_snapshot. Do NOT use browser_vision or browser_get_images: "
     "no vision model is available in this environment, image analysis always fails."
 )
@@ -58,16 +62,7 @@ _DEFAULT_RULES = (
 # (Hermes auxiliary auto mode resolves to the main provider first), so it works
 # whenever that model is multimodal. Vision is evidence capture on top of
 # snapshot-driven reading, not a replacement for it.
-_VISION_RULES = (
-    "You are a browser automation agent. "
-    "You MUST use ONLY the browser_* tools for ALL browser interactions."
-    "\n\nTask completion rules:\n"
-    "- If you can see enough information to answer the task from the current page (e.g., "
-    "ratings, names, prices visible in search results), provide your answer IMMEDIATELY "
-    "without clicking into individual items to get more detail.\n"
-    "- If you encounter a CAPTCHA, verification page, login wall, or access restriction: "
-    "go back to the previous page and use the data already collected to answer.\n"
-    "- Do NOT get stuck retrying the same blocked action. One retry max, then fall back.\n"
+_VISION_RULES = _RULES_PREFIX + (
     "- Read pages with browser_snapshot as your primary tool. Additionally, call "
     "browser_vision once on each page that contains evidence for your final answer, so "
     "the run keeps a visual record. Trust browser_snapshot text over the vision summary "
@@ -86,6 +81,7 @@ def _rules_for(agent_config: dict[str, Any]) -> str:
     if explicit:
         return str(explicit)
     return _VISION_RULES if agent_config.get("use_vision") else _DEFAULT_RULES
+
 
 # The name of the env var carrying the bench provider API key into the Hermes
 # subprocess; referenced as key_env in the per-task config.yaml so the secret
@@ -139,10 +135,10 @@ def _state_config(model: str, base_url: str, agent_config: dict[str, Any]) -> di
         "agent": agent_section,
     }
     if agent_config.get("use_vision"):
-        temperature = float(
-            agent_config.get("vision_temperature", _DEFAULT_VISION_TEMPERATURE)
-        )
-        config["auxiliary"] = {"vision": {"temperature": temperature}}
+        # `or` (not the .get default) so an explicit null/empty in config falls
+        # back instead of crashing float(None).
+        raw_temperature = agent_config.get("vision_temperature") or _DEFAULT_VISION_TEMPERATURE
+        config["auxiliary"] = {"vision": {"temperature": float(raw_temperature)}}
     return config
 
 
