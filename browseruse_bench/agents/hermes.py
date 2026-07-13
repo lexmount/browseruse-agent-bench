@@ -54,6 +54,39 @@ _DEFAULT_RULES = (
     "no vision model is available in this environment, image analysis always fails."
 )
 
+# Rules for use_vision runs: browser_vision routes to the main bench model
+# (Hermes auxiliary auto mode resolves to the main provider first), so it works
+# whenever that model is multimodal. Vision is evidence capture on top of
+# snapshot-driven reading, not a replacement for it.
+_VISION_RULES = (
+    "You are a browser automation agent. "
+    "You MUST use ONLY the browser_* tools for ALL browser interactions."
+    "\n\nTask completion rules:\n"
+    "- If you can see enough information to answer the task from the current page (e.g., "
+    "ratings, names, prices visible in search results), provide your answer IMMEDIATELY "
+    "without clicking into individual items to get more detail.\n"
+    "- If you encounter a CAPTCHA, verification page, login wall, or access restriction: "
+    "go back to the previous page and use the data already collected to answer.\n"
+    "- Do NOT get stuck retrying the same blocked action. One retry max, then fall back.\n"
+    "- Read pages with browser_snapshot as your primary tool. Additionally, call "
+    "browser_vision once on each page that contains evidence for your final answer, so "
+    "the run keeps a visual record. Trust browser_snapshot text over the vision summary "
+    "when they disagree."
+)
+
+# gpt-5-family models on the gateway reject any temperature other than 1, while
+# Hermes's browser_vision defaults to temperature=0.1; vision runs therefore
+# pin auxiliary.vision.temperature (config key vision_temperature to override).
+_DEFAULT_VISION_TEMPERATURE = 1.0
+
+
+def _rules_for(agent_config: dict[str, Any]) -> str:
+    """Pick the system rules for a run: explicit config wins, then vision mode."""
+    explicit = agent_config.get("system_prompt")
+    if explicit:
+        return str(explicit)
+    return _VISION_RULES if agent_config.get("use_vision") else _DEFAULT_RULES
+
 # The name of the env var carrying the bench provider API key into the Hermes
 # subprocess; referenced as key_env in the per-task config.yaml so the secret
 # never touches disk.
@@ -100,11 +133,17 @@ def _state_config(model: str, base_url: str, agent_config: dict[str, Any]) -> di
     reasoning_effort = agent_config.get("reasoning_effort")
     if reasoning_effort:
         agent_section["reasoning_effort"] = str(reasoning_effort)
-    return {
+    config: dict[str, Any] = {
         "model": {"default": model, "provider": "bench"},
         "providers": {"bench": {"base_url": base_url, "key_env": _API_KEY_ENV}},
         "agent": agent_section,
     }
+    if agent_config.get("use_vision"):
+        temperature = float(
+            agent_config.get("vision_temperature", _DEFAULT_VISION_TEMPERATURE)
+        )
+        config["auxiliary"] = {"vision": {"temperature": temperature}}
+    return config
 
 
 def _write_state_config(
@@ -370,7 +409,7 @@ class HermesAgent(CLIAgent):
     ) -> AgentResult:
         task_id = task_info["task_id"]
         prompt = task_info.get("prompt") or self.build_task_prompt(task_info)
-        rules = agent_config.get("system_prompt") or _DEFAULT_RULES
+        rules = _rules_for(agent_config)
         model = str(agent_config.get("model_id") or agent_config.get("model", ""))
         timeout = self.get_timeout(agent_config, 600)
 

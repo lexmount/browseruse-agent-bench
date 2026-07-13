@@ -289,6 +289,10 @@ agents:
     active_model: hermes
     timeout: 600
     # toolsets: browser              # Hermes toolsets enabled for the run (comma-separated)
+    # use_vision: true               # allow browser_vision (needs a multimodal bench model);
+    #                                # captures screenshots as trajectory evidence
+    # vision_temperature: 1          # auxiliary.vision.temperature for use_vision runs
+    #                                # (gpt-5-family gateways only accept temperature=1)
   deepbrowse:
     use_vision: auto
     max_steps: 50

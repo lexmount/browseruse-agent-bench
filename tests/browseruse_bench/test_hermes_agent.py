@@ -15,6 +15,7 @@ from browseruse_bench.agents.hermes import (
     _API_KEY_ENV,
     HermesAgent,
     _collect_screenshots,
+    _rules_for,
     _session_items,
     _state_config,
     _subprocess_env,
@@ -155,6 +156,32 @@ class TestStateConfig:
     def test_reasoning_effort_forwarded(self) -> None:
         config = _state_config("m", "u", {"reasoning_effort": "high"})
         assert config["agent"]["reasoning_effort"] == "high"
+
+    def test_no_auxiliary_section_without_use_vision(self) -> None:
+        config = _state_config("m", "u", AGENT_CONFIG)
+        assert "auxiliary" not in config
+
+    def test_use_vision_pins_vision_temperature(self) -> None:
+        config = _state_config("m", "u", {"use_vision": True})
+        assert config["auxiliary"]["vision"]["temperature"] == 1.0
+
+    def test_vision_temperature_override(self) -> None:
+        config = _state_config("m", "u", {"use_vision": True, "vision_temperature": 0.3})
+        assert config["auxiliary"]["vision"]["temperature"] == 0.3
+
+
+class TestRulesSelection:
+    def test_default_rules_forbid_vision(self) -> None:
+        rules = _rules_for({})
+        assert "Do NOT use browser_vision" in rules
+
+    def test_use_vision_switches_to_vision_rules(self) -> None:
+        rules = _rules_for({"use_vision": True})
+        assert "browser_vision" in rules
+        assert "Do NOT use browser_vision" not in rules
+
+    def test_explicit_system_prompt_wins(self) -> None:
+        assert _rules_for({"use_vision": True, "system_prompt": "custom"}) == "custom"
 
 
 class TestSubprocessEnv:
