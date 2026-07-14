@@ -276,6 +276,11 @@ class CodexAgent(CLIAgent):
             "-c", 'mcp_servers.playwright.default_tools_approval_mode="approve"',
             "-c", f"mcp_servers.playwright.startup_timeout_sec={mcp_startup_timeout}",
             "-c", f"mcp_servers.playwright.tool_timeout_sec={mcp_tool_timeout}",
+            # Codex advertises a built-in image_generation tool by default; the
+            # bench gateway's Azure gpt-5.x deployment rejects it (400
+            # "imagegen deployment must be provided ...") on turn 1, before any
+            # browsing. Browser tasks never generate images, so disable it.
+            "-c", "features.image_generation=false",
         ]
         # codex ignores OPENAI_BASE_URL; to route it at a custom (proxy)
         # endpoint, register a model provider under a fixed, non-reserved id
