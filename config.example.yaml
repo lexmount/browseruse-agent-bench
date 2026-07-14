@@ -285,6 +285,10 @@ agents:
   openclaw:
     active_model: openclaw
     timeout: 600
+    # use_vision: true               # declare the primary model multimodal and enable
+    #                                # tools.media.image, so OpenClaw passes browser
+    #                                # screenshots straight to it (needs a multimodal
+    #                                # bench model); off by default
   hermes:
     active_model: hermes
     timeout: 600
