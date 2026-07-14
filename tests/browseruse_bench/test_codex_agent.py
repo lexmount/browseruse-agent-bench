@@ -254,6 +254,9 @@ class TestCodexAgentRunTask:
         assert "--cdp-endpoint" not in joined
         # No base_url => default codex provider (api.openai.com / auth.json).
         assert "model_provider=" not in joined
+        # Codex's built-in image_generation tool is rejected by the gateway's
+        # Azure gpt-5.x deployment on turn 1; browser tasks never need it.
+        assert "features.image_generation=false" in joined
 
     def test_base_url_registers_responses_provider(self, tmp_path: Path) -> None:
         # codex ignores OPENAI_BASE_URL; base_url must be wired via a model
