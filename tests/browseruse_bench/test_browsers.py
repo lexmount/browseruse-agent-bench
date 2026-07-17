@@ -272,6 +272,26 @@ def test_local_backend_empty_proxy_server_treated_as_no_proxy() -> None:
     assert "local_proxy" not in ctx.metadata
 
 
+def test_local_backend_passes_explicit_headless_setting() -> None:
+    backend = LocalBackend("local")
+
+    enabled = backend.open(agent_name="browser-use", agent_config={"headless": True})
+    disabled = backend.open(agent_name="browser-use", agent_config={"headless": "false"})
+
+    assert enabled.metadata["headless"] is True
+    assert disabled.metadata["headless"] is False
+
+
+def test_local_backend_passes_explicit_executable_path() -> None:
+    backend = LocalBackend("local")
+    ctx = backend.open(
+        agent_name="browser-use",
+        agent_config={"local_executable_path": "/opt/chrome"},
+    )
+
+    assert ctx.metadata["executable_path"] == "/opt/chrome"
+
+
 def test_local_backend_server_only() -> None:
     backend = LocalBackend("local")
     ctx = backend.open(

@@ -720,7 +720,13 @@ class OpenClawAgent(CLIAgent):
             "name": model,
             "api": provider_api,
             "reasoning": bool(agent_config.get("reasoning", False)),
-            "input": ["text"],
+            # When use_vision is on, declare the primary model natively
+            # multimodal so OpenClaw passes browser screenshots straight to it
+            # (docs/nodes/images: "if the active primary image model already
+            # supports vision natively, OpenClaw ... passes the original image
+            # to the model") instead of auto-detecting a separate image model
+            # that the bench gateway does not serve.
+            "input": ["text", "image"] if agent_config.get("use_vision") else ["text"],
             "contextWindow": int(agent_config.get("context_window", 195000)),
             "maxTokens": int(agent_config.get("max_tokens", 16000)),
             "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
@@ -752,10 +758,13 @@ class OpenClawAgent(CLIAgent):
                 "list": [{"id": "main", "tools": {"allow": ["browser", "read"]}}],
             },
             "browser": _browser_config(cdp_url),
-            # Screenshots would otherwise trigger image understanding, which
-            # auto-detects an image model and burns a failing LLM call per
-            # image; the bench model gets no vision either way, so turn it off.
-            "tools": {"media": {"image": {"enabled": False}}},
+            # Media image understanding is off by default: without use_vision
+            # the primary model is declared text-only, so a screenshot would
+            # make OpenClaw auto-detect a separate image model and burn a
+            # failing LLM call per image on the bench gateway. With use_vision
+            # the primary model is declared multimodal (see input above), so
+            # OpenClaw routes screenshots straight to it.
+            "tools": {"media": {"image": {"enabled": bool(agent_config.get("use_vision"))}}},
             # Default "auto" consults gateway node.list before the in-process
             # browser service; without gateway credentials every browser call
             # fails ("gateway node.list requires credentials before opening a

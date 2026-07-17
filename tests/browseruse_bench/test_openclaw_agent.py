@@ -362,6 +362,20 @@ class TestOpenClawAgentRunTask:
         agent.run_task(TASK_INFO, AGENT_CONFIG, tmp_path)
         cfg = json.loads((tmp_path / ".openclaw-state" / "openclaw.json").read_text())
         assert cfg["tools"]["media"]["image"]["enabled"] is False
+        assert cfg["models"]["providers"]["bench"]["models"][0]["input"] == ["text"]
+
+    def test_use_vision_enables_image_and_multimodal_input(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # With use_vision, the primary model is declared natively multimodal so
+        # OpenClaw routes browser screenshots straight to it instead of
+        # auto-detecting a separate (unavailable) image model.
+        agent = OpenClawAgent()
+        monkeypatch.setattr(agent, "_run_subprocess", lambda *a, **kw: (0, _result_stdout(), None))
+        agent.run_task(TASK_INFO, {**AGENT_CONFIG, "use_vision": True}, tmp_path)
+        cfg = json.loads((tmp_path / ".openclaw-state" / "openclaw.json").read_text())
+        assert cfg["tools"]["media"]["image"]["enabled"] is True
+        assert cfg["models"]["providers"]["bench"]["models"][0]["input"] == ["text", "image"]
 
     def test_provider_autodetect_vars_scrubbed_from_subprocess_env(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

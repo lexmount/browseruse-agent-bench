@@ -656,9 +656,12 @@ class BrowserUseAgent(BaseAgent):
             temp_dir_obj = tempfile.TemporaryDirectory(prefix="browseruse-tmp-user-data-")
             user_data_dir = Path(temp_dir_obj.name)
             local_browser_kwargs: dict[str, Any] = {
-                "headless": False,
+                "headless": bool(session_context.metadata.get("headless", False)),
                 "user_data_dir": user_data_dir,
             }
+            executable_path = str(session_context.metadata.get("executable_path") or "").strip()
+            if executable_path:
+                local_browser_kwargs["executable_path"] = executable_path
             proxy_meta = session_context.metadata.get("local_proxy")
             if proxy_meta:
                 local_browser_kwargs["proxy"] = BrowserUseProxySettings(

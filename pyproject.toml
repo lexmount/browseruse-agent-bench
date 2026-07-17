@@ -58,7 +58,7 @@ dev = [
 
 # Agent-specific dependencies (use --extra to select)
 browser-use = [
-    "browser-use>=0.12.6",
+    "browser-use @ git+https://github.com/254808127/browser-use.git@b174da3fcd1c6483fbae9746cbc686fb97b502a5",
     "wuying-agentbay-sdk>=0.15.0",
 ]
 
