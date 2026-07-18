@@ -137,7 +137,7 @@ def test_propagating_module_logger_emits_line_once(clean_root_logger, capsys):
     module_logger.info("unique-regression-marker")
 
     captured = capsys.readouterr()
-    assert captured.out.count("unique-regression-marker") == 1
+    assert captured.err.count("unique-regression-marker") == 1
 
 
 def test_setup_logger_never_attaches_file_handlers(clean_root_logger):

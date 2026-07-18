@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -96,22 +97,52 @@ class BaseEvaluator(ABC):
         pending: List[str],
         tasks: Dict[str, Dict[str, Any]],
     ) -> Iterator[EvalResult]:
+        max_workers = max(1, self.args.num_worker or 1)
+        if max_workers == 1 or len(pending) <= 1:
+            yield from self._run_iteration_serial(pending, tasks)
+            return
+
+        logger.info("Evaluating with %d worker threads", max_workers)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(self._evaluate_task_safe, task_id, tasks[task_id]): task_id
+                for task_id in pending
+            }
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    yield result
+
+    def _run_iteration_serial(
+        self,
+        pending: List[str],
+        tasks: Dict[str, Dict[str, Any]],
+    ) -> Iterator[EvalResult]:
         # Per-task isolation: a single task's failure (transient API error,
         # upstream content-policy rejection on a screenshot, malformed result
         # JSON) must not abort the whole batch. Subclasses with post-eval hooks
         # may backfill synthetic failure records for skipped tasks.
         for task_id in pending:
-            trajectory_dir = self.args.trajectories_dir / task_id
-            token = current_task_id.set(task_id)
-            try:
-                with open(trajectory_dir / "result.json", encoding="utf-8") as fh:
-                    agent_result = json.load(fh)
-                yield self.evaluate_one(task_id, tasks[task_id], agent_result, trajectory_dir)
-            except (OSError, ValueError, KeyError, RuntimeError, openai.OpenAIError) as exc:
-                logger.exception("Error evaluating task %s: %s", task_id, exc)
-                continue
-            finally:
-                current_task_id.reset(token)
+            result = self._evaluate_task_safe(task_id, tasks[task_id])
+            if result is not None:
+                yield result
+
+    def _evaluate_task_safe(
+        self,
+        task_id: str,
+        task: Dict[str, Any],
+    ) -> Optional[EvalResult]:
+        trajectory_dir = self.args.trajectories_dir / task_id
+        token = current_task_id.set(task_id)
+        try:
+            with open(trajectory_dir / "result.json", encoding="utf-8") as fh:
+                agent_result = json.load(fh)
+            return self.evaluate_one(task_id, task, agent_result, trajectory_dir)
+        except (OSError, ValueError, KeyError, RuntimeError, openai.OpenAIError) as exc:
+            logger.exception("Error evaluating task %s: %s", task_id, exc)
+            return None
+        finally:
+            current_task_id.reset(token)
 
     # ---- Final scaffolding (do not override) --------------------------
     def results_path(self) -> Path:
