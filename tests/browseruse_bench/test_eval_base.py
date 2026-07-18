@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import fields, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,7 +32,7 @@ def test_evaluator_args_required_fields():
     assert expected.issubset(field_names)
 
 
-def _make_args(tmp_path: Path, force_reeval: bool = False) -> EvaluatorArgs:
+def _make_args(tmp_path: Path, force_reeval: bool = False, num_worker: int = 1) -> EvaluatorArgs:
     traj = tmp_path / "tasks"
     traj.mkdir()
     out = tmp_path / "out"
@@ -44,7 +45,7 @@ def _make_args(tmp_path: Path, force_reeval: bool = False) -> EvaluatorArgs:
         trajectories_dir=traj,
         output_path=out,
         score_threshold=None,
-        num_worker=1,
+        num_worker=num_worker,
         temperature=None,
         split="All",
         data_source="local",
@@ -307,4 +308,29 @@ def test_run_iteration_sets_contextvar_per_task(tmp_path):
 
     assert seen == ["t1", "t2"]
     # contextvar must reset to default after the loop completes
+    assert current_task_id.get() == "-"
+
+
+def test_run_iteration_uses_worker_threads_when_requested(tmp_path):
+    """A multi-worker eval should process tasks concurrently while preserving task context."""
+    from browseruse_bench.eval.model import current_task_id
+
+    args = _make_args(tmp_path, num_worker=2)
+    _seed_trajectories(args, ("t1", "t2"))
+    barrier = threading.Barrier(2)
+    seen: list[str] = []
+
+    class _ParallelEvaluator(_FakeEvaluator):
+        def evaluate_one(self, task_id, task, agent_result, trajectory_dir):
+            seen.append(current_task_id.get())
+            barrier.wait(timeout=2)
+            return super().evaluate_one(task_id, task, agent_result, trajectory_dir)
+
+    ev = _ParallelEvaluator(
+        args, model=None, tasks={"t1": {"desc": "a"}, "t2": {"desc": "b"}},
+    )
+
+    ev.run()
+
+    assert sorted(seen) == ["t1", "t2"]
     assert current_task_id.get() == "-"

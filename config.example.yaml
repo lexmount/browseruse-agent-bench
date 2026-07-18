@@ -76,6 +76,19 @@ models:
     dont_force_structured_output: true
     add_schema_to_system_prompt: true
 
+  kimi-k3:
+    model_type: OPENAI
+    model_provider: openai
+    model_id: kimi-k3
+    api_key: $MOONSHOT_API_KEY
+    base_url: https://api.moonshot.cn/v1
+    temperature: 1.0
+    frequency_penalty: 0
+    remove_min_items_from_schema: true
+    remove_defaults_from_schema: true
+    dont_force_structured_output: true
+    add_schema_to_system_prompt: true
+
   # MiniMax family.
   minimax-m3:
     model_type: OPENAI

@@ -1,5 +1,68 @@
 {
   "schema_version": "1.0",
   "generated_from": "community/results",
-  "results": []
+  "results": [
+    {
+      "id": "lexbench-browser-all-browser-use-kimi-k3-20260718",
+      "benchmark": "LexBench-Browser",
+      "split": "All",
+      "benchmark_version": "1.0",
+      "agent": {
+        "name": "browser-use",
+        "version": "local",
+        "source": "https://github.com/browser-use/browser-use",
+        "reproducibility_limitations": "Live-web benchmark results may vary due to site availability, anti-bot behavior, browser/CDP stability, and model nondeterminism."
+      },
+      "model": {
+        "provider": "Moonshot AI",
+        "model_id": "kimi-k3",
+        "access": "official OpenAI-compatible API"
+      },
+      "browser": {
+        "backend": "Lexmount",
+        "mode": "normal"
+      },
+      "evaluation": {
+        "judge_model": "gpt-5.5",
+        "judge_provider": "LiteLLM",
+        "strategy": "stepwise",
+        "score_threshold": "per_task",
+        "finished_at": "2026-07-18T09:06:54Z"
+      },
+      "metrics": {
+        "success_rate": 72.38,
+        "successful_tasks": 152,
+        "failed_tasks": 58,
+        "total_tasks": 210,
+        "accounted_tasks": 210,
+        "average_steps": 14.65,
+        "median_steps": 13.0,
+        "average_end_to_end_seconds": 515.6,
+        "median_end_to_end_seconds": 440.6,
+        "mean_score": 74.13,
+        "median_score": 90.0,
+        "t1_success_rate": 71.13,
+        "t2_success_rate": 87.5,
+        "eval_cost_usd": 17.71
+      },
+      "artifacts": {
+        "run_directory": "experiments/LexBench-Browser/All/browser-use/kimi-k3/20260718_003918",
+        "summary": "experiments/LexBench-Browser/All/browser-use/kimi-k3/20260718_003918/tasks_eval_result/task_gpt-5.5_per_task_threshold_stepwise_summary.json",
+        "results": "experiments/LexBench-Browser/All/browser-use/kimi-k3/20260718_003918/tasks_eval_result/task_gpt-5.5_per_task_threshold_stepwise_eval_results.json"
+      },
+      "commands": {
+        "run": "uv run bubench run --agent browser-use --data LexBench-Browser --split All --mode all --timestamp 20260718_003918 --skip-completed --model-name kimi-k3 --timeout 1200 --concurrency 5",
+        "eval": "uv run bubench eval --agent browser-use --data LexBench-Browser --split All --model-id kimi-k3 --timestamp 20260718_003918 --model gpt-5.5 --num-worker 20"
+      },
+      "review": {
+        "status": "accepted",
+        "reviewed_by": "maintainer rerun",
+        "rerun_status": "full",
+        "code_revision": "0a05edb"
+      },
+      "notes": {
+        "skips": "None. All 210 tasks generated result.json and were evaluated."
+      }
+    }
+  ]
 }

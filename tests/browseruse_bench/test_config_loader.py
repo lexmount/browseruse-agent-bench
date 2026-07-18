@@ -208,10 +208,10 @@ def test_resolve_agent_inline_config_no_passthrough_for_provider_agents() -> Non
 def test_resolve_agent_inline_config_uses_explicit_model_override(tmp_path: Path) -> None:
     config = load_config_file(_write_runtime_root_config(tmp_path))
 
-    inline = resolve_agent_inline_config("browser-use", config, "qwen-plus")
+    inline = resolve_agent_inline_config("browser-use", config, "qwen3.7-max")
 
     assert inline is not None
-    assert inline.get("model_id") == "qwen3.5-plus"
+    assert inline.get("model_id") == "qwen3.7-max"
     assert inline.get("browser_id") == "lexmount"
 
 
