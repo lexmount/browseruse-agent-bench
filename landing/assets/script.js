@@ -33,49 +33,51 @@
     }, 1400);
   }
 
-  // --- Leaderboard sortable table ---
-  var table = document.getElementById('lb-table');
-  if (!table) return;
-  var headers = table.querySelectorAll('thead th');
-  var tbody = table.querySelector('tbody');
-  var state = { key: 'success', dir: 'desc' };
+  // --- Leaderboard sortable tables ---
+  var tables = document.querySelectorAll('.lb-table');
+  tables.forEach(function (table) {
+    var headers = table.querySelectorAll('thead th');
+    var tbody = table.querySelector('tbody');
+    if (!tbody) return;
+    var state = { key: 'success', dir: 'desc' };
 
-  headers.forEach(function (th) {
-    th.addEventListener('click', function () {
-      var key = th.getAttribute('data-key');
-      if (!key) return;
-      if (state.key === key) {
-        state.dir = state.dir === 'asc' ? 'desc' : 'asc';
-      } else {
-        state.key = key;
-        state.dir = (key === 'rank' || key === 'agent' || key === 'model' || key === 'browser') ? 'asc' : 'desc';
-      }
-      sortRows();
-    });
-  });
-
-  function sortRows() {
-    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
-    rows.sort(function (a, b) {
-      var av = a.getAttribute('data-' + state.key) || '';
-      var bv = b.getAttribute('data-' + state.key) || '';
-      var an = parseFloat(av), bn = parseFloat(bv);
-      var cmp;
-      if (!isNaN(an) && !isNaN(bn)) {
-        cmp = an - bn;
-      } else {
-        cmp = av.localeCompare(bv);
-      }
-      return state.dir === 'asc' ? cmp : -cmp;
-    });
-    rows.forEach(function (r) { tbody.appendChild(r); });
     headers.forEach(function (th) {
-      th.removeAttribute('data-sort-active');
-      th.style.removeProperty('--sort-arrow');
-      if (th.getAttribute('data-key') === state.key) {
-        th.setAttribute('data-sort-active', '1');
-        th.style.setProperty('--sort-arrow', state.dir === 'asc' ? '"▴"' : '"▾"');
-      }
+      th.addEventListener('click', function () {
+        var key = th.getAttribute('data-key');
+        if (!key) return;
+        if (state.key === key) {
+          state.dir = state.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+          state.key = key;
+          state.dir = (key === 'rank' || key === 'agent' || key === 'model' || key === 'browser') ? 'asc' : 'desc';
+        }
+        sortRows();
+      });
     });
-  }
+
+    function sortRows() {
+      var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+      rows.sort(function (a, b) {
+        var av = a.getAttribute('data-' + state.key) || '';
+        var bv = b.getAttribute('data-' + state.key) || '';
+        var an = parseFloat(av), bn = parseFloat(bv);
+        var cmp;
+        if (!isNaN(an) && !isNaN(bn)) {
+          cmp = an - bn;
+        } else {
+          cmp = av.localeCompare(bv);
+        }
+        return state.dir === 'asc' ? cmp : -cmp;
+      });
+      rows.forEach(function (r) { tbody.appendChild(r); });
+      headers.forEach(function (th) {
+        th.removeAttribute('data-sort-active');
+        th.style.removeProperty('--sort-arrow');
+        if (th.getAttribute('data-key') === state.key) {
+          th.setAttribute('data-sort-active', '1');
+          th.style.setProperty('--sort-arrow', state.dir === 'asc' ? '"▴"' : '"▾"');
+        }
+      });
+    }
+  });
 })();

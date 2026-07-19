@@ -332,8 +332,10 @@
   <div class="container">
     <h2 class="section-title">Leaderboard</h2>
     <p class="section-lede">
-      Snapshot results for browser-use on LexBench-Browser across 13 models. Click any header to
-      sort. Showing all 13 entries by success rate.
+      Snapshot results for LexBench-Browser. The model view compares browser-use across 13
+      models; the agent view compares five agents on the public 210-task split; the browser
+      view compares three cloud browser backends on the 92-task global split. Click any header
+      to sort.
     </p>
     <figure class="wide-fig efficiency-fig">
       <div class="efficiency-pdf-frame">
@@ -341,6 +343,7 @@
       </div>
       <figcaption>Model efficiency view: success rate versus average browser-agent steps.</figcaption>
     </figure>
+    <h3 class="lb-title">Model Leaderboard</h3>
     <div class="lb-wrap">
       <table class="lb-table" id="lb-table">
         <thead>
@@ -471,6 +474,159 @@
             <td class="num"><strong>40.1</strong></td>
             <td class="num">20.1</td>
             <td class="num">584.5</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <h3 class="lb-title">Agent Leaderboard</h3>
+    <p class="lb-note">
+      Same benchmark, split, Lexmount browser backend, 900s timeout, and <code>gpt-4.1</code>
+      stepwise judge. Main-agent report generated on 2026-07-14.
+    </p>
+    <div class="lb-wrap">
+      <table class="lb-table lb-table-wide">
+        <thead>
+          <tr>
+            <th data-key="rank">#</th>
+            <th data-key="agent">Agent</th>
+            <th data-key="model">Model / runtime</th>
+            <th data-key="pass" class="num">Pass</th>
+            <th data-key="fail" class="num">Fail</th>
+            <th data-key="success" class="num">Success&nbsp;%</th>
+            <th data-key="mean" class="num">Avg&nbsp;score</th>
+            <th data-key="median" class="num">Median</th>
+            <th data-key="success_time" class="num">Success&nbsp;e2e (s)</th>
+            <th data-key="fail_time" class="num">Fail&nbsp;e2e (s)</th>
+            <th data-key="success_cost" class="num">Success&nbsp;cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr data-rank="1" data-agent="Hermes" data-model="gpt-5.5 medium" data-pass="174" data-fail="36" data-success="82.86" data-mean="82.35" data-median="99" data-success_time="202.1" data-fail_time="98.9" data-success_cost="1.496">
+            <td class="num">1</td>
+            <td><span class="cell-strong">Hermes</span></td>
+            <td><code class="cell-mono">gpt-5.5 medium</code></td>
+            <td class="num">174</td>
+            <td class="num">36</td>
+            <td class="num"><strong>82.86</strong></td>
+            <td class="num">82.35</td>
+            <td class="num">99</td>
+            <td class="num">202.1</td>
+            <td class="num">98.9</td>
+            <td class="num">$1.496</td>
+          </tr>
+          <tr data-rank="2" data-agent="Codex" data-model="gpt-5.5 medium" data-pass="171" data-fail="39" data-success="81.43" data-mean="83.67" data-median="99" data-success_time="238.6" data-fail_time="323.8" data-success_cost="1.254">
+            <td class="num">2</td>
+            <td><span class="cell-strong">Codex</span></td>
+            <td><code class="cell-mono">gpt-5.5 medium</code></td>
+            <td class="num">171</td>
+            <td class="num">39</td>
+            <td class="num"><strong>81.43</strong></td>
+            <td class="num">83.67</td>
+            <td class="num">99</td>
+            <td class="num">238.6</td>
+            <td class="num">323.8</td>
+            <td class="num">$1.254</td>
+          </tr>
+          <tr data-rank="3" data-agent="Claude Code" data-model="gpt-5.5 medium" data-pass="156" data-fail="54" data-success="74.29" data-mean="77.64" data-median="95" data-success_time="194.4" data-fail_time="326.8" data-success_cost="0.771">
+            <td class="num">3</td>
+            <td><span class="cell-strong">Claude Code</span></td>
+            <td><code class="cell-mono">gpt-5.5 medium</code></td>
+            <td class="num">156</td>
+            <td class="num">54</td>
+            <td class="num"><strong>74.29</strong></td>
+            <td class="num">77.64</td>
+            <td class="num">95</td>
+            <td class="num">194.4</td>
+            <td class="num">326.8</td>
+            <td class="num">$0.771</td>
+          </tr>
+          <tr data-rank="4" data-agent="Cursor" data-model="GPT-5.5 Medium" data-pass="153" data-fail="57" data-success="72.86" data-mean="76.12" data-median="96.5" data-success_time="199.2" data-fail_time="245.5" data-success_cost="0.808">
+            <td class="num">4</td>
+            <td><span class="cell-strong">Cursor</span></td>
+            <td><code class="cell-mono">GPT-5.5 Medium</code></td>
+            <td class="num">153</td>
+            <td class="num">57</td>
+            <td class="num"><strong>72.86</strong></td>
+            <td class="num">76.12</td>
+            <td class="num">96.5</td>
+            <td class="num">199.2</td>
+            <td class="num">245.5</td>
+            <td class="num">$0.808</td>
+          </tr>
+          <tr data-rank="5" data-agent="OpenClaw" data-model="gpt-5.5 medium" data-pass="144" data-fail="66" data-success="68.57" data-mean="72.61" data-median="96" data-success_time="487.5" data-fail_time="450.9" data-success_cost="0.970">
+            <td class="num">5</td>
+            <td><span class="cell-strong">OpenClaw</span></td>
+            <td><code class="cell-mono">gpt-5.5 medium</code></td>
+            <td class="num">144</td>
+            <td class="num">66</td>
+            <td class="num"><strong>68.57</strong></td>
+            <td class="num">72.61</td>
+            <td class="num">96</td>
+            <td class="num">487.5</td>
+            <td class="num">450.9</td>
+            <td class="num">$0.970</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <h3 class="lb-title">Browser Leaderboard</h3>
+    <p class="lb-note">
+      Same <code>browser-use</code> agent, <code>gpt-5.4</code> model, 600s timeout, vision off,
+      and <code>gpt-5.4</code> stepwise judge on the 92-task global split. Browser report generated
+      on 2026-07-16.
+    </p>
+    <div class="lb-wrap">
+      <table class="lb-table lb-table-wide">
+        <thead>
+          <tr>
+            <th data-key="rank">#</th>
+            <th data-key="browser">Browser backend</th>
+            <th data-key="pass" class="num">Pass</th>
+            <th data-key="total" class="num">Total</th>
+            <th data-key="success" class="num">Success&nbsp;%</th>
+            <th data-key="steps" class="num">Avg&nbsp;steps</th>
+            <th data-key="tokens" class="num">Avg&nbsp;tokens</th>
+            <th data-key="calls" class="num">LLM&nbsp;calls</th>
+            <th data-key="e2e" class="num">Avg&nbsp;e2e (s)</th>
+            <th data-key="status">Done / timeout / error</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr data-rank="1" data-browser="Lexmount" data-pass="60" data-total="92" data-success="65.2" data-steps="17.2" data-tokens="178400" data-calls="16.7" data-e2e="182.3" data-status="88/2/2">
+            <td class="num">1</td>
+            <td><span class="cell-strong">Lexmount</span></td>
+            <td class="num">60</td>
+            <td class="num">92</td>
+            <td class="num"><strong>65.2</strong></td>
+            <td class="num">17.2</td>
+            <td class="num">178.4k</td>
+            <td class="num">16.7</td>
+            <td class="num">182.3</td>
+            <td><code class="cell-mono">88 / 2 / 2</code></td>
+          </tr>
+          <tr data-rank="2" data-browser="Browser Use Cloud" data-pass="58" data-total="92" data-success="63.0" data-steps="13.8" data-tokens="109700" data-calls="13.2" data-e2e="273.3" data-status="71/21/0">
+            <td class="num">2</td>
+            <td><span class="cell-strong">Browser Use Cloud</span></td>
+            <td class="num">58</td>
+            <td class="num">92</td>
+            <td class="num"><strong>63.0</strong></td>
+            <td class="num">13.8</td>
+            <td class="num">109.7k</td>
+            <td class="num">13.2</td>
+            <td class="num">273.3</td>
+            <td><code class="cell-mono">71 / 21 / 0</code></td>
+          </tr>
+          <tr data-rank="3" data-browser="Browserbase" data-pass="54" data-total="92" data-success="58.7" data-steps="16.0" data-tokens="161500" data-calls="15.4" data-e2e="258.4" data-status="81/6/5">
+            <td class="num">3</td>
+            <td><span class="cell-strong">Browserbase</span></td>
+            <td class="num">54</td>
+            <td class="num">92</td>
+            <td class="num"><strong>58.7</strong></td>
+            <td class="num">16.0</td>
+            <td class="num">161.5k</td>
+            <td class="num">15.4</td>
+            <td class="num">258.4</td>
+            <td><code class="cell-mono">81 / 6 / 5</code></td>
           </tr>
         </tbody>
       </table>
