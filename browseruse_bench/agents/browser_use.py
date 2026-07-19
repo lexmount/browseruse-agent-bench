@@ -506,6 +506,17 @@ def _get_config_value(agent_config: dict[str, Any], *keys: str, default: Any = N
     return default
 
 
+def _get_optional_int_config_value(agent_config: dict[str, Any], *keys: str) -> int | None:
+    raw = _get_config_value(agent_config, *keys)
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        logger.warning("Invalid %s value %r; using browser-use default", keys[0], raw)
+        return None
+
+
 @contextmanager
 def _browser_use_cdp_connect_timeout(timeout_seconds: float) -> Iterator[None]:
     """Override browser-use SDK's hard-coded 15s CDP connect guard."""
@@ -714,9 +725,16 @@ class BrowserUseAgent(BaseAgent):
         use_vision = _get_config_value(agent_config, "use_vision", "USE_VISION", default=False)
         max_steps = self.get_max_steps(agent_config, 40)
         save_api_logs = _get_config_value(agent_config, "save_api_logs", "SAVE_API_LOGS", default=True)
+        llm_timeout = _get_optional_int_config_value(
+            agent_config,
+            "llm_timeout",
+            "llm_timeout_seconds",
+            "LLM_TIMEOUT",
+        )
 
         config_info = {
             "timeout_seconds": timeout,
+            "llm_timeout_seconds": llm_timeout,
             "flash_mode": flash_mode,
             "use_vision": use_vision,
             "max_steps": max_steps,
@@ -745,6 +763,7 @@ class BrowserUseAgent(BaseAgent):
                 calculate_cost=True,
                 flash_mode=flash_mode,
                 use_vision=use_vision,
+                llm_timeout=llm_timeout,
                 use_judge=_get_config_value(agent_config, "use_judge", "USE_JUDGE", default=False),
             )
             _patch_agent_output_json_parsers(agent)

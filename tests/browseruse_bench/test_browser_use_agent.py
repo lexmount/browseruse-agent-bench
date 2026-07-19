@@ -663,6 +663,82 @@ def test_run_task_async_keeps_real_max_steps_status(
     assert result.answer == "[Task Failed: Failed to complete task in maximum steps]"
 
 
+def test_run_task_async_passes_configured_llm_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class FakeHistory:
+        history: list[Any] = []
+
+        def extracted_content(self) -> list[str]:
+            return ["ok"]
+
+        def number_of_steps(self) -> int:
+            return 1
+
+        def screenshots(self) -> list[str]:
+            return []
+
+        def errors(self) -> list[str | None]:
+            return [None]
+
+        def is_done(self) -> bool:
+            return True
+
+        def is_successful(self) -> bool:
+            return True
+
+        def final_result(self) -> str:
+            return "ok"
+
+    class FakeAgent:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+            self.history = FakeHistory()
+
+        async def run(self, max_steps: int) -> FakeHistory:
+            assert max_steps == 40
+            return self.history
+
+    class FakeBrowser:
+        async def stop(self) -> None:
+            return None
+
+    monkeypatch.setattr(browser_use_module, "Agent", FakeAgent)
+    monkeypatch.setattr(
+        BrowserUseAgent,
+        "_create_browser_instance",
+        staticmethod(lambda session_context: (FakeBrowser(), None)),
+    )
+    monkeypatch.setattr(
+        BrowserUseAgent,
+        "_create_llm",
+        lambda self, model_type, model_id, agent_config, config_info: _StubLLM(),
+    )
+
+    result = asyncio.run(
+        BrowserUseAgent()._run_task_async(
+            task_info={"task_id": "t-timeout", "task_text": "search", "url": "https://example.com"},
+            task_workspace=tmp_path,
+            timeout=600,
+            flash_mode=False,
+            agent_config={
+                "MODEL_TYPE": "OPENAI",
+                "MODEL_ID": "gpt-test",
+                "SAVE_API_LOGS": False,
+                "llm_timeout": "120",
+            },
+            session_context=BrowserSessionContext(backend_id="Chrome-Local", transport="local"),
+        )
+    )
+
+    assert captured["llm_timeout"] == 120
+    assert result.config["llm_timeout_seconds"] == 120
+    assert result.agent_success is True
+
+
 # ---------------------------------------------------------------------------
 # local_proxy → BrowserUseProxySettings → Browser kwargs
 # ---------------------------------------------------------------------------

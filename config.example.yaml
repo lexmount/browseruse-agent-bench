@@ -266,6 +266,7 @@ agents:
     use_judge: false
     use_vision: false
     max_steps: 40
+    llm_timeout: 120
     flash_mode: true
     timeout: 600
   skyvern:

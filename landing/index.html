@@ -332,7 +332,7 @@
   <div class="container">
     <h2 class="section-title">Leaderboard</h2>
     <p class="section-lede">
-      Snapshot results for LexBench-Browser. The model view compares browser-use across 13
+      Snapshot results for LexBench-Browser. The model view compares browser-use across 14
       models; the agent view compares five agents on the public 210-task split; the browser
       view compares three cloud browser backends on the 92-task global split. Click any header
       to sort.
@@ -352,125 +352,179 @@
             <th data-key="agent">Agent</th>
             <th data-key="model">Model</th>
             <th data-key="browser">Browser</th>
+            <th data-key="pass" class="num">Pass</th>
+            <th data-key="fail" class="num">Fail</th>
+            <th data-key="total" class="num">Total</th>
             <th data-key="success" class="num">Success&nbsp;%</th>
             <th data-key="steps" class="num">Avg&nbsp;steps</th>
             <th data-key="e2e" class="num">Avg&nbsp;e2e (s)</th>
           </tr>
         </thead>
         <tbody>
-          <tr data-rank="1" data-agent="browser-use" data-model="dmx-claude-opus-4-8-thinking" data-browser="Lexmount" data-success="75.3" data-steps="16.90" data-e2e="522.4">
+          <tr data-rank="1" data-agent="browser-use" data-model="dmx-claude-opus-4-8-thinking" data-browser="Lexmount" data-pass="158" data-fail="52" data-total="210" data-success="75.3" data-steps="16.90" data-e2e="522.4">
             <td class="num">1</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">dmx-claude-opus-4-8-thinking</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num">158</td>
+            <td class="num">52</td>
+            <td class="num">210</td>
             <td class="num"><strong>75.3</strong></td>
             <td class="num">16.9</td>
             <td class="num">522.4</td>
           </tr>
-          <tr data-rank="2" data-agent="browser-use" data-model="gpt-5.5" data-browser="Lexmount" data-success="74.3" data-steps="14.00" data-e2e="212.0">
+          <tr data-rank="2" data-agent="browser-use" data-model="gpt-5.5" data-browser="Lexmount" data-pass="156" data-fail="54" data-total="210" data-success="74.3" data-steps="14.00" data-e2e="212.0">
             <td class="num">2</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">gpt-5.5</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num">156</td>
+            <td class="num">54</td>
+            <td class="num">210</td>
             <td class="num"><strong>74.3</strong></td>
             <td class="num">14.0</td>
             <td class="num">212.0</td>
           </tr>
-          <tr data-rank="3" data-agent="browser-use" data-model="grok-4.5" data-browser="Lexmount" data-success="74.3" data-steps="15.37" data-e2e="132.2">
+          <tr data-rank="3" data-agent="browser-use" data-model="grok-4.5" data-browser="Lexmount" data-pass="156" data-fail="54" data-total="210" data-success="74.3" data-steps="15.37" data-e2e="132.2">
             <td class="num">3</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">grok-4.5</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num">156</td>
+            <td class="num">54</td>
+            <td class="num">210</td>
             <td class="num"><strong>74.3</strong></td>
             <td class="num">15.4</td>
             <td class="num">132.2</td>
           </tr>
-          <tr data-rank="4" data-agent="browser-use" data-model="kimi-k3" data-browser="Lexmount" data-success="72.4" data-steps="14.65" data-e2e="515.6">
+          <tr data-rank="4" data-agent="browser-use" data-model="gpt-5.6" data-browser="Lexmount" data-pass="155" data-fail="55" data-total="210" data-success="73.8" data-steps="13.46" data-e2e="292.7">
             <td class="num">4</td>
+            <td><span class="cell-strong">browser-use</span></td>
+            <td><code class="cell-mono">gpt-5.6</code></td>
+            <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num">155</td>
+            <td class="num">55</td>
+            <td class="num">210</td>
+            <td class="num"><strong>73.8</strong></td>
+            <td class="num">13.5</td>
+            <td class="num">292.7</td>
+          </tr>
+          <tr data-rank="5" data-agent="browser-use" data-model="kimi-k3" data-browser="Lexmount" data-pass="152" data-fail="58" data-total="210" data-success="72.4" data-steps="14.65" data-e2e="515.6">
+            <td class="num">5</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">kimi-k3</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num">152</td>
+            <td class="num">58</td>
+            <td class="num">210</td>
             <td class="num"><strong>72.4</strong></td>
             <td class="num">14.7</td>
             <td class="num">515.6</td>
           </tr>
-          <tr data-rank="5" data-agent="browser-use" data-model="bu-2-0" data-browser="Lexmount" data-success="68.7" data-steps="17.50" data-e2e="323.8">
-            <td class="num">5</td>
+          <tr data-rank="6" data-agent="browser-use" data-model="bu-2-0" data-browser="Lexmount" data-pass="144" data-fail="66" data-total="210" data-success="68.7" data-steps="17.50" data-e2e="323.8">
+            <td class="num">6</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">bu-2-0</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num">144</td>
+            <td class="num">66</td>
+            <td class="num">210</td>
             <td class="num"><strong>68.7</strong></td>
             <td class="num">17.5</td>
             <td class="num">323.8</td>
           </tr>
-          <tr data-rank="6" data-agent="browser-use" data-model="glm-5.1" data-browser="Lexmount" data-success="68.2" data-steps="22.00" data-e2e="589.7">
-            <td class="num">6</td>
+          <tr data-rank="7" data-agent="browser-use" data-model="glm-5.1" data-browser="Lexmount" data-pass="143" data-fail="67" data-total="210" data-success="68.2" data-steps="22.00" data-e2e="589.7">
+            <td class="num">7</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">glm-5.1</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num">143</td>
+            <td class="num">67</td>
+            <td class="num">210</td>
             <td class="num"><strong>68.2</strong></td>
             <td class="num">22.0</td>
             <td class="num">589.7</td>
           </tr>
-          <tr data-rank="7" data-agent="browser-use" data-model="glm-5.2" data-browser="Lexmount" data-success="66.2" data-steps="22.27" data-e2e="697.9">
-            <td class="num">7</td>
+          <tr data-rank="8" data-agent="browser-use" data-model="glm-5.2" data-browser="Lexmount" data-pass="139" data-fail="71" data-total="210" data-success="66.2" data-steps="22.27" data-e2e="697.9">
+            <td class="num">8</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">glm-5.2</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num">139</td>
+            <td class="num">71</td>
+            <td class="num">210</td>
             <td class="num"><strong>66.2</strong></td>
             <td class="num">22.3</td>
             <td class="num">697.9</td>
           </tr>
-          <tr data-rank="8" data-agent="browser-use" data-model="qwen3.7-max" data-browser="Lexmount" data-success="65.8" data-steps="18.80" data-e2e="487.6">
-            <td class="num">8</td>
+          <tr data-rank="9" data-agent="browser-use" data-model="qwen3.7-max" data-browser="Lexmount" data-pass="138" data-fail="72" data-total="210" data-success="65.8" data-steps="18.80" data-e2e="487.6">
+            <td class="num">9</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">qwen3.7-max</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num">138</td>
+            <td class="num">72</td>
+            <td class="num">210</td>
             <td class="num"><strong>65.8</strong></td>
             <td class="num">18.8</td>
             <td class="num">487.6</td>
           </tr>
-          <tr data-rank="9" data-agent="browser-use" data-model="gemini-3.1-pro-preview" data-browser="Lexmount" data-success="63.9" data-steps="12.60" data-e2e="368.6">
-            <td class="num">9</td>
+          <tr data-rank="10" data-agent="browser-use" data-model="gemini-3.1-pro-preview" data-browser="Lexmount" data-pass="134" data-fail="76" data-total="210" data-success="63.9" data-steps="12.60" data-e2e="368.6">
+            <td class="num">10</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">gemini-3.1-pro-preview</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num">134</td>
+            <td class="num">76</td>
+            <td class="num">210</td>
             <td class="num"><strong>63.9</strong></td>
             <td class="num">12.6</td>
             <td class="num">368.6</td>
           </tr>
-          <tr data-rank="10" data-agent="browser-use" data-model="doubao-seed-2-0-pro" data-browser="Lexmount" data-success="61.8" data-steps="17.70" data-e2e="595.3">
-            <td class="num">10</td>
+          <tr data-rank="11" data-agent="browser-use" data-model="doubao-seed-2-0-pro" data-browser="Lexmount" data-pass="130" data-fail="80" data-total="210" data-success="61.8" data-steps="17.70" data-e2e="595.3">
+            <td class="num">11</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">doubao-seed-2-0-pro</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num">130</td>
+            <td class="num">80</td>
+            <td class="num">210</td>
             <td class="num"><strong>61.8</strong></td>
             <td class="num">17.7</td>
             <td class="num">595.3</td>
           </tr>
-          <tr data-rank="11" data-agent="browser-use" data-model="gemini-3.5-flash" data-browser="Lexmount" data-success="58.6" data-steps="26.90" data-e2e="376.4">
-            <td class="num">11</td>
+          <tr data-rank="12" data-agent="browser-use" data-model="gemini-3.5-flash" data-browser="Lexmount" data-pass="123" data-fail="87" data-total="210" data-success="58.6" data-steps="26.90" data-e2e="376.4">
+            <td class="num">12</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">gemini-3.5-flash</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num">123</td>
+            <td class="num">87</td>
+            <td class="num">210</td>
             <td class="num"><strong>58.6</strong></td>
             <td class="num">26.9</td>
             <td class="num">376.4</td>
           </tr>
-          <tr data-rank="12" data-agent="browser-use" data-model="kimi-k2.6" data-browser="Lexmount" data-success="53.3" data-steps="23.60" data-e2e="433.4">
-            <td class="num">12</td>
+          <tr data-rank="13" data-agent="browser-use" data-model="kimi-k2.6" data-browser="Lexmount" data-pass="112" data-fail="98" data-total="210" data-success="53.3" data-steps="23.60" data-e2e="433.4">
+            <td class="num">13</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">kimi-k2.6</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num">112</td>
+            <td class="num">98</td>
+            <td class="num">210</td>
             <td class="num"><strong>53.3</strong></td>
             <td class="num">23.6</td>
             <td class="num">433.4</td>
           </tr>
-          <tr data-rank="13" data-agent="browser-use" data-model="MiniMax-M3" data-browser="Lexmount" data-success="40.1" data-steps="20.10" data-e2e="584.5">
-            <td class="num">13</td>
+          <tr data-rank="14" data-agent="browser-use" data-model="MiniMax-M3" data-browser="Lexmount" data-pass="84" data-fail="126" data-total="210" data-success="40.1" data-steps="20.10" data-e2e="584.5">
+            <td class="num">14</td>
             <td><span class="cell-strong">browser-use</span></td>
             <td><code class="cell-mono">MiniMax-M3</code></td>
             <td><span class="browser-pill">Lexmount</span></td>
+            <td class="num">84</td>
+            <td class="num">126</td>
+            <td class="num">210</td>
             <td class="num"><strong>40.1</strong></td>
             <td class="num">20.1</td>
             <td class="num">584.5</td>
@@ -490,81 +544,75 @@
             <th data-key="rank">#</th>
             <th data-key="agent">Agent</th>
             <th data-key="model">Model / runtime</th>
+            <th data-key="browser">Browser</th>
             <th data-key="pass" class="num">Pass</th>
             <th data-key="fail" class="num">Fail</th>
+            <th data-key="total" class="num">Total</th>
             <th data-key="success" class="num">Success&nbsp;%</th>
-            <th data-key="mean" class="num">Avg&nbsp;score</th>
-            <th data-key="median" class="num">Median</th>
-            <th data-key="success_time" class="num">Success&nbsp;e2e (s)</th>
-            <th data-key="fail_time" class="num">Fail&nbsp;e2e (s)</th>
-            <th data-key="success_cost" class="num">Success&nbsp;cost</th>
+            <th data-key="steps" class="num">Avg&nbsp;steps</th>
+            <th data-key="e2e" class="num">Avg&nbsp;e2e (s)</th>
           </tr>
         </thead>
         <tbody>
-          <tr data-rank="1" data-agent="Hermes" data-model="gpt-5.5 medium" data-pass="174" data-fail="36" data-success="82.86" data-mean="82.35" data-median="99" data-success_time="202.1" data-fail_time="98.9" data-success_cost="1.496">
+          <tr data-rank="1" data-agent="Hermes" data-model="gpt-5.5 medium" data-browser="Lexmount" data-pass="174" data-fail="36" data-total="210" data-success="82.86" data-steps="" data-e2e="184.4">
             <td class="num">1</td>
             <td><span class="cell-strong">Hermes</span></td>
             <td><code class="cell-mono">gpt-5.5 medium</code></td>
+            <td><span class="browser-pill">Lexmount</span></td>
             <td class="num">174</td>
             <td class="num">36</td>
+            <td class="num">210</td>
             <td class="num"><strong>82.86</strong></td>
-            <td class="num">82.35</td>
-            <td class="num">99</td>
-            <td class="num">202.1</td>
-            <td class="num">98.9</td>
-            <td class="num">$1.496</td>
+            <td class="num">-</td>
+            <td class="num">184.4</td>
           </tr>
-          <tr data-rank="2" data-agent="Codex" data-model="gpt-5.5 medium" data-pass="171" data-fail="39" data-success="81.43" data-mean="83.67" data-median="99" data-success_time="238.6" data-fail_time="323.8" data-success_cost="1.254">
+          <tr data-rank="2" data-agent="Codex" data-model="gpt-5.5 medium" data-browser="Lexmount" data-pass="171" data-fail="39" data-total="210" data-success="81.43" data-steps="" data-e2e="254.4">
             <td class="num">2</td>
             <td><span class="cell-strong">Codex</span></td>
             <td><code class="cell-mono">gpt-5.5 medium</code></td>
+            <td><span class="browser-pill">Lexmount</span></td>
             <td class="num">171</td>
             <td class="num">39</td>
+            <td class="num">210</td>
             <td class="num"><strong>81.43</strong></td>
-            <td class="num">83.67</td>
-            <td class="num">99</td>
-            <td class="num">238.6</td>
-            <td class="num">323.8</td>
-            <td class="num">$1.254</td>
+            <td class="num">-</td>
+            <td class="num">254.4</td>
           </tr>
-          <tr data-rank="3" data-agent="Claude Code" data-model="gpt-5.5 medium" data-pass="156" data-fail="54" data-success="74.29" data-mean="77.64" data-median="95" data-success_time="194.4" data-fail_time="326.8" data-success_cost="0.771">
+          <tr data-rank="3" data-agent="Claude Code" data-model="gpt-5.5 medium" data-browser="Lexmount" data-pass="156" data-fail="54" data-total="210" data-success="74.29" data-steps="" data-e2e="228.4">
             <td class="num">3</td>
             <td><span class="cell-strong">Claude Code</span></td>
             <td><code class="cell-mono">gpt-5.5 medium</code></td>
+            <td><span class="browser-pill">Lexmount</span></td>
             <td class="num">156</td>
             <td class="num">54</td>
+            <td class="num">210</td>
             <td class="num"><strong>74.29</strong></td>
-            <td class="num">77.64</td>
-            <td class="num">95</td>
-            <td class="num">194.4</td>
-            <td class="num">326.8</td>
-            <td class="num">$0.771</td>
+            <td class="num">-</td>
+            <td class="num">228.4</td>
           </tr>
-          <tr data-rank="4" data-agent="Cursor" data-model="GPT-5.5 Medium" data-pass="153" data-fail="57" data-success="72.86" data-mean="76.12" data-median="96.5" data-success_time="199.2" data-fail_time="245.5" data-success_cost="0.808">
+          <tr data-rank="4" data-agent="Cursor" data-model="GPT-5.5 Medium" data-browser="Lexmount" data-pass="153" data-fail="57" data-total="210" data-success="72.86" data-steps="" data-e2e="211.8">
             <td class="num">4</td>
             <td><span class="cell-strong">Cursor</span></td>
             <td><code class="cell-mono">GPT-5.5 Medium</code></td>
+            <td><span class="browser-pill">Lexmount</span></td>
             <td class="num">153</td>
             <td class="num">57</td>
+            <td class="num">210</td>
             <td class="num"><strong>72.86</strong></td>
-            <td class="num">76.12</td>
-            <td class="num">96.5</td>
-            <td class="num">199.2</td>
-            <td class="num">245.5</td>
-            <td class="num">$0.808</td>
+            <td class="num">-</td>
+            <td class="num">211.8</td>
           </tr>
-          <tr data-rank="5" data-agent="OpenClaw" data-model="gpt-5.5 medium" data-pass="144" data-fail="66" data-success="68.57" data-mean="72.61" data-median="96" data-success_time="487.5" data-fail_time="450.9" data-success_cost="0.970">
+          <tr data-rank="5" data-agent="OpenClaw" data-model="gpt-5.5 medium" data-browser="Lexmount" data-pass="144" data-fail="66" data-total="210" data-success="68.57" data-steps="" data-e2e="476.0">
             <td class="num">5</td>
             <td><span class="cell-strong">OpenClaw</span></td>
             <td><code class="cell-mono">gpt-5.5 medium</code></td>
+            <td><span class="browser-pill">Lexmount</span></td>
             <td class="num">144</td>
             <td class="num">66</td>
+            <td class="num">210</td>
             <td class="num"><strong>68.57</strong></td>
-            <td class="num">72.61</td>
-            <td class="num">96</td>
-            <td class="num">487.5</td>
-            <td class="num">450.9</td>
-            <td class="num">$0.970</td>
+            <td class="num">-</td>
+            <td class="num">476.0</td>
           </tr>
         </tbody>
       </table>
@@ -580,53 +628,53 @@
         <thead>
           <tr>
             <th data-key="rank">#</th>
+            <th data-key="agent">Agent</th>
+            <th data-key="model">Model</th>
             <th data-key="browser">Browser backend</th>
             <th data-key="pass" class="num">Pass</th>
+            <th data-key="fail" class="num">Fail</th>
             <th data-key="total" class="num">Total</th>
             <th data-key="success" class="num">Success&nbsp;%</th>
             <th data-key="steps" class="num">Avg&nbsp;steps</th>
-            <th data-key="tokens" class="num">Avg&nbsp;tokens</th>
-            <th data-key="calls" class="num">LLM&nbsp;calls</th>
             <th data-key="e2e" class="num">Avg&nbsp;e2e (s)</th>
-            <th data-key="status">Done / timeout / error</th>
           </tr>
         </thead>
         <tbody>
-          <tr data-rank="1" data-browser="Lexmount" data-pass="60" data-total="92" data-success="65.2" data-steps="17.2" data-tokens="178400" data-calls="16.7" data-e2e="182.3" data-status="88/2/2">
+          <tr data-rank="1" data-agent="browser-use" data-model="gpt-5.4" data-browser="Lexmount" data-pass="60" data-fail="32" data-total="92" data-success="65.2" data-steps="17.2" data-e2e="182.3">
             <td class="num">1</td>
+            <td><span class="cell-strong">browser-use</span></td>
+            <td><code class="cell-mono">gpt-5.4</code></td>
             <td><span class="cell-strong">Lexmount</span></td>
             <td class="num">60</td>
+            <td class="num">32</td>
             <td class="num">92</td>
             <td class="num"><strong>65.2</strong></td>
             <td class="num">17.2</td>
-            <td class="num">178.4k</td>
-            <td class="num">16.7</td>
             <td class="num">182.3</td>
-            <td><code class="cell-mono">88 / 2 / 2</code></td>
           </tr>
-          <tr data-rank="2" data-browser="Browser Use Cloud" data-pass="58" data-total="92" data-success="63.0" data-steps="13.8" data-tokens="109700" data-calls="13.2" data-e2e="273.3" data-status="71/21/0">
+          <tr data-rank="2" data-agent="browser-use" data-model="gpt-5.4" data-browser="Browser Use Cloud" data-pass="58" data-fail="34" data-total="92" data-success="63.0" data-steps="13.8" data-e2e="273.3">
             <td class="num">2</td>
+            <td><span class="cell-strong">browser-use</span></td>
+            <td><code class="cell-mono">gpt-5.4</code></td>
             <td><span class="cell-strong">Browser Use Cloud</span></td>
             <td class="num">58</td>
+            <td class="num">34</td>
             <td class="num">92</td>
             <td class="num"><strong>63.0</strong></td>
             <td class="num">13.8</td>
-            <td class="num">109.7k</td>
-            <td class="num">13.2</td>
             <td class="num">273.3</td>
-            <td><code class="cell-mono">71 / 21 / 0</code></td>
           </tr>
-          <tr data-rank="3" data-browser="Browserbase" data-pass="54" data-total="92" data-success="58.7" data-steps="16.0" data-tokens="161500" data-calls="15.4" data-e2e="258.4" data-status="81/6/5">
+          <tr data-rank="3" data-agent="browser-use" data-model="gpt-5.4" data-browser="Browserbase" data-pass="54" data-fail="38" data-total="92" data-success="58.7" data-steps="16.0" data-e2e="258.4">
             <td class="num">3</td>
+            <td><span class="cell-strong">browser-use</span></td>
+            <td><code class="cell-mono">gpt-5.4</code></td>
             <td><span class="cell-strong">Browserbase</span></td>
             <td class="num">54</td>
+            <td class="num">38</td>
             <td class="num">92</td>
             <td class="num"><strong>58.7</strong></td>
             <td class="num">16.0</td>
-            <td class="num">161.5k</td>
-            <td class="num">15.4</td>
             <td class="num">258.4</td>
-            <td><code class="cell-mono">81 / 6 / 5</code></td>
           </tr>
         </tbody>
       </table>
