@@ -168,6 +168,42 @@ def test_browser_use_browser_rewrites_sdk_cdp_timeout_message(
         asyncio.run(browser.start())
 
 
+def test_build_openai_kwargs_forwards_xhigh_reasoning_effort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("REASONING_EFFORT", raising=False)
+    config_info: dict[str, Any] = {}
+
+    kwargs = BrowserUseAgent._build_openai_kwargs(
+        "gpt-5.6-sol",
+        {
+            "api_key": "key",
+            "base_url": "https://example.test/v1",
+            "max_tokens": 16384,
+            "reasoning_effort": "xhigh",
+        },
+        config_info,
+    )
+
+    assert kwargs["reasoning_effort"] == "xhigh"
+    assert kwargs["reasoning_models"] == ["gpt-5.6-sol"]
+    assert kwargs["max_completion_tokens"] == 16384
+    assert config_info["reasoning_effort"] == "xhigh"
+
+
+def test_build_openai_kwargs_rejects_invalid_reasoning_effort() -> None:
+    with pytest.raises(ValueError, match="Invalid reasoning_effort"):
+        BrowserUseAgent._build_openai_kwargs(
+            "gpt-5.6-sol",
+            {
+                "api_key": "key",
+                "base_url": "https://example.test/v1",
+                "reasoning_effort": "extreme",
+            },
+            {},
+        )
+
+
 class _OutputForParserTest(BaseModel):
     memory: str
     action: list[dict[str, Any]]
