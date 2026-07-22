@@ -1,13 +1,18 @@
 {
   "default_split": "All",
   "split": {
-    "All": "task.jsonl"
+    "All": "task.jsonl",
+    "Challenge100": "task_challenge_100.jsonl"
   },
   "version_info": {
     "LexBench-Browser2.0": {
-      "total_tasks": 100,
+      "total_tasks": 150,
       "version": "2.0",
-      "description": "LexBench-Browser 2.0 tasks."
+      "description": "LexBench-Browser 2.0 tasks, including the default All split and the harder Challenge100 evaluation split.",
+      "split_counts": {
+        "All": 150,
+        "Challenge100": 100
+      }
     }
   }
 }

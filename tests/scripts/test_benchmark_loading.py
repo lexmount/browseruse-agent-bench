@@ -54,6 +54,23 @@ class TestBenchmarkLoading:
         assert lexmount_ids.isdisjoint(global_ids)
         assert lexmount_ids | global_ids == all_ids
 
+    def test_lexbench_browser2_splits_are_complete(self):
+        """Test the full and Challenge100 LexBench-Browser2.0 splits."""
+        all_tasks = load_task_file(_resolve_tasks_file("LexBench-Browser2.0", "All"))
+        challenge_tasks = load_task_file(
+            _resolve_tasks_file("LexBench-Browser2.0", "Challenge100")
+        )
+
+        all_ids = {task["id"] for task in all_tasks}
+        challenge_ids = {task["id"] for task in challenge_tasks}
+
+        assert len(all_tasks) == 150
+        assert len(all_ids) == 150
+        assert len(challenge_tasks) == 100
+        assert len(challenge_ids) == 100
+        assert challenge_ids <= all_ids
+        assert all(task.get("query") and task.get("rubrics") for task in all_tasks)
+
     def test_online_mind2web_tasks_exist(self):
         """Test Online-Mind2Web tasks file exists and is valid JSON."""
         tasks_file = _resolve_tasks_file("Online-Mind2Web")

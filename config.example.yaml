@@ -27,6 +27,19 @@ models:
     dont_force_structured_output: false
     add_schema_to_system_prompt: true
 
+  # GPT-5.6 Sol reference configuration for LexBench-Browser2.0 Challenge100.
+  gpt-5.6-sol:
+    model_type: OPENAI
+    model_provider: openai
+    model_id: gpt-5.6-sol
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
+    max_tokens: 16384
+    reasoning_effort: xhigh
+    llm_timeout: 150
+    dont_force_structured_output: false
+    add_schema_to_system_prompt: true
+
   # Anthropic Claude family, proxied as an OpenAI-compatible model.
   claude-opus-4.8:
     model_type: OPENAI

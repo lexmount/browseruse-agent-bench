@@ -187,6 +187,7 @@ def _patch_agent_output_json_parsers(agent: Any) -> None:
 
 _PATCHED_SCHEMA_OPTIMIZER_ATTR = "_browseruse_bench_strip_numeric_bounds_patched"
 _VALID_REASONING_EFFORTS = ("minimal", "low", "medium", "high")
+_VALID_OPENAI_REASONING_EFFORTS = ("none", "low", "medium", "high", "xhigh")
 _NON_IDENTIFIER_CHARS_RE = re.compile(r"[^a-zA-Z0-9_-]+")
 
 
@@ -1027,6 +1028,18 @@ class BrowserUseAgent(BaseAgent):
             "dont_force_structured_output": dont_force_structured_output,
             "add_schema_to_system_prompt": add_schema_to_system_prompt,
         }
+        reasoning_effort = agent_config.get("reasoning_effort") or os.getenv("REASONING_EFFORT")
+        if reasoning_effort:
+            if reasoning_effort not in _VALID_OPENAI_REASONING_EFFORTS:
+                raise ValueError(
+                    f"Invalid reasoning_effort={reasoning_effort!r}; expected one of "
+                    f"{_VALID_OPENAI_REASONING_EFFORTS}"
+                )
+            openai_kwargs["reasoning_effort"] = reasoning_effort
+            # browser-use only emits reasoning_effort for IDs in this list.
+            # Register gateway aliases that are newer than the installed SDK.
+            openai_kwargs["reasoning_models"] = [model_id]
+            config_info["reasoning_effort"] = reasoning_effort
         if "temperature" in agent_config:
             temperature = agent_config["temperature"]
             openai_kwargs["temperature"] = temperature
