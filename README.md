@@ -45,6 +45,10 @@ Together they make external results easy to run, compare, cite, and submit back.
   - `All` (1266)
 - [ ] More benchmarks
 
+### Related external benchmarks
+
+[ClawBench](https://github.com/TIGER-AI-Lab/ClawBench) is an independent live-web benchmark for browser and computer-use agents. It covers 283 tasks across 163 live websites and records browser actions, screenshots, recordings, HTTP requests, and agent messages. This reference is informational; ClawBench is not a built-in `browseruse-bench` dataset.
+
 > Details: [Benchmarks overview](https://docs.bubench.lexmount.io/en/benchmarks/overview).
 
 **Supported Agents & Browsers**
