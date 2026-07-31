@@ -80,11 +80,12 @@ RUN chown -R 1000:1000 /app /root/.cache/uv
 ENV PATH="/app/.venv/bin:$PATH"
 ENV UV_PROJECT_ENVIRONMENT="/app/.venv"
 
-# Optional: CLI coding agents (codex / cursor / openclaw, plus the claude-code
-# CLI). Off by default to keep the CI image small. Enable with:
+# Optional: CLI coding agents (claude-code / codex / cursor / openhands /
+# openclaw). Off by default to keep the CI image small. Enable with:
 #   docker build --build-arg INSTALL_CLI_AGENTS=true .
 # Notes (see docs/cli-agents-deployment.md):
 #   - Node 22.x via NodeSource: openclaw declares engines node>=22.19.0.
+#   - OpenHands is installed as a uv tool with Python 3.12.
 #   - npm cache lives at a world-writable path so the uid-1000 runtime user
 #     reuses the pre-warmed Playwright MCP download (npx caches per-user via
 #     this env, not under /root).
@@ -100,12 +101,14 @@ RUN if [ "$INSTALL_CLI_AGENTS" = "true" ]; then \
         && rm -rf /var/lib/apt/lists/* \
         && if [ "$USE_CN_MIRROR" = "true" ]; then npm config set registry https://registry.npmmirror.com -g; fi \
         && npm install -g @anthropic-ai/claude-code @openai/codex openclaw \
+        && UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin uv tool install openhands --python 3.12 \
         && curl https://cursor.com/install -fsS | bash \
         && mv /root/.local/share/cursor-agent /opt/cursor-agent \
         && ln -s /opt/cursor-agent/versions/*/cursor-agent /usr/local/bin/cursor-agent \
         && npx -y @playwright/mcp@latest --version \
         && chmod -R a+rwX /opt/npm-cache \
         && chmod -R a+rX /opt/cursor-agent \
+        && chmod -R a+rX /opt/uv-tools \
         # Real passwd entry + home for the uid-1000 runtime user: codex
         # refuses a codex_home under temporary dirs, so HOME must not fall
         # back to /tmp. docker run --user 1000 resolves HOME from passwd.

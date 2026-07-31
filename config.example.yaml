@@ -191,6 +191,13 @@ models:
     model_type: OPENAI
     model_id: gpt-5.2
     api_key: $CURSOR_API_KEY
+  # OpenHands CLI model. Only supported by the openhands agent; credentials are
+  # passed via LLM_API_KEY / LLM_MODEL / LLM_BASE_URL with --override-with-envs.
+  openhands:
+    model_type: OPENAI
+    model_id: gpt-5.5
+    api_key: $OPENAI_API_KEY
+    base_url: $OPENAI_BASE_URL
   # OpenClaw CLI model. Only supported by the openclaw agent; the agent writes
   # a per-task OpenClaw provider config from these values (OpenAI-compatible
   # endpoints work, e.g. a LiteLLM proxy).
@@ -313,6 +320,11 @@ agents:
   cursor:
     active_model: cursor
     timeout: 600
+  openhands:
+    active_model: openhands
+    timeout: 600
+    # Defaults to openhands; use ["uv", "tool", "run", "openhands"] without a PATH install.
+    openhands_command: openhands
   openclaw:
     active_model: openclaw
     timeout: 600

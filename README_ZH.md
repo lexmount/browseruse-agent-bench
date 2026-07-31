@@ -102,7 +102,7 @@ source .venv/bin/activate          # macOS / Linux
 .venv\Scripts\Activate.ps1         # Windows PowerShell
 ```
 
-**CLI agents: claude-code / codex / cursor / openclaw**（需要 Node.js 18+；**openclaw 需要 Node.js 22.19+**）
+**CLI agents: claude-code / codex / cursor / openhands / openclaw**（需要 Node.js 18+；**openclaw 需要 Node.js 22.19+**；**openhands 需要通过 uv 使用 Python 3.12+**）
 
 这些 agent 共用主 venv（`uv sync`,无 extra），并依赖单独安装的外部 CLI：
 
@@ -112,6 +112,7 @@ npm install -g @anthropic-ai/claude-code     # claude-code（认证：ANTHROPIC_
 npm install -g @openai/codex                 # codex（认证：codex login 或 OPENAI_API_KEY）
 curl https://cursor.com/install -fsS | bash  # cursor（认证：CURSOR_API_KEY）
 export PATH="$HOME/.local/bin:$PATH"         # cursor-agent 安装在 ~/.local/bin
+uv tool install openhands --python 3.12      # openhands（认证：通过 config.yaml 注入 LLM_API_KEY）
 npm install -g openclaw                      # openclaw（无需登录；key 通过 config.yaml 注入）
 ```
 

@@ -103,7 +103,7 @@ source .venv/bin/activate          # macOS / Linux
 .venv\Scripts\Activate.ps1         # Windows PowerShell
 ```
 
-**CLI agents: claude-code / codex / cursor / openclaw** (requires Node.js 18+; **openclaw requires Node.js 22.19+**)
+**CLI agents: claude-code / codex / cursor / openhands / openclaw** (requires Node.js 18+; **openclaw requires Node.js 22.19+**; **openhands requires Python 3.12+ via uv**)
 
 These agents share the main venv (`uv sync`, no extra) and drive an external
 CLI installed separately:
@@ -114,6 +114,7 @@ npm install -g @anthropic-ai/claude-code     # claude-code (auth: ANTHROPIC_API_
 npm install -g @openai/codex                 # codex (auth: codex login or OPENAI_API_KEY)
 curl https://cursor.com/install -fsS | bash  # cursor (auth: CURSOR_API_KEY)
 export PATH="$HOME/.local/bin:$PATH"         # cursor-agent installs to ~/.local/bin
+uv tool install openhands --python 3.12      # openhands (auth: LLM_API_KEY via config.yaml)
 npm install -g openclaw                      # openclaw (no login; key via config.yaml)
 ```
 

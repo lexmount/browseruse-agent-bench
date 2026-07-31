@@ -1,4 +1,4 @@
-# CLI Agents Deployment (claude-code / codex / cursor / openclaw)
+# CLI Agents Deployment (claude-code / codex / cursor / openhands / openclaw)
 
 The CLI-based agents drive an external coding-agent CLI as a subprocess. They
 share the repo's main venv (`uv sync`, no extra) but each requires its CLI
@@ -15,7 +15,8 @@ upgrading.
 | Requirement | Why |
 |---|---|
 | Python >= 3.11 + `uv sync` | bench runtime (all CLI agents use the root `.venv`) |
-| Node.js >= 18 + npm (claude-code, codex, **cursor**) / **>= 22.19 (openclaw)** | installs the npm CLIs, and `npx` launches Playwright MCP at runtime for codex **and cursor** (cursor's own binary installs via curl but still needs `npx`). openclaw declares `engines: >=22.19.0` — install Node 22+ when openclaw is in the fleet |
+| Node.js >= 18 + npm (claude-code, codex, **cursor**) / **>= 22.19 (openclaw)** | installs the npm CLIs, and `npx` launches Playwright MCP at runtime for codex, cursor, and openhands (cursor's own binary installs via curl but still needs `npx`). openclaw declares `engines: >=22.19.0` — install Node 22+ when openclaw is in the fleet |
+| Python 3.12+ for OpenHands (`uv tool install openhands --python 3.12`) | OpenHands CLI runtime |
 | Outbound HTTPS | model APIs, Cursor backend, lexmount CDP (wss) |
 | `LEXMOUNT_API_KEY` in `.env` | recommended browser path on servers (see below) |
 
@@ -23,15 +24,15 @@ upgrading.
 
 - **Recommended on servers: `lexmount`** (default via `agents.<agent>.active_browser`).
   The browser runs in the cloud; the server only needs outbound network. No
-  local Chrome required for the CDP-capable agents (claude-code/codex/cursor/openclaw)
+  local Chrome required for the CDP-capable agents (claude-code/codex/cursor/openhands/openclaw)
   in this mode — claude-code now opens the managed backend session and attaches
   Playwright MCP to its CDP endpoint (`--cdp-endpoint`), like the others.
 - **`browser_id=local`**: requires a local Chrome/Chromium plus headless-Linux
-  dependencies. For claude-code/codex/cursor, Playwright MCP downloads its own
+  dependencies. For claude-code/codex/cursor/openhands, Playwright MCP downloads its own
   browser on first run — pre-warm with `npx -y @playwright/mcp@latest --version`
   during image build to avoid first-task latency.
 - Cloud-native backends (`browser-use-cloud`, `skyvern-cloud`) are **not
-  supported** by CLI agents (no CDP endpoint). All four (claude-code/codex/cursor/openclaw)
+  supported** by CLI agents (no CDP endpoint). All CLI agents
   fail fast with a clear error rather than silently self-launching a local browser.
 
 ## Per-agent install and auth
@@ -110,6 +111,25 @@ export PATH="$HOME/.local/bin:$PATH"          # ensure on PATH for the bench pro
   `agent_metadata.reported_model` in each result; avoid `model_id: auto`
   (non-deterministic, breaks the experiments-dir / eval model match).
 
+### openhands (verified: OpenHands CLI 1.16.0 / SDK 1.21.0)
+
+```bash
+uv tool install openhands --python 3.12
+```
+
+- Auth: `models.openhands.api_key/base_url/model_id` are passed via
+  `LLM_API_KEY`, `LLM_BASE_URL`, and `LLM_MODEL` with `--override-with-envs`.
+  OpenAI-compatible endpoints work; in local smoke testing `gpt-5.5` through
+  the LiteLLM gateway succeeded, while `gpt-5.4` returned 404 from that route.
+- Browser: Playwright MCP via `npx`; managed CDP backends attach automatically.
+- The agent writes a task-local `~/.openhands/mcp.json` by setting `HOME` and
+  `OH_PERSISTENCE_DIR` to a workspace-local directory. `UV_CACHE_DIR` remains
+  pointed at the operator cache so `uv tool run openhands` does not reinstall
+  OpenHands for every task.
+- OpenHands may emit transient `AgentErrorEvent`s when the model retries a tool
+  call with the right schema; the adapter records final success when a later
+  agent message answers the task.
+
 ### openclaw (verified: openclaw 2026.5.22)
 
 ```bash
@@ -128,7 +148,7 @@ npm install -g openclaw
 
 | Variable | Used by | Notes |
 |---|---|---|
-| `OPENAI_API_KEY` / `OPENAI_BASE_URL` | codex (direct), openclaw (via config) | proxy endpoints OK |
+| `OPENAI_API_KEY` / `OPENAI_BASE_URL` | codex (direct), openclaw/openhands (via config) | proxy endpoints OK |
 | `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL` | claude-code | |
 | `CURSOR_API_KEY` | cursor | Cursor key, not OpenAI |
 | `LEXMOUNT_API_KEY` / `LEXMOUNT_PROJECT_ID` | lexmount browser backend | recommended on servers |
@@ -143,7 +163,8 @@ docker build --build-arg INSTALL_CLI_AGENTS=true -t bubench-cli .
 ```
 
 This installs Node.js 22.x (openclaw requires >= 22.19), the
-claude-code/codex/openclaw CLIs, cursor-agent (relocated to
+claude-code/codex/openclaw CLIs, OpenHands as a uv tool,
+cursor-agent (relocated to
 `/opt/cursor-agent` and symlinked into `/usr/local/bin` so the uid-1000
 runtime user can execute it), and pre-warms the Playwright MCP download into
 a world-readable npm cache (`NPM_CONFIG_CACHE=/opt/npm-cache`).
@@ -154,7 +175,7 @@ plus a `config.yaml`. Verified container invocations (image runs as uid 1000,
 whose home is `/home/bench`):
 
 ```bash
-# openclaw / cursor — env-only auth:
+# openclaw / cursor / openhands — env-only auth:
 docker run --rm --user 1000 -v "$PWD/.env:/app/.env:ro" bubench-cli \
   uv run scripts/run.py --agent openclaw --data LexBench-Browser --mode single
 
@@ -172,18 +193,20 @@ With API-key codex auth instead, set `models.codex.base_url` when using a
 proxy endpoint (the key alone routes to api.openai.com).
 
 With the lexmount browser path no Chrome is needed in the image for any of the
-CLI agents (claude-code/codex/cursor/openclaw); **include Chrome/Chromium (and
+CLI agents (claude-code/codex/cursor/openhands/openclaw); **include Chrome/Chromium (and
 headless deps) separately only if `browser_id=local` runs are planned**.
 
 ## Smoke verification (per agent, after deploy)
 
 ```bash
 # CLI self-checks
-claude --version; codex --version; cursor-agent --version; openclaw --version
+claude --version; codex --version; cursor-agent --version
+openhands --version; openclaw --version
 
 # Real end-to-end check (one task, see AGENTS.md smoke policy)
 bubench run --agent codex   --data LexBench-Browser --mode single
 bubench run --agent cursor  --data LexBench-Browser --mode single
+bubench run --agent openhands  --data LexBench-Browser --mode single
 bubench run --agent openclaw --data LexBench-Browser --mode single
 # claude-code on lexmount needs no local Chrome; config.example.yaml pins
 # agents.claude-code.active_model: sonnet (an Anthropic model):
@@ -192,7 +215,7 @@ bubench run --agent claude-code --data LexBench-Browser --mode single
 
 Verify by log, not exit code:
 
-- All four CLI agents on a managed backend: `run.log` shows
+- CLI agents on a managed backend: `run.log` shows
   `Lexmount session created: wss://...` plus the agent's model-call lines.
 - Any `browser_id=local` run: no Lexmount line is expected — look for the
   Playwright MCP browser starting and the agent's tool calls.
