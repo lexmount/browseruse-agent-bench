@@ -43,6 +43,7 @@ Together they make external results easy to run, compare, cite, and submit back.
   - `All` (300) / `Hard` (hard subset)
 - [x] **BrowseComp** — Browser operation competition tasks, no login required
   - `All` (1266)
+- [ ] **ClawBench** — Open web-agent benchmark with 283 V1+V2 tasks across 163 live websites, using submission interception and judge-based outcome evidence
 - [ ] More benchmarks
 
 > Details: [Benchmarks overview](https://docs.bubench.lexmount.io/en/benchmarks/overview).
